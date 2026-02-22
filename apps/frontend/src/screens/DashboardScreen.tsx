@@ -155,7 +155,7 @@ export default function DashboardScreen() {
     if (dx === 0 && dy === 0) return
     const nx = Math.max(0, Math.min(GRID_COLS - tile.w, tile.x + dx))
     const ny = Math.max(0, Math.min(GRID_ROWS - tile.h, tile.y + dy))
-    updateTile(tile.id as string, { x: nx, y: ny })
+    updateTile(tile.id, { x: nx, y: ny })
   }
 
   return (

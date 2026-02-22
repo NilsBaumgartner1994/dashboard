@@ -40,7 +40,7 @@ export const useStore = create<AppState>()(
           tiles: [
             ...s.tiles,
             {
-              id: `tile-${Date.now()}`,
+              id: `tile-${crypto.randomUUID()}`,
               type,
               x: 0,
               y: 0,
