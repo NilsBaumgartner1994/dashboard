@@ -22,6 +22,7 @@ interface AppState {
   addTile: (type: string) => void
   removeTile: (id: string) => void
   updateTile: (id: string, patch: Partial<TileInstance>) => void
+  duplicateTile: (id: string) => void
 }
 
 export const useStore = create<AppState>()(
@@ -56,6 +57,18 @@ export const useStore = create<AppState>()(
         set((s) => ({
           tiles: s.tiles.map((t) => (t.id === id ? { ...t, ...patch } : t)),
         })),
+      duplicateTile: (id) =>
+        set((s) => {
+          const src = s.tiles.find((t) => t.id === id)
+          if (!src) return {}
+          const copy: TileInstance = {
+            ...src,
+            id: `tile-${crypto.randomUUID()}`,
+            x: Math.min(src.x + 1, 28),
+            y: Math.min(src.y + 1, 16),
+          }
+          return { tiles: [...s.tiles, copy] }
+        }),
     }),
     {
       name: 'dashboard-store',
