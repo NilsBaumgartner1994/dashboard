@@ -9,6 +9,7 @@ export interface TileInstance {
   w: number
   h: number
   hidden: boolean
+  config?: Record<string, unknown>
 }
 
 interface AppState {

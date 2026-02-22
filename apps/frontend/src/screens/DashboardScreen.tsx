@@ -36,12 +36,14 @@ import { CSS } from '@dnd-kit/utilities'
 import { useStore } from '../store/useStore'
 import type { TileInstance } from '../store/useStore'
 import SampleTile from '../components/tiles/SampleTile'
+import RocketMealsTile from '../components/tiles/RocketMealsTile'
 
 const GRID_COLS = 32
 const GRID_ROWS = 18
 
 const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: TileInstance }> }> = {
   sample: { label: 'Sample Tile', component: SampleTile },
+  rocketmeals: { label: 'Rocket Meals Server', component: RocketMealsTile },
 }
 
 type ControlDef = { label: string; icon: React.ReactNode; dx: number; dy: number; isResize: boolean }
