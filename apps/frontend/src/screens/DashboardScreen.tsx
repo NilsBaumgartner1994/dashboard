@@ -44,6 +44,19 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   sample: { label: 'Sample Tile', component: SampleTile },
 }
 
+type ControlDef = { label: string; icon: React.ReactNode; dx: number; dy: number; isResize: boolean }
+
+const TILE_CONTROLS: ControlDef[] = [
+  { label: 'Move left',  icon: <ArrowBackIcon fontSize="inherit" />,           dx: -1, dy:  0, isResize: false },
+  { label: 'Move right', icon: <ArrowForwardIcon fontSize="inherit" />,        dx:  1, dy:  0, isResize: false },
+  { label: 'Move up',    icon: <ArrowUpwardIcon fontSize="inherit" />,         dx:  0, dy: -1, isResize: false },
+  { label: 'Move down',  icon: <ArrowDownwardIcon fontSize="inherit" />,       dx:  0, dy:  1, isResize: false },
+  { label: 'Wider',      icon: <AddCircleOutlineIcon fontSize="inherit" />,    dx:  1, dy:  0, isResize: true  },
+  { label: 'Narrower',   icon: <RemoveCircleOutlineIcon fontSize="inherit" />, dx: -1, dy:  0, isResize: true  },
+  { label: 'Taller',     icon: <AddCircleOutlineIcon fontSize="inherit" />,    dx:  0, dy:  1, isResize: true  },
+  { label: 'Shorter',    icon: <RemoveCircleOutlineIcon fontSize="inherit" />, dx:  0, dy: -1, isResize: true  },
+]
+
 function DraggableTile({
   tile,
   editMode,
@@ -105,18 +118,12 @@ function DraggableTile({
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {([
-            ['Move left', <ArrowBackIcon fontSize="inherit" />, () => move(-1, 0)],
-            ['Move right', <ArrowForwardIcon fontSize="inherit" />, () => move(1, 0)],
-            ['Move up', <ArrowUpwardIcon fontSize="inherit" />, () => move(0, -1)],
-            ['Move down', <ArrowDownwardIcon fontSize="inherit" />, () => move(0, 1)],
-            ['Wider', <AddCircleOutlineIcon fontSize="inherit" />, () => resize(1, 0)],
-            ['Narrower', <RemoveCircleOutlineIcon fontSize="inherit" />, () => resize(-1, 0)],
-            ['Taller', <AddCircleOutlineIcon fontSize="inherit" />, () => resize(0, 1)],
-            ['Shorter', <RemoveCircleOutlineIcon fontSize="inherit" />, () => resize(0, -1)],
-          ] as [string, React.ReactNode, () => void][]).map(([label, icon, handler]) => (
+          {TILE_CONTROLS.map(({ label, icon, dx, dy, isResize }) => (
             <Tooltip key={label} title={label}>
-              <IconButton size="small" onClick={handler}>{icon}</IconButton>
+              <IconButton
+                size="small"
+                onClick={() => isResize ? resize(dx, dy) : move(dx, dy)}
+              >{icon}</IconButton>
             </Tooltip>
           ))}
           <Tooltip title={tile.hidden ? 'Show' : 'Hide'}>

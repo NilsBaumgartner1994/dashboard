@@ -8,7 +8,8 @@ interface BaseTileProps {
   style?: React.CSSProperties
 }
 
-export default function BaseTile({ tile: _tile, children, style }: BaseTileProps) {
+export default function BaseTile({ tile, children, style }: BaseTileProps) {
+  void tile // available for sub-components; not used in base layout
   return (
     <Paper
       elevation={2}
