@@ -105,20 +105,30 @@ function DraggableTile({
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <Tooltip title="Move left"><IconButton size="small" onClick={() => move(-1, 0)}><ArrowBackIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Move right"><IconButton size="small" onClick={() => move(1, 0)}><ArrowForwardIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Move up"><IconButton size="small" onClick={() => move(0, -1)}><ArrowUpwardIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Move down"><IconButton size="small" onClick={() => move(0, 1)}><ArrowDownwardIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Wider"><IconButton size="small" onClick={() => resize(1, 0)}><AddCircleOutlineIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Narrower"><IconButton size="small" onClick={() => resize(-1, 0)}><RemoveCircleOutlineIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Taller"><IconButton size="small" onClick={() => resize(0, 1)}><AddCircleOutlineIcon fontSize="inherit" /></IconButton></Tooltip>
-          <Tooltip title="Shorter"><IconButton size="small" onClick={() => resize(0, -1)}><RemoveCircleOutlineIcon fontSize="inherit" /></IconButton></Tooltip>
+          {([
+            ['Move left', <ArrowBackIcon fontSize="inherit" />, () => move(-1, 0)],
+            ['Move right', <ArrowForwardIcon fontSize="inherit" />, () => move(1, 0)],
+            ['Move up', <ArrowUpwardIcon fontSize="inherit" />, () => move(0, -1)],
+            ['Move down', <ArrowDownwardIcon fontSize="inherit" />, () => move(0, 1)],
+            ['Wider', <AddCircleOutlineIcon fontSize="inherit" />, () => resize(1, 0)],
+            ['Narrower', <RemoveCircleOutlineIcon fontSize="inherit" />, () => resize(-1, 0)],
+            ['Taller', <AddCircleOutlineIcon fontSize="inherit" />, () => resize(0, 1)],
+            ['Shorter', <RemoveCircleOutlineIcon fontSize="inherit" />, () => resize(0, -1)],
+          ] as [string, React.ReactNode, () => void][]).map(([label, icon, handler]) => (
+            <Tooltip key={label} title={label}>
+              <IconButton size="small" onClick={handler}>{icon}</IconButton>
+            </Tooltip>
+          ))}
           <Tooltip title={tile.hidden ? 'Show' : 'Hide'}>
             <IconButton size="small" onClick={() => updateTile(tile.id, { hidden: !tile.hidden })}>
               {tile.hidden ? <VisibilityIcon fontSize="inherit" /> : <VisibilityOffIcon fontSize="inherit" />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => removeTile(tile.id)}><DeleteIcon fontSize="inherit" /></IconButton></Tooltip>
+          <Tooltip title="Delete">
+            <IconButton size="small" color="error" onClick={() => removeTile(tile.id)}>
+              <DeleteIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
         </Box>
       )}
     </Box>

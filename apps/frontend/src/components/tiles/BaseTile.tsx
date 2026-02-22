@@ -13,14 +13,14 @@ export default function BaseTile({ tile, children, style }: BaseTileProps) {
     <Paper
       elevation={2}
       sx={{
-        gridColumn: `${tile.x + 1} / span ${tile.w}`,
-        gridRow: `${tile.y + 1} / span ${tile.h}`,
         overflow: 'hidden',
-        display: tile.hidden ? 'none' : 'flex',
+        display: 'flex',
         flexDirection: 'column',
         position: 'relative',
         p: 1,
         boxSizing: 'border-box',
+        width: '100%',
+        height: '100%',
       }}
       style={style}
     >
