@@ -1,182 +1,81 @@
 import { useState, useEffect, useCallback } from 'react'
-import {
-  Typography,
-  Box,
-  IconButton,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  TextField,
-  Chip,
-} from '@mui/material'
-import SettingsIcon from '@mui/icons-material/Settings'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ErrorIcon from '@mui/icons-material/Error'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
-import RefreshIcon from '@mui/icons-material/Refresh'
-import BaseTile from './BaseTile'
-import type { TileInstance } from '../../store/useStore'
+import { Typography } from '@mui/material'
+import ServerTile, { resolveServerUrl } from './ServerTile'
+import type { ServerConfig } from './ServerTile'
 import { useStore } from '../../store/useStore'
+import type { TileInstance } from '../../store/useStore'
 
-interface RocketMealsConfig {
-  serverUrl?: string
+interface ProjectInfo {
+  project_name: string | null
+  project_logo: string | null
 }
 
 interface RocketMealsTileProps {
   tile: TileInstance
 }
 
-type ServerStatus = 'online' | 'offline' | 'unknown' | 'checking'
-
 export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
   const updateTile = useStore((s) => s.updateTile)
-  const config = (tile.config ?? {}) as RocketMealsConfig
+  const config = (tile.config ?? {}) as ServerConfig
 
-  const [configOpen, setConfigOpen] = useState(false)
-  const [urlInput, setUrlInput] = useState(config.serverUrl ?? '')
-  const [status, setStatus] = useState<ServerStatus>('unknown')
-  const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const serverUrl = resolveServerUrl(config)
 
-  const checkServer = useCallback(async () => {
-    if (!config.serverUrl) return
-    setStatus('checking')
+  const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null)
+
+  const fetchProjectInfo = useCallback(async () => {
+    if (!serverUrl) return
     try {
-      // `no-cors` mode lets us detect unreachable servers (network errors/timeouts)
-      // while avoiding CORS restrictions. A resolved opaque response means the server
-      // is reachable; a thrown error means it is not.
-      await fetch(config.serverUrl, {
-        method: 'HEAD',
-        mode: 'no-cors',
-        signal: AbortSignal.timeout(5000),
+      const res = await fetch(`${serverUrl}/server/info`, {
+        signal: AbortSignal.timeout(8000),
       })
-      setStatus('online')
+      if (!res.ok) return
+      const json = (await res.json()) as {
+        data?: { project?: { project_name?: string; project_logo?: string } }
+      }
+      const proj = json?.data?.project
+      if (proj) {
+        const info: ProjectInfo = {
+          project_name: proj.project_name ?? null,
+          project_logo: proj.project_logo ?? null,
+        }
+        setProjectInfo(info)
+
+        // Persist logo as background image when none is set yet
+        if (info.project_logo && !config.backgroundImage) {
+          const logoUrl = `${serverUrl}/assets/${info.project_logo}`
+          updateTile(tile.id, {
+            config: { ...tile.config, backgroundImage: logoUrl },
+          })
+        }
+      }
     } catch {
-      setStatus('offline')
+      // silently ignore – the ServerTile already shows offline status
     }
-    setLastChecked(new Date())
-  }, [config.serverUrl])
+  }, [serverUrl, config.backgroundImage, tile.id, tile.config, updateTile])
 
   useEffect(() => {
-    checkServer()
-    const interval = setInterval(checkServer, 60_000)
-    return () => clearInterval(interval)
-  }, [checkServer])
+    fetchProjectInfo()
+  }, [fetchProjectInfo])
 
-  const handleSave = () => {
-    updateTile(tile.id, { config: { ...config, serverUrl: urlInput } })
-    setConfigOpen(false)
-  }
-
-  const handleOpenConfig = () => {
-    setUrlInput(config.serverUrl ?? '')
-    setConfigOpen(true)
-  }
-
-  const statusColor =
-    status === 'online' ? 'success' : status === 'offline' ? 'error' : 'default'
-  const statusLabel =
-    status === 'checking'
-      ? 'Checking…'
-      : status === 'online'
-        ? 'Online'
-        : status === 'offline'
-          ? 'Offline'
-          : 'Unknown'
-
-  const isValidUrl = (url: string): boolean => {
-    try {
-      const parsed = new URL(url)
-      return parsed.protocol === 'https:'
-    } catch {
-      return false
-    }
-  }
+  // Display name: customName > config.name > project_name from API
+  const projectName = projectInfo?.project_name ?? null
+  const overrideName =
+    (config.customName ?? '').trim() ||
+    (config.name ?? '').trim() ||
+    projectName ||
+    ''
 
   return (
-    <BaseTile tile={tile}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="subtitle1" fontWeight="bold">
-          🚀 Rocket Meals
-        </Typography>
-        <Box>
-          {config.serverUrl && (
-            <Tooltip title="Refresh">
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={checkServer}
-                  disabled={status === 'checking'}
-                >
-                  <RefreshIcon fontSize="inherit" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          )}
-          <Tooltip title="Configure server">
-            <IconButton size="small" onClick={handleOpenConfig}>
-              <SettingsIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
-
-      {config.serverUrl ? (
-        <Box sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-            {config.serverUrl}
+    <ServerTile
+      tile={tile}
+      overrideName={overrideName || undefined}
+      extraSettingsChildren={
+        projectName ? (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Projektname: {projectName}
           </Typography>
-          <Box sx={{ mt: 1 }}>
-            <Chip
-              size="small"
-              label={statusLabel}
-              color={statusColor as 'success' | 'error' | 'default'}
-              icon={
-                status === 'online' ? (
-                  <CheckCircleIcon />
-                ) : status === 'offline' ? (
-                  <ErrorIcon />
-                ) : (
-                  <HelpOutlineIcon />
-                )
-              }
-            />
-          </Box>
-          {lastChecked && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              Last checked: {lastChecked.toLocaleTimeString()}
-            </Typography>
-          )}
-        </Box>
-      ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          No server configured. Click ⚙ to set up.
-        </Typography>
-      )}
-
-      <Dialog open={configOpen} onClose={() => setConfigOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Configure Rocket Meals Server</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            fullWidth
-            label="Server URL"
-            placeholder="https://your-server.rocket-meals.de"
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            sx={{ mt: 1 }}
-            helperText="Enter the URL of your Rocket Meals server (starting with https://)"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfigOpen(false)}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained" disabled={!isValidUrl(urlInput)}>
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </BaseTile>
+        ) : undefined
+      }
+    />
   )
 }
