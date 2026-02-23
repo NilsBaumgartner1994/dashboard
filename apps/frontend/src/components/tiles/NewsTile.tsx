@@ -591,6 +591,16 @@ export default function NewsTile({ tile }: NewsTileProps) {
         onTileClick={items.length > 0 ? handleModalOpen : undefined}
         overrideBackgroundImage={currentImageUrl}
         settingsOpenerRef={settingsOpenerRef}
+        footer={
+          <ReloadIntervalBar
+            show={showReloadBar}
+            lastUpdate={lastFeedUpdate}
+            intervalMs={reloadIntervalMinutes * 60 * 1000}
+            showLastUpdate={showLastUpdate}
+            label="Feeds"
+            onReload={handleFeedsReload}
+          />
+        }
       >
         {/* No feeds configured */}
         {feeds.length === 0 && (
@@ -646,7 +656,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 px: 1.5,
                 py: 1,
                 mx: -1,
-                mb: showReloadBar ? 0 : -1,
+                mb: -1,
               }}
             >
               {currentItem.source && (
@@ -685,14 +695,6 @@ export default function NewsTile({ tile }: NewsTileProps) {
             </Box>
           </>
         )}
-        <ReloadIntervalBar
-          show={showReloadBar}
-          lastUpdate={lastFeedUpdate}
-          intervalMs={reloadIntervalMinutes * 60 * 1000}
-          showLastUpdate={showLastUpdate}
-          label="Feeds"
-          onReload={handleFeedsReload}
-        />
       </BaseTile>
 
       {/* ── News detail modal ─────────────────────────────────────────────── */}

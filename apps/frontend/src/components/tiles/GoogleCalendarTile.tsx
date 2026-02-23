@@ -540,6 +540,25 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         getExtraConfig={getExtraConfig}
         onSettingsOpen={handleSettingsOpen}
         onTileClick={tokenOk ? handleTileClick : undefined}
+        footer={tokenOk ? (
+          <>
+            <ReloadIntervalBar
+              show={showReloadBars}
+              lastUpdate={lastEventsUpdate}
+              intervalMs={eventsReloadIntervalMinutes * 60 * 1000}
+              showLastUpdate={showLastUpdate}
+              label="Events"
+              onReload={triggerEventsReload}
+            />
+            <ReloadIntervalBar
+              show={showReloadBars}
+              lastUpdate={tokenIssuedAt}
+              intervalMs={tokenLifetimeMs}
+              showLastUpdate={showLastUpdate}
+              label="Token"
+            />
+          </>
+        ) : undefined}
       >
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -642,27 +661,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           <Typography variant="body2" color="text.secondary" sx={{ pl: 0.5 }}>
             Keine Termine
           </Typography>
-        </Box>
-      )}
-
-      {/* ── Reload bars at the bottom ── */}
-      {tokenOk && (
-        <Box sx={{ mt: 'auto' }}>
-          <ReloadIntervalBar
-            show={showReloadBars}
-            lastUpdate={lastEventsUpdate}
-            intervalMs={eventsReloadIntervalMinutes * 60 * 1000}
-            showLastUpdate={showLastUpdate}
-            label="Events"
-            onReload={triggerEventsReload}
-          />
-          <ReloadIntervalBar
-            show={showReloadBars}
-            lastUpdate={tokenIssuedAt}
-            intervalMs={tokenLifetimeMs}
-            showLastUpdate={showLastUpdate}
-            label="Token"
-          />
         </Box>
       )}
     </BaseTile>

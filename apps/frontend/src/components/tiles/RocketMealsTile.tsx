@@ -119,6 +119,16 @@ function MultiServerView({
       getExtraConfig={getExtraConfig}
       onSettingsOpen={onSettingsOpen}
       overrideBackgroundImage={overrideBackgroundImage}
+      footer={
+        <ReloadIntervalBar
+          show={showReloadBar}
+          lastUpdate={lastCheckUpdate}
+          intervalMs={reloadIntervalMinutes * 60 * 1000}
+          showLastUpdate={showLastUpdate}
+          label="Status"
+          onReload={checkAll}
+        />
+      }
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {overrideName ? (
@@ -175,14 +185,6 @@ function MultiServerView({
           />
         )}
       </Box>
-      <ReloadIntervalBar
-        show={showReloadBar}
-        lastUpdate={lastCheckUpdate}
-        intervalMs={reloadIntervalMinutes * 60 * 1000}
-        showLastUpdate={showLastUpdate}
-        label="Status"
-        onReload={checkAll}
-      />
     </BaseTile>
   )
 }

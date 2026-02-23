@@ -239,6 +239,7 @@ export default function ServerTile({
       getExtraConfig={getServerExtraConfig}
       onSettingsOpen={handleSettingsOpen}
       overrideBackgroundImage={overrideBackgroundImage}
+      footer={afterContent}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {/* Name */}
@@ -299,7 +300,6 @@ export default function ServerTile({
           {statusChip}
         </Box>
       </Box>
-      {afterContent}
     </BaseTile>
   )
 }
