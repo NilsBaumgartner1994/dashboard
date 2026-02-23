@@ -23,10 +23,15 @@ const MAX_FETCHED_CONTENT_LENGTH = 4000;
 const WEB_SEARCH_TIMEOUT_MS = 10_000;
 const FETCH_URL_TIMEOUT_MS = 15_000;
 const OLLAMA_INFERENCE_TIMEOUT_MS = 300_000; // 5 minutes
+const DUCKDUCKGO_SEARCH_BASE_URL = 'https://duckduckgo.com/?q=';
 
 interface Job {
   status: 'pending' | 'running' | 'done' | 'error';
   partialContent: string;
+  /** Short status description of what the AI is currently doing (e.g. visiting a URL). */
+  currentActivity?: string;
+  /** URLs that were visited during the agent loop (for source attribution). */
+  visitedUrls: string[];
   message?: { role: string; content: string };
   error?: string;
   createdAt: number;
@@ -78,6 +83,12 @@ const INTERNET_TOOLS = [
     },
   },
 ];
+
+/** Sets both currentActivity and partialContent on a job in one call. */
+function setJobActivity(job: Job, activity: string): void {
+  job.currentActivity = activity;
+  job.partialContent = activity;
+}
 
 async function executeWebSearch(query: string): Promise<string> {
   try {
@@ -178,19 +189,20 @@ async function runAgentLoop(
 ): Promise<void> {
   const currentMessages = [...messages];
 
-  // Prepend a system prompt when internet tools are active so the model
-  // knows it should actively use them instead of relying on training data.
-  if (tools.length > 0 && currentMessages[0]?.role !== 'system') {
-    currentMessages.unshift({
-      role: 'system',
-      content:
-        'You are a helpful assistant with access to real-time internet tools. ' +
-        'When the user asks about current events, news, prices, weather, or any ' +
-        'information that may have changed since your training, you MUST call the ' +
-        'web_search or fetch_url tool to retrieve up-to-date information. ' +
-        'Never claim you cannot access the internet – you have tools for this. ' +
-        'Always use them when the question requires current or live data.',
-    });
+  // Always prepend a German system prompt so the model answers in German.
+  // When internet tools are active, also instruct the model to use them.
+  if (currentMessages[0]?.role !== 'system') {
+    let systemContent =
+      'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+    if (tools.length > 0) {
+      systemContent +=
+        ' Du hast Zugriff auf aktuelle Internet-Tools.' +
+        ' WICHTIG: Wenn der Benutzer nach aktuellen Nachrichten, Ereignissen, Preisen, Wetter' +
+        ' oder anderen Informationen fragt, die sich seit deinem Training geändert haben könnten,' +
+        ' MUSST du sofort das web_search oder fetch_url Tool aufrufen.' +
+        ' Sage NIEMALS, dass du keinen Internetzugriff hast – du hast die Tools und MUSST sie nutzen.';
+    }
+    currentMessages.unshift({ role: 'system', content: systemContent });
   }
 
   // Update the debug payload with the actual messages (including system prompt) and tools
@@ -268,9 +280,17 @@ async function runAgentLoop(
         let toolResult: string;
 
         if (name === 'web_search') {
-          toolResult = await executeWebSearch(args.query as string);
+          const query = args.query as string;
+          setJobActivity(job, `KI sucht im Internet: "${query}"…`);
+          job.visitedUrls.push(`${DUCKDUCKGO_SEARCH_BASE_URL}${encodeURIComponent(query)}`);
+          toolResult = await executeWebSearch(query);
         } else if (name === 'fetch_url') {
-          toolResult = await executeFetchUrl(args.url as string);
+          const url = args.url as string;
+          setJobActivity(job, `KI besucht Webseite: ${url}…`);
+          job.visitedUrls.push(url);
+          const rawContent = await executeFetchUrl(url);
+          setJobActivity(job, `KI verarbeitet Inhalt der Webseite: ${url}…`);
+          toolResult = rawContent;
         } else {
           toolResult = `Unknown tool: ${name}`;
         }
@@ -280,6 +300,7 @@ async function runAgentLoop(
 
       // Reset partial content so the poller sees fresh output for the next iteration
       job.partialContent = '';
+      job.currentActivity = undefined;
       toolCalls = undefined;
       continue;
     }
@@ -334,6 +355,8 @@ export default defineEndpoint({
       return res.json({
         status: job.status,
         partialContent: job.partialContent,
+        currentActivity: job.currentActivity,
+        visitedUrls: job.visitedUrls,
         message: job.message,
         error: job.error,
         debugPayload: job.debugPayload,
@@ -366,6 +389,7 @@ export default defineEndpoint({
       const job: Job = {
         status: 'pending',
         partialContent: '',
+        visitedUrls: [],
         createdAt: Date.now(),
         debugPayload: {
           model: model ?? DEFAULT_MODEL,
