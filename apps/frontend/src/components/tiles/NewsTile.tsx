@@ -24,6 +24,8 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import SettingsIcon from '@mui/icons-material/Settings'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import ReloadIntervalBar from './ReloadIntervalBar'
+import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -108,6 +110,9 @@ interface NewsConfig {
   interval?: number       // seconds per item
   name?: string
   backgroundImage?: string
+  reloadIntervalMinutes?: 1 | 5 | 60
+  showReloadBar?: boolean
+  showLastUpdate?: boolean
 }
 
 interface NewsTileProps {
@@ -232,6 +237,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const config = (tile.config ?? {}) as NewsConfig
   const feeds: string[] = config.feeds ?? []
   const interval = config.interval ?? 10
+  const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 5
+  const showReloadBar = config.showReloadBar ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
   const backendUrl = useStore((s) => s.backendUrl)
   const openModal = useUIStore((s) => s.openModal)
   const closeModal = useUIStore((s) => s.closeModal)
@@ -242,12 +250,16 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [fetchErrors, setFetchErrors] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [imageCache, setImageCache] = useState<Record<string, string>>({})
+  const [lastFeedUpdate, setLastFeedUpdate] = useState<number | null>(null)
 
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
   const [customUrlInput, setCustomUrlInput] = useState('')
   const [googleSearchInput, setGoogleSearchInput] = useState('')
   const [intervalInput, setIntervalInput] = useState(String(config.interval ?? 10))
+  const [reloadIntervalInput, setReloadIntervalInput] = useState<1 | 5 | 60>(reloadIntervalMinutes)
+  const [showReloadBarInput, setShowReloadBarInput] = useState(showReloadBar)
+  const [showLastUpdateInput, setShowLastUpdateInput] = useState(showLastUpdate)
 
   // Timers / refs
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -308,6 +320,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
       setItems(allItems)
       setFetchErrors(errors)
       setCurrentIndex(0)
+      setLastFeedUpdate(Date.now())
     } finally {
       setLoading(false)
     }
@@ -335,6 +348,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
     setCustomUrlInput('')
     setGoogleSearchInput('')
     setIntervalInput(String(config.interval ?? 10))
+    setReloadIntervalInput(reloadIntervalMinutes)
+    setShowReloadBarInput(showReloadBar)
+    setShowLastUpdateInput(showLastUpdate)
   }
 
   const togglePreset = (url: string) => {
@@ -367,6 +383,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const getExtraConfig = (): Record<string, unknown> => ({
     feeds: feedsInput,
     interval: Math.max(5, Number(intervalInput) || 10),
+    reloadIntervalMinutes: reloadIntervalInput,
+    showReloadBar: showReloadBarInput,
+    showLastUpdate: showLastUpdateInput,
   })
 
   // Settings content
@@ -475,6 +494,15 @@ export default function NewsTile({ tile }: NewsTileProps) {
         onChange={(e) => setIntervalInput(e.target.value)}
         sx={{ mb: 2 }}
       />
+      <ReloadIntervalSettings
+        intervalMinutes={reloadIntervalInput}
+        onIntervalChange={setReloadIntervalInput}
+        showBar={showReloadBarInput}
+        onShowBarChange={setShowReloadBarInput}
+        showLastUpdate={showLastUpdateInput}
+        onShowLastUpdateChange={setShowLastUpdateInput}
+        label="Aktualisierung"
+      />
     </>
   )
 
@@ -482,6 +510,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const currentImageUrl = currentItem
     ? (currentItem.imageUrl || imageCache[currentItem.link] || undefined)
     : undefined
+
+  // Use a ref so the reload callback always sees the latest feeds without causing extra re-renders
+  const feedsRef = useRef(feeds)
+  useEffect(() => { feedsRef.current = feeds })
+  const handleFeedsReload = useCallback(() => { fetchAllFeeds(feedsRef.current) }, [fetchAllFeeds])
 
   return (
     <>
@@ -548,7 +581,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 px: 1.5,
                 py: 1,
                 mx: -1,
-                mb: -1,
+                mb: showReloadBar ? 0 : -1,
               }}
             >
               {currentItem.source && (
@@ -587,6 +620,14 @@ export default function NewsTile({ tile }: NewsTileProps) {
             </Box>
           </>
         )}
+        <ReloadIntervalBar
+          show={showReloadBar}
+          lastUpdate={lastFeedUpdate}
+          intervalMs={reloadIntervalMinutes * 60 * 1000}
+          showLastUpdate={showLastUpdate}
+          label="Feeds"
+          onReload={handleFeedsReload}
+        />
       </BaseTile>
 
       {/* ── News detail modal ─────────────────────────────────────────────── */}

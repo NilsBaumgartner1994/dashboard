@@ -67,6 +67,8 @@ interface ServerTileProps {
   onExtraSettingsOpen?: () => void
   /** When true, the status chip is pinned to the bottom of the tile */
   statusAtBottom?: boolean
+  /** Optional element rendered after the main tile content (e.g. a ReloadIntervalBar) */
+  afterContent?: React.ReactNode
 }
 
 export default function ServerTile({
@@ -77,6 +79,7 @@ export default function ServerTile({
   getChildExtraConfig,
   onExtraSettingsOpen,
   statusAtBottom,
+  afterContent,
 }: ServerTileProps) {
   const config = (tile.config ?? {}) as ServerConfig
 
@@ -296,6 +299,7 @@ export default function ServerTile({
           {statusChip}
         </Box>
       </Box>
+      {afterContent}
     </BaseTile>
   )
 }
