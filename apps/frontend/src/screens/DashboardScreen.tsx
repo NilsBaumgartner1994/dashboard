@@ -40,6 +40,7 @@ import NewsTile from '../components/tiles/NewsTile'
 import RouteTile from '../components/tiles/RouteTile'
 import GoogleTasksTile from '../components/tiles/GoogleTasksTile'
 import NotesTile from '../components/tiles/NotesTile'
+import PostItTile from '../components/tiles/PostItTile'
 
 const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
@@ -66,6 +67,7 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   route: { label: 'Route & Fahrtzeit', component: RouteTile },
   tasks: { label: 'Aufgaben (Google Tasks)', component: GoogleTasksTile },
   notes: { label: 'Notizen', component: NotesTile },
+  postit: { label: 'Notizzettel (Post-it)', component: PostItTile },
 }
 
 function DraggableTile({

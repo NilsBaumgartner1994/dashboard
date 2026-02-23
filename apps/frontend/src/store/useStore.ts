@@ -70,7 +70,6 @@ export const useStore = create<AppState>()(
       addNote: (title, content) =>
         set((s) => ({
           notes: [
-            ...s.notes,
             {
               id: `note-${crypto.randomUUID()}`,
               title: title || 'Neue Notiz',
@@ -78,6 +77,7 @@ export const useStore = create<AppState>()(
               createdAt: Date.now(),
               updatedAt: Date.now(),
             },
+            ...s.notes,
           ],
         })),
       updateNote: (id, patch) =>
@@ -95,7 +95,7 @@ export const useStore = create<AppState>()(
       setBackendUrl: (backendUrl) => set({ backendUrl }),
       addTile: (type) =>
         set((s) => {
-          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks', 'notes'].includes(type) ? 4 : 2
+          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks', 'notes'].includes(type) ? 4 : type === 'postit' ? 3 : 2
           const bottomY = s.tiles.reduce((max, t) => Math.max(max, t.y + t.h), 0)
           return {
             tiles: [
