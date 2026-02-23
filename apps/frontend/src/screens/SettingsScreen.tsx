@@ -9,6 +9,8 @@ import {
   Button,
   CircularProgress,
   Alert,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -30,6 +32,8 @@ export default function SettingsScreen() {
   const defaultLon = useStore((s) => s.defaultLon)
   const defaultLocationName = useStore((s) => s.defaultLocationName)
   const setDefaultLocation = useStore((s) => s.setDefaultLocation)
+  const debugMode = useStore((s) => s.debugMode)
+  const setDebugMode = useStore((s) => s.setDebugMode)
   const setTiles = useStore((s) => s.setTiles)
   const { clientId, setClientId, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
@@ -86,6 +90,7 @@ export default function SettingsScreen() {
       defaultLat: useStore.getState().defaultLat,
       defaultLon: useStore.getState().defaultLon,
       defaultLocationName: useStore.getState().defaultLocationName,
+      debugMode: useStore.getState().debugMode,
     },
     googleAuth: {
       clientId: useGoogleAuthStore.getState().clientId,
@@ -128,6 +133,7 @@ export default function SettingsScreen() {
       if (typeof s.defaultLat === 'number' && typeof s.defaultLon === 'number') {
         setDefaultLocation(s.defaultLat, s.defaultLon, s.defaultLocationName ?? '')
       }
+      if (typeof s.debugMode === 'boolean') setDebugMode(s.debugMode)
       if (data.googleAuth?.clientId) {
         setClientId(data.googleAuth.clientId)
         setClientIdInput(data.googleAuth.clientId)
@@ -239,6 +245,25 @@ export default function SettingsScreen() {
         <Button variant="contained" onClick={handleSaveGridColumns}>
           Speichern
         </Button>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Debug-Modus
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Zeigt in der Routen-Kachel den nächsten Kalendertermin (mit oder ohne Ort) als JSON an.
+          Im Kalender-Detail-Dialog wird das Event-Objekt als JSON angezeigt.
+        </Typography>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={debugMode}
+              onChange={(e) => setDebugMode(e.target.checked)}
+            />
+          }
+          label="Debug-Modus aktivieren"
+        />
       </Paper>
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>

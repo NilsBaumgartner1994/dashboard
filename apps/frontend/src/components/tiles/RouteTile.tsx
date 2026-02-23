@@ -76,6 +76,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const defaultLat = useStore((s) => s.defaultLat)
   const defaultLon = useStore((s) => s.defaultLon)
   const defaultLocationName = useStore((s) => s.defaultLocationName)
+  const debugMode = useStore((s) => s.debugMode)
   const { accessToken, tokenExpiry } = useGoogleAuthStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
@@ -86,6 +87,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
 
   // Calendar mode
   const [nextEvent, setNextEvent] = useState<CalendarEvent | null>(null)
+  const [nextEventAny, setNextEventAny] = useState<CalendarEvent | null>(null)
   const [eventLat, setEventLat] = useState<number | null>(null)
   const [eventLon, setEventLon] = useState<number | null>(null)
   const [calLoading, setCalLoading] = useState(false)
@@ -180,6 +182,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
       const events: CalendarEvent[] = data.items ?? []
       const withLocation = events.find((e) => e.location?.trim())
       setNextEvent(withLocation ?? null)
+      setNextEventAny(events[0] ?? null)
     } catch { /* ignore */ }
     finally { setCalLoading(false) }
   }, [])
@@ -554,6 +557,23 @@ export default function RouteTile({ tile }: RouteTileProps) {
               ? 'Zielort oben eingeben.'
               : ''}
           </Typography>
+        )}
+
+        {/* Debug: show next calendar event as JSON */}
+        {debugMode && config.useCalendar && (
+          <Box sx={{ mt: 1 }}>
+            <Divider sx={{ mb: 0.5 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+              Debug – Nächster Termin:
+            </Typography>
+            <Typography
+              component="pre"
+              variant="caption"
+              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: '0.65rem', fontFamily: 'monospace' }}
+            >
+              {JSON.stringify(nextEventAny, null, 2)}
+            </Typography>
+          </Box>
         )}
       </Box>
     </BaseTile>

@@ -22,6 +22,8 @@ interface CalendarEventDetailModalProps {
   event: CalendarEventData | null
   /** Hex background color of the calendar this event belongs to */
   color?: string
+  /** Show raw event JSON for debugging */
+  debugMode?: boolean
 }
 
 function formatDateTime(dateTime?: string, date?: string): string {
@@ -53,6 +55,7 @@ export default function CalendarEventDetailModal({
   onClose,
   event,
   color,
+  debugMode,
 }: CalendarEventDetailModalProps) {
   if (!event) return null
 
@@ -147,6 +150,23 @@ export default function CalendarEventDetailModal({
                 {event.description}
               </Typography>
             </Box>
+          </>
+        )}
+
+        {/* Debug: raw event JSON */}
+        {debugMode && (
+          <>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              Debug – Event JSON:
+            </Typography>
+            <Typography
+              component="pre"
+              variant="caption"
+              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: '0.65rem', fontFamily: 'monospace' }}
+            >
+              {JSON.stringify(event, null, 2)}
+            </Typography>
           </>
         )}
       </DialogContent>

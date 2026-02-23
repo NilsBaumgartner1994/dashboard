@@ -26,6 +26,7 @@ import CalendarEventItem, { isCalendarWeekMarker } from './CalendarEventItem'
 import CalendarEventDetailModal from './CalendarEventDetailModal'
 import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 
 interface CalendarInfo {
@@ -88,6 +89,7 @@ function ErrorMessage({ message, copied, onCopy }: { message: string; copied: bo
 
 function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const { accessToken, tokenExpiry, setToken, clearToken } = useGoogleAuthStore()
+  const debugMode = useStore((s) => s.debugMode)
   const config = (tile.config ?? {}) as GoogleCalendarConfig
   const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
   const daysAhead = config.daysAhead ?? 7
@@ -640,6 +642,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         onClose={() => setDetailOpen(false)}
         event={detailEvent}
         color={detailEvent?.calendarId ? calColorMap[detailEvent.calendarId] : undefined}
+        debugMode={debugMode}
       />
     </>
   )
