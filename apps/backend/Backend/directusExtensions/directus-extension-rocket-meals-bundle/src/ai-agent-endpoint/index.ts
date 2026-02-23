@@ -30,6 +30,8 @@ interface Job {
   message?: { role: string; content: string };
   error?: string;
   createdAt: number;
+  /** The exact payload that was sent to Ollama – exposed for frontend debug mode. */
+  debugPayload?: Record<string, unknown>;
 }
 
 const jobs = new Map<string, Job>();
@@ -79,10 +81,48 @@ const INTERNET_TOOLS = [
 
 async function executeWebSearch(query: string): Promise<string> {
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS) });
+    // Use DuckDuckGo HTML endpoint for more reliable search results
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
     if (!response.ok) return `Search failed with status ${response.status}`;
-    const data = (await response.json()) as {
+    const html = await response.text();
+
+    // Extract result titles and snippets from DuckDuckGo HTML response
+    const results: string[] = [];
+
+    // Match result titles
+    const titleMatches = html.matchAll(/<a[^>]+class="result__a"[^>]*>([^<]+)<\/a>/g);
+    const titles = [...titleMatches].map((m) => (m[1] ?? '').trim()).filter(Boolean);
+
+    // Match result snippets
+    const snippetMatches = html.matchAll(/<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g);
+    const snippets = [...snippetMatches]
+      .map((m) => {
+        // Replace angle brackets so the result is clean plain text.
+        // The content is sent to the AI model only, never rendered as HTML.
+        return (m[1] ?? '').replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim();
+      })
+      .filter(Boolean);
+
+    for (let i = 0; i < Math.min(titles.length, snippets.length, 5); i++) {
+      results.push(`${i + 1}. ${titles[i]}\n   ${snippets[i]}`);
+    }
+
+    if (results.length > 0) {
+      return `Search results for "${query}":\n\n${results.join('\n\n')}`;
+    }
+
+    // Fallback: DuckDuckGo instant-answer JSON API
+    const apiUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const apiResponse = await fetch(apiUrl, { signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS) });
+    if (!apiResponse.ok) return `Search failed with status ${apiResponse.status}`;
+    const data = (await apiResponse.json()) as {
       AbstractText?: string;
       AbstractURL?: string;
       RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
@@ -111,8 +151,8 @@ async function executeFetchUrl(url: string): Promise<string> {
     });
     if (!response.ok) return `Fetch failed with status ${response.status}`;
     const text = await response.text();
-    // Strip HTML tags and truncate to avoid overwhelming the model context
-    const cleaned = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    // Replace angle brackets so the result is clean plain text sent to the AI model only.
+    const cleaned = text.replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim();
     return cleaned.length > MAX_FETCHED_CONTENT_LENGTH ? `${cleaned.slice(0, MAX_FETCHED_CONTENT_LENGTH)}…` : cleaned;
   } catch (err) {
     return `Fetch error: ${err instanceof Error ? err.message : String(err)}`;
@@ -137,6 +177,29 @@ async function runAgentLoop(
   job: Job,
 ): Promise<void> {
   const currentMessages = [...messages];
+
+  // Prepend a system prompt when internet tools are active so the model
+  // knows it should actively use them instead of relying on training data.
+  if (tools.length > 0 && currentMessages[0]?.role !== 'system') {
+    currentMessages.unshift({
+      role: 'system',
+      content:
+        'You are a helpful assistant with access to real-time internet tools. ' +
+        'When the user asks about current events, news, prices, weather, or any ' +
+        'information that may have changed since your training, you MUST call the ' +
+        'web_search or fetch_url tool to retrieve up-to-date information. ' +
+        'Never claim you cannot access the internet – you have tools for this. ' +
+        'Always use them when the question requires current or live data.',
+    });
+  }
+
+  // Update the debug payload with the actual messages (including system prompt) and tools
+  // that will be sent to Ollama so the frontend can display them in debug mode.
+  job.debugPayload = {
+    ...job.debugPayload,
+    actualMessages: currentMessages,
+    tools,
+  };
 
   for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration++) {
     job.status = 'running';
@@ -273,6 +336,7 @@ export default defineEndpoint({
         partialContent: job.partialContent,
         message: job.message,
         error: job.error,
+        debugPayload: job.debugPayload,
       });
     });
 
@@ -303,6 +367,12 @@ export default defineEndpoint({
         status: 'pending',
         partialContent: '',
         createdAt: Date.now(),
+        debugPayload: {
+          model: model ?? DEFAULT_MODEL,
+          messages,
+          allowInternet,
+          effectiveTools,
+        },
       };
       jobs.set(jobId, job);
 

@@ -34,22 +34,25 @@ interface JobStatusResponse {
   partialContent: string
   message?: { role: string; content: string }
   error?: string
+  debugPayload?: Record<string, unknown>
 }
 
 interface AiChatProps {
   backendUrl: string
   model: string
   allowInternet: boolean
+  debugMode: boolean
   messages: Message[]
   onMessages: (msgs: Message[]) => void
   compact?: boolean
 }
 
-function AiChat({ backendUrl, model, allowInternet, messages, onMessages, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessages, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  const [debugPayload, setDebugPayload] = useState<Record<string, unknown> | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -83,6 +86,7 @@ function AiChat({ backendUrl, model, allowInternet, messages, onMessages, compac
             const reply = data.message?.content ?? ''
             onMessages([...newMessages, { role: 'assistant', content: reply }])
             setPartialContent('')
+            if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
@@ -110,6 +114,7 @@ function AiChat({ backendUrl, model, allowInternet, messages, onMessages, compac
     setInput('')
     setError(null)
     setPartialContent('')
+    setDebugPayload(null)
     const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
     onMessages(newMessages)
     setLoading(true)
@@ -220,6 +225,36 @@ function AiChat({ backendUrl, model, allowInternet, messages, onMessages, compac
             Fehler: {error}
           </Typography>
         )}
+        {/* Debug panel – shown only when debugMode is active */}
+        {debugMode && debugPayload && (
+          <Box
+            sx={{
+              mt: 1,
+              p: 1,
+              bgcolor: 'action.selected',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'warning.main',
+            }}
+          >
+            <Typography variant="caption" fontWeight="bold" color="warning.main" sx={{ display: 'block', mb: 0.5 }}>
+              🐛 Debug: Letzte Ollama-Anfrage
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                fontSize: '0.7rem',
+                overflow: 'auto',
+                maxHeight: 300,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}
+            >
+              {JSON.stringify(debugPayload, null, 2)}
+            </Box>
+          </Box>
+        )}
         <div ref={bottomRef} />
       </Box>
 
@@ -264,9 +299,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [allowInternetInput, setAllowInternetInput] = useState(
     tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
   )
+  const [debugModeInput, setDebugModeInput] = useState(
+    tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false,
+  )
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
+  const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
 
   return (
@@ -277,6 +316,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
         onSettingsOpen={() => {
           setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
+          setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
         }}
         settingsChildren={
           <Box>
@@ -304,9 +344,20 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 </Box>
               }
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={debugModeInput}
+                  onChange={(e) => setDebugModeInput(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2">Debug-Modus (zeige Ollama-Anfrage)</Typography>
+              }
+            />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, debugMode: debugModeInput })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -362,6 +413,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               backendUrl={backendUrl}
               model={model}
               allowInternet={allowInternet}
+              debugMode={debugMode}
               messages={messages}
               onMessages={setMessages}
             />
