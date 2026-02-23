@@ -8,9 +8,6 @@ import {
   Button,
   IconButton,
   Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
 } from '@mui/material'
 import WbSunnyIcon from '@mui/icons-material/WbSunny'
 import WbCloudyIcon from '@mui/icons-material/WbCloudy'
@@ -21,8 +18,8 @@ import ThunderstormIcon from '@mui/icons-material/Thunderstorm'
 import WaterDropIcon from '@mui/icons-material/WaterDrop'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SearchIcon from '@mui/icons-material/Search'
-import CloseIcon from '@mui/icons-material/Close'
 import BaseTile from './BaseTile'
+import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 
@@ -437,34 +434,11 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
       </BaseTile>
 
       {/* ── Weather detail modal ─────────────────────────────────────────── */}
-      <Dialog
+      <LargeModal
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
-        fullWidth
-        maxWidth={false}
-        PaperProps={{
-          sx: {
-            width: '100%',
-            maxWidth: '100%',
-            height: '80vh',
-            m: 0,
-            borderRadius: '16px 16px 0 0',
-          },
-        }}
-        sx={{ '& .MuiDialog-container': { alignItems: 'flex-end' } }}
+        title={effectiveName ? `Wetter – ${effectiveName}` : 'Wetter'}
       >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
-          <Box sx={{ flex: 1 }}>
-            {effectiveName ? `Wetter – ${effectiveName}` : 'Wetter'}
-          </Box>
-          <Tooltip title="Schließen">
-            <IconButton size="small" onClick={() => setDetailOpen(false)}>
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </DialogTitle>
-
-        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', p: 0, overflow: 'hidden' }}>
           {/* Loading */}
           {detailLoading && (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
@@ -606,8 +580,7 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
               )}
             </>
           )}
-        </DialogContent>
-      </Dialog>
+      </LargeModal>
     </>
   )
 }

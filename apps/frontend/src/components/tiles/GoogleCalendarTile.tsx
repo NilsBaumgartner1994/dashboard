@@ -21,7 +21,10 @@ import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import BaseTile from './BaseTile'
+import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 
@@ -114,6 +117,13 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalWeekOffset, setModalWeekOffset] = useState(0)
+  const [modalEvents, setModalEvents] = useState<CalendarEvent[]>([])
+  const [modalLoading, setModalLoading] = useState(false)
+  const [modalError, setModalError] = useState<string | null>(null)
+
   const handleCopyError = () => {
     if (error) {
       navigator.clipboard.writeText(error).then(() => {
@@ -203,7 +213,120 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     [clearToken],
   )
 
-  // ── Load data when token and calendar selection change ───────────────────
+  // ── Fetch events for a custom time range ────────────────────────────────
+  const fetchEventsForRange = useCallback(
+    async (token: string, calIds: string[], timeMin: string, timeMax: string): Promise<CalendarEvent[]> => {
+      const targetCals = calIds.length > 0 ? calIds : ['primary']
+      const results = await Promise.all(
+        targetCals.map(async (calId) => {
+          const url = new URL(
+            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
+          )
+          url.searchParams.set('timeMin', timeMin)
+          url.searchParams.set('timeMax', timeMax)
+          url.searchParams.set('singleEvents', 'true')
+          url.searchParams.set('orderBy', 'startTime')
+          const res = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.status === 401) {
+            clearToken()
+            throw new Error('TOKEN_EXPIRED')
+          }
+          if (!res.ok) {
+            let body = ''
+            try { body = await res.text() } catch { /* ignore */ }
+            throw new Error(`HTTP ${res.status} – ${res.statusText} (${calId})\n\n${body}`)
+          }
+          const data = await res.json()
+          return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
+        }),
+      )
+      return results.flat().sort((a, b) => {
+        const ta = a.start.dateTime ?? a.start.date ?? ''
+        const tb = b.start.dateTime ?? b.start.date ?? ''
+        return ta.localeCompare(tb)
+      })
+    },
+    [clearToken],
+  )
+
+  // ── Fetch modal events for a given week offset ───────────────────────────
+  const fetchModalEventsForOffset = useCallback(
+    async (token: string, calIds: string[], weekOffset: number) => {
+      setModalLoading(true)
+      setModalError(null)
+      try {
+        const now = new Date()
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const startDate = new Date(startOfToday.getTime() + weekOffset * 7 * 24 * 3600 * 1000)
+        const endDate = new Date(startDate.getTime() + 7 * 24 * 3600 * 1000)
+        const calendarIds = calendars.map((c) => c.id)
+        const ids = calIds.length > 0 ? calIds : (calendarIds.length > 0 ? calendarIds : ['primary'])
+        const evts = await fetchEventsForRange(token, ids, startDate.toISOString(), endDate.toISOString())
+        setModalEvents(evts)
+      } catch (err: unknown) {
+        if ((err as Error).message === 'TOKEN_EXPIRED') {
+          setModalError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+        } else {
+          setModalError((err as Error).message)
+        }
+      } finally {
+        setModalLoading(false)
+      }
+    },
+    [fetchEventsForRange, calendars],
+  )
+
+  // ── Open modal ───────────────────────────────────────────────────────────
+  const handleTileClick = () => {
+    if (!tokenOk || !accessToken) return
+    setModalOpen(true)
+    setModalWeekOffset(0)
+    fetchModalEventsForOffset(accessToken, selectedCalendarIds, 0)
+  }
+
+  // ── Navigate modal weeks ─────────────────────────────────────────────────
+  const handleModalPrevWeek = () => {
+    if (!accessToken) return
+    const next = modalWeekOffset - 1
+    setModalWeekOffset(next)
+    fetchModalEventsForOffset(accessToken, selectedCalendarIds, next)
+  }
+
+  const handleModalNextWeek = () => {
+    if (!accessToken) return
+    const next = modalWeekOffset + 1
+    setModalWeekOffset(next)
+    fetchModalEventsForOffset(accessToken, selectedCalendarIds, next)
+  }
+
+  // ── Modal date range label ────────────────────────────────────────────────
+  const modalDateRangeLabel = (() => {
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startDate = new Date(startOfToday.getTime() + modalWeekOffset * 7 * 24 * 3600 * 1000)
+    const endDate = new Date(startDate.getTime() + 6 * 24 * 3600 * 1000)
+    const fmt = (d: Date) => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    if (modalWeekOffset === 0) return `Diese Woche (${fmt(startDate)} – ${fmt(endDate)})`
+    if (modalWeekOffset === 1) return `Nächste Woche (${fmt(startDate)} – ${fmt(endDate)})`
+    if (modalWeekOffset === -1) return `Letzte Woche (${fmt(startDate)} – ${fmt(endDate)})`
+    return `${fmt(startDate)} – ${fmt(endDate)}`
+  })()
+
+  // ── Group modal events by date ────────────────────────────────────────────
+  type DateGroup = { dateLabel: string; events: CalendarEvent[] }
+  const modalGrouped: DateGroup[] = []
+  for (const ev of modalEvents) {
+    const dateKey = ev.start.dateTime
+      ? new Date(ev.start.dateTime).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+      : ev.start.date
+      ? new Date(ev.start.date + 'T00:00:00').toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+      : 'Unbekannt'
+    const existing = modalGrouped.find((g) => g.dateLabel === dateKey)
+    if (existing) existing.events.push(ev)
+    else modalGrouped.push({ dateLabel: dateKey, events: [ev] })
+  }
   useEffect(() => {
     if (!tokenOk || !accessToken) return
     setLoading(true)
@@ -341,7 +464,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   }
 
   // ── Group events by date ─────────────────────────────────────────────────
-  type DateGroup = { dateLabel: string; events: CalendarEvent[] }
   const grouped: DateGroup[] = []
   for (const ev of events) {
     const dateKey = ev.start.dateTime
@@ -356,12 +478,14 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
   // ── Tile body ────────────────────────────────────────────────────────────
   return (
-    <BaseTile
-      tile={tile}
-      settingsChildren={settingsContent}
-      getExtraConfig={getExtraConfig}
-      onSettingsOpen={handleSettingsOpen}
-    >
+    <>
+      <BaseTile
+        tile={tile}
+        settingsChildren={settingsContent}
+        getExtraConfig={getExtraConfig}
+        onSettingsOpen={handleSettingsOpen}
+        onTileClick={tokenOk ? handleTileClick : undefined}
+      >
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <EventIcon fontSize="small" color="primary" />
@@ -462,6 +586,93 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         </Box>
       )}
     </BaseTile>
+
+      {/* ── Calendar detail modal ────────────────────────────────────────── */}
+      <LargeModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={(tile.config?.name as string) || 'Google Kalender'}
+      >
+        {/* Week navigation */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            px: 1.5,
+            py: 1,
+            flexShrink: 0,
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <IconButton size="small" onClick={handleModalPrevWeek} disabled={modalLoading}>
+            <ChevronLeftIcon />
+          </IconButton>
+          <Typography variant="subtitle2" sx={{ flex: 1, textAlign: 'center' }}>
+            {modalDateRangeLabel}
+          </Typography>
+          <IconButton size="small" onClick={handleModalNextWeek} disabled={modalLoading}>
+            <ChevronRightIcon />
+          </IconButton>
+        </Box>
+
+        {/* Modal body */}
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+          {modalLoading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+              <CircularProgress />
+            </Box>
+          )}
+          {modalError && !modalLoading && (
+            <Typography color="error" variant="body2">{modalError}</Typography>
+          )}
+          {!modalLoading && !modalError && modalGrouped.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Keine Ereignisse in diesem Zeitraum.
+            </Typography>
+          )}
+          {!modalLoading && modalGrouped.map((group) => (
+            <Box key={group.dateLabel} sx={{ mb: 2 }}>
+              <Typography
+                variant="subtitle2"
+                fontWeight="bold"
+                color="primary"
+                sx={{ mb: 0.5, textTransform: 'capitalize' }}
+              >
+                {group.dateLabel}
+              </Typography>
+              <Divider sx={{ mb: 0.5 }} />
+              <List dense disablePadding>
+                {group.events.map((ev) => {
+                  const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
+                  return (
+                    <ListItem key={ev.id} disableGutters disablePadding sx={{ mb: 0.75, alignItems: 'flex-start' }}>
+                      <Chip
+                        size="small"
+                        label={formatTime(ev)}
+                        sx={{
+                          mr: 1,
+                          mt: 0.25,
+                          minWidth: 52,
+                          flexShrink: 0,
+                          fontSize: '0.65rem',
+                          backgroundColor: evColor ?? undefined,
+                          color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                        }}
+                      />
+                      <ListItemText
+                        primary={ev.summary}
+                        primaryTypographyProps={{ variant: 'body2' }}
+                      />
+                    </ListItem>
+                  )
+                })}
+              </List>
+            </Box>
+          ))}
+        </Box>
+      </LargeModal>
+    </>
   )
 }
 
