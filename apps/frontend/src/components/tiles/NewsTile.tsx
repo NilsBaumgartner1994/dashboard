@@ -49,6 +49,10 @@ const CORS_PROXIES = [
 
 const MEDIA_NS = 'http://search.yahoo.com/mrss/'
 const MAX_NEWS_ITEMS = 20
+// Minimum title length used when extracting article titles from Google News HTML / JSON
+const MIN_TITLE_LENGTH = 10
+// How far back (in characters) to search within a script text for a title preceding an article URL
+const MAX_SCRIPT_SEARCH_DISTANCE = 600
 
 /** Return true when the URL points to a Google News HTML page (not an RSS endpoint). */
 function isGoogleNewsHtmlUrl(url: string): boolean {
@@ -66,72 +70,115 @@ const resolveGoogleNewsHref = (raw: string): string => {
   try { return new URL(raw, 'https://news.google.com').toString() } catch { return raw }
 }
 
-const CONTAINER_TAGS = new Set(['div', 'section', 'main', 'article'])
-
 /**
  * Parse Google News HTML in the browser using node-html-parser.
- * Three fallback strategies (tried in order until results are found):
- *  1. <article> elements
- *  2. <h3>/<h4> headings that contain an <a>
- *  3. Any <a href*="/articles/"> anchor with meaningful text
+ *
+ * Google News is a JavaScript SPA – it has NO <article> elements.
+ * Strategies tried in order until results are found:
+ *  1. DOM: <h3>/<h4> whose parent is an <a href> (common Google News structure)
+ *  2. DOM: <h3>/<h4> that contain an <a href> (alternative structure)
+ *  3. DOM: any <a href*="articles"> / <a href*="CBMi"> anchor with text ≥ 5 chars
+ *  4. Script JSON: extract from AF_initDataCallback embedded data (pure SPA case)
  */
 function parseGoogleNewsHtml(html: string, sourceLabel: string): NewsItem[] {
   const doc = parseHtml(html)
   const results: NewsItem[] = []
+  const seenLinks = new Set<string>()
 
-  // Strategy 1 – <article> elements
-  for (const art of doc.querySelectorAll('article')) {
+  const addItem = (item: NewsItem) => {
+    const key = item.link || item.title
+    if (!key || seenLinks.has(key)) return
+    seenLinks.add(key)
+    results.push(item)
+  }
+
+  // Strategy 1 – <h3>/<h4> whose direct parent is an <a href> (typical Google News card)
+  for (const heading of doc.querySelectorAll('h3, h4')) {
     if (results.length >= MAX_NEWS_ITEMS) break
-    const headingEl = art.querySelector('h3, h4, h2')
-    const title = headingEl?.text.trim() ?? art.querySelector('a')?.text.trim() ?? ''
+    const parent = heading.parentNode
+    if (!parent || parent.rawTagName?.toLowerCase() !== 'a') continue
+    const rawHref = (parent as typeof heading).getAttribute?.('href') ?? ''
+    if (!rawHref) continue
+    const title = heading.text.trim()
     if (!title) continue
-
-    const linkEl = art.querySelector('a[href*="articles"]') ?? art.querySelector('a[href]')
-    const link = resolveGoogleNewsHref(linkEl?.getAttribute('href') ?? '')
-
-    const timeEl = art.querySelector('time')
+    const link = resolveGoogleNewsHref(rawHref)
+    const timeEl = parent.parentNode?.querySelector('time')
     const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.text.trim() ?? ''
-
-    const imgEl = art.querySelector('figure img') ?? art.querySelector('img')
-    const imageUrl = resolveGoogleNewsHref(imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? '')
-
-    const sourceEl = art.querySelector('a[href*="publications"]') ?? art.querySelector('[data-n-tid]')
-    const source = sourceEl?.text.trim() || sourceLabel
-
-    results.push({ title, description: '', link, pubDate, source, imageUrl })
+    addItem({ title, description: '', link, pubDate, source: sourceLabel, imageUrl: '' })
   }
   if (results.length > 0) return results
 
-  // Strategy 2 – headings (<h3>/<h4>) containing a link
+  // Strategy 2 – <h3>/<h4> that contain an <a href>
   for (const heading of doc.querySelectorAll('h3, h4')) {
     if (results.length >= MAX_NEWS_ITEMS) break
     const anchor = heading.querySelector('a[href]')
+    if (!anchor) continue
     const title = heading.text.trim()
-    const link = resolveGoogleNewsHref(anchor?.getAttribute('href') ?? '')
+    const link = resolveGoogleNewsHref(anchor.getAttribute('href') ?? '')
     if (!title || !link) continue
-
-    // Walk up to a meaningful container
-    let container = heading.parentNode
-    while (container && !CONTAINER_TAGS.has(container.rawTagName?.toLowerCase() ?? '')) {
-      container = container.parentNode
-    }
+    const container = heading.parentNode
     const timeEl = container?.querySelector('time')
     const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.text.trim() ?? ''
-    const imgEl = container?.querySelector('img')
-    const imageUrl = resolveGoogleNewsHref(imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? '')
-
-    results.push({ title, description: '', link, pubDate, source: sourceLabel, imageUrl })
+    addItem({ title, description: '', link, pubDate, source: sourceLabel, imageUrl: '' })
   }
   if (results.length > 0) return results
 
-  // Strategy 3 – any <a href*="/articles/"> anchor with meaningful text
+  // Strategy 3 – any <a> pointing to a Google News article URL with readable text
   for (const anchor of doc.querySelectorAll('a[href]')) {
     if (results.length >= MAX_NEWS_ITEMS) break
     const rawHref = anchor.getAttribute('href') ?? ''
-    if (!rawHref.includes('/articles/')) continue
+    if (!rawHref.includes('/articles/') && !rawHref.includes('CBMi')) continue
     const title = anchor.text.trim()
-    if (!title || title.length < 10) continue
-    results.push({ title, description: '', link: resolveGoogleNewsHref(rawHref), pubDate: '', source: sourceLabel, imageUrl: '' })
+    if (!title || title.length < 5) continue
+    addItem({ title, description: '', link: resolveGoogleNewsHref(rawHref), pubDate: '', source: sourceLabel, imageUrl: '' })
+  }
+  if (results.length > 0) return results
+
+  // Strategy 4 – extract article data from embedded AF_initDataCallback JSON (pure SPA)
+  // Google News embeds article data in <script> tags as:
+  //   AF_initDataCallback({..., data:function(){return [..., [["CBMiXXX","Title",...], ...],...]}})
+  for (const script of doc.querySelectorAll('script')) {
+    if (results.length >= MAX_NEWS_ITEMS) break
+    const text = script.text
+    if (!text.includes('CBMi')) continue
+
+    // Primary: "CBMiXXX","Title" – article ID immediately followed by title
+    const primaryRe = new RegExp(`"(CBMi[A-Za-z0-9_-]{5,})"\\s*,\\s*"([^"]{${MIN_TITLE_LENGTH},200})"`, 'g')
+    for (const m of text.matchAll(primaryRe)) {
+      if (results.length >= MAX_NEWS_ITEMS) break
+      const [, articleId, title] = m
+      if (title.startsWith('http') || title.startsWith('CBMi')) continue
+      addItem({ title, description: '', link: `https://news.google.com/articles/${articleId}`, pubDate: '', source: sourceLabel, imageUrl: '' })
+    }
+    if (results.length > 0) break
+
+    // Fallback: "Title",...,"./articles/CBMiXXX" – title appears before the article URL
+    const urlRe = /"\.\/articles\/(CBMi[A-Za-z0-9_-]+)"/g
+    for (const m of text.matchAll(urlRe)) {
+      if (results.length >= MAX_NEWS_ITEMS) break
+      const articleId = m[1]
+      const pos = m.index ?? 0
+      // Find start of array entry containing this URL
+      let start = pos
+      let depth = 0
+      for (let i = pos - 1; i >= Math.max(0, pos - MAX_SCRIPT_SEARCH_DISTANCE); i--) {
+        const ch = text[i]
+        if (ch === ']') depth++
+        else if (ch === '[') {
+          if (depth === 0) { start = i + 1; break }
+          depth--
+        }
+      }
+      const ctx = text.slice(start, pos)
+      // Find all quoted strings that look like article titles (contain spaces)
+      const candidates = [...ctx.matchAll(/"([^"]{${MIN_TITLE_LENGTH},200})"/g)]
+        .map((c) => c[1])
+        .filter((s) => !s.startsWith('http') && !s.startsWith('CBMi') && s.includes(' '))
+      const title = candidates.sort((a, b) => b.length - a.length)[0]
+      if (!title) continue
+      addItem({ title, description: '', link: `https://news.google.com/articles/${articleId}`, pubDate: '', source: sourceLabel, imageUrl: '' })
+    }
+    if (results.length > 0) break
   }
 
   return results
