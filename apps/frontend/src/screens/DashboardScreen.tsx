@@ -39,6 +39,7 @@ import type { TileInstance } from '../store/useStore'
 import SampleTile from '../components/tiles/SampleTile'
 import ServerTile from '../components/tiles/ServerTile'
 import RocketMealsTile from '../components/tiles/RocketMealsTile'
+import GoogleCalendarTile from '../components/tiles/GoogleCalendarTile'
 
 const GRID_COLS = 32
 const GRID_ROWS = 18
@@ -61,6 +62,7 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   sample: { label: 'Sample Tile', component: SampleTile },
   server: { label: 'Server Status', component: ServerTile },
   rocketmeals: { label: 'Rocket Meals Server', component: RocketMealsTile },
+  googlecalendar: { label: 'Google Kalender', component: GoogleCalendarTile },
 }
 
 type ControlDef = { label: string; icon: React.ReactNode; dx: number; dy: number; isResize: boolean }
