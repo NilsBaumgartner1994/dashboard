@@ -21,12 +21,14 @@ interface AppState {
   defaultLon?: number
   defaultLocationName?: string
   debugMode: boolean
+  backendUrl: string
   setTheme: (t: 'light' | 'dark' | 'auto') => void
   setTiles: (tiles: TileInstance[]) => void
   toggleEditMode: () => void
   setGridColumns: (n: number) => void
   setDefaultLocation: (lat: number, lon: number, name: string) => void
   setDebugMode: (v: boolean) => void
+  setBackendUrl: (url: string) => void
   addTile: (type: string) => void
   removeTile: (id: string) => void
   updateTile: (id: string, patch: Partial<TileInstance>) => void
@@ -47,6 +49,7 @@ export const useStore = create<AppState>()(
       defaultLon: undefined,
       defaultLocationName: undefined,
       debugMode: false,
+      backendUrl: 'https://test.rocket-meals.de/my-dashboard/api',
       setTheme: (theme) => set({ theme }),
       setTiles: (tiles) => set({ tiles }),
       toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),
@@ -54,6 +57,7 @@ export const useStore = create<AppState>()(
       setDefaultLocation: (defaultLat, defaultLon, defaultLocationName) =>
         set({ defaultLat, defaultLon, defaultLocationName }),
       setDebugMode: (debugMode) => set({ debugMode }),
+      setBackendUrl: (backendUrl) => set({ backendUrl }),
       addTile: (type) =>
         set((s) => {
           const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks'].includes(type) ? 4 : 2
