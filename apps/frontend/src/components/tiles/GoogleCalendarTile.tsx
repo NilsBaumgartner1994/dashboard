@@ -27,6 +27,7 @@ import CalendarEventDetailModal from './CalendarEventDetailModal'
 import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
+import { useCalendarEventsStore } from '../../store/useCalendarEventsStore'
 
 interface CalendarInfo {
   id: string
@@ -93,6 +94,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const daysAhead = config.daysAhead ?? 7
 
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
+  const setCalendarEvents = useCalendarEventsStore((s) => s.setEvents)
 
   // Events & calendars state
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -328,7 +330,10 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             : cals.map((c) => c.id)
         return fetchEvents(accessToken, ids, daysAhead)
       })
-      .then(setEvents)
+      .then((evts) => {
+        setEvents(evts)
+        setCalendarEvents(evts)
+      })
       .catch((err: Error) => {
         if (err.message === 'TOKEN_EXPIRED') {
           setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
