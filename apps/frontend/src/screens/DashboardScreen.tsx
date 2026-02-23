@@ -37,6 +37,7 @@ import GoogleCalendarTile from '../components/tiles/GoogleCalendarTile'
 import WeatherTile from '../components/tiles/WeatherTile'
 import NewsTile from '../components/tiles/NewsTile'
 import RouteTile from '../components/tiles/RouteTile'
+import GoogleTasksTile from '../components/tiles/GoogleTasksTile'
 
 const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
@@ -61,6 +62,7 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   weather: { label: 'Wetter', component: WeatherTile },
   news: { label: 'News (RSS)', component: NewsTile },
   route: { label: 'Route & Fahrtzeit', component: RouteTile },
+  tasks: { label: 'Aufgaben (Google Tasks)', component: GoogleTasksTile },
 }
 
 function DraggableTile({
