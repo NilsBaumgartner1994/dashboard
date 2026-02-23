@@ -179,6 +179,28 @@ export default function SettingsScreen() {
           <br />
           <code>{window.location.origin + window.location.pathname}</code>
         </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Außerdem muss die{' '}
+          <a
+            href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google Calendar API
+          </a>{' '}
+          aktiviert sein. Im{' '}
+          <a
+            href="https://console.cloud.google.com/apis/credentials/consent"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            OAuth-Consent-Screen
+          </a>{' '}
+          muss der folgende Scope hinzugefügt werden:
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <code>https://www.googleapis.com/auth/calendar.readonly</code>
+        </Typography>
         <TextField
           fullWidth
           label="Google OAuth Client-ID"
