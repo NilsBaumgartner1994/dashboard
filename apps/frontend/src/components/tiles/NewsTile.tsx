@@ -18,13 +18,12 @@ import {
   ListItemSecondaryAction,
   Alert,
 } from '@mui/material'
-import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
-import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RssFeedIcon from '@mui/icons-material/RssFeed'
 import BaseTile from './BaseTile'
+import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 
 // Pre-defined RSS feed presets
@@ -42,9 +41,6 @@ const CORS_PROXIES = [
   'https://api.allorigins.win/raw?url=',
   'https://corsproxy.io/?url=',
 ]
-
-// Duration in ms before navigation controls auto-hide
-const CONTROLS_HIDE_DELAY_MS = 10_000
 
 interface NewsItem {
   title: string
@@ -150,8 +146,8 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [items, setItems] = useState<NewsItem[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [controlsVisible, setControlsVisible] = useState(false)
   const [fetchErrors, setFetchErrors] = useState<string[]>([])
+  const [modalOpen, setModalOpen] = useState(false)
 
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
@@ -160,7 +156,6 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [intervalInput, setIntervalInput] = useState(String(config.interval ?? 10))
 
   // Timers
-  const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Fetch all feeds
@@ -195,42 +190,6 @@ export default function NewsTile({ tile }: NewsTileProps) {
       if (cycleTimerRef.current) clearInterval(cycleTimerRef.current)
     }
   }, [items.length, interval])
-
-  // Show controls on click, reset hide-timer on any action
-  const showControls = () => {
-    setControlsVisible(true)
-    if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current)
-    hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), CONTROLS_HIDE_DELAY_MS)
-  }
-
-  const goBack = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    showControls()
-    setCurrentIndex((prev) => (prev - 1 + items.length) % items.length)
-    // Reset cycle timer
-    if (cycleTimerRef.current) {
-      clearInterval(cycleTimerRef.current)
-      cycleTimerRef.current = setInterval(() => {
-        setCurrentIndex((p) => (p + 1) % items.length)
-      }, Math.max(5, interval) * 1000)
-    }
-  }
-
-  const goForward = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    showControls()
-    setCurrentIndex((prev) => (prev + 1) % items.length)
-    if (cycleTimerRef.current) {
-      clearInterval(cycleTimerRef.current)
-      cycleTimerRef.current = setInterval(() => {
-        setCurrentIndex((p) => (p + 1) % items.length)
-      }, Math.max(5, interval) * 1000)
-    }
-  }
-
-  const handleTileClick = () => {
-    if (!controlsVisible) showControls()
-  }
 
   // Settings helpers
   const handleSettingsOpen = () => {
@@ -384,16 +343,13 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const currentItem = items[currentIndex] ?? null
 
   return (
-    <BaseTile
-      tile={tile}
-      settingsChildren={settingsContent}
-      getExtraConfig={getExtraConfig}
-      onSettingsOpen={handleSettingsOpen}
-    >
-      {/* Tile click area */}
-      <Box
-        onClick={handleTileClick}
-        sx={{ position: 'relative', height: '100%', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+    <>
+      <BaseTile
+        tile={tile}
+        settingsChildren={settingsContent}
+        getExtraConfig={getExtraConfig}
+        onSettingsOpen={handleSettingsOpen}
+        onTileClick={items.length > 0 ? () => setModalOpen(true) : undefined}
       >
         {/* No feeds configured */}
         {feeds.length === 0 && (
@@ -434,71 +390,6 @@ export default function NewsTile({ tile }: NewsTileProps) {
 
         {currentItem && (
           <>
-            {/* Open-link icon – top left, appears with controls */}
-            {controlsVisible && (
-              <Tooltip title="Artikel öffnen">
-                <IconButton
-                  size="small"
-                  component="a"
-                  href={currentItem.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                  sx={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    zIndex: 20,
-                    backgroundColor: 'rgba(0,0,0,0.5)',
-                    color: '#fff',
-                    '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' },
-                  }}
-                >
-                  <OpenInNewIcon fontSize="inherit" />
-                </IconButton>
-              </Tooltip>
-            )}
-
-            {/* Navigation – left arrow */}
-            {controlsVisible && items.length > 1 && (
-              <IconButton
-                size="small"
-                onClick={goBack}
-                sx={{
-                  position: 'absolute',
-                  left: 4,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  color: '#fff',
-                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' },
-                }}
-              >
-                <ArrowBackIosNewIcon fontSize="inherit" />
-              </IconButton>
-            )}
-
-            {/* Navigation – right arrow */}
-            {controlsVisible && items.length > 1 && (
-              <IconButton
-                size="small"
-                onClick={goForward}
-                sx={{
-                  position: 'absolute',
-                  right: 4,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  color: '#fff',
-                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' },
-                }}
-              >
-                <ArrowForwardIosIcon fontSize="inherit" />
-              </IconButton>
-            )}
-
             {/* Spacer pushes news text to the bottom */}
             <Box sx={{ flex: 1 }} />
 
@@ -544,7 +435,60 @@ export default function NewsTile({ tile }: NewsTileProps) {
             </Box>
           </>
         )}
-      </Box>
-    </BaseTile>
+      </BaseTile>
+
+      {/* ── News detail modal ─────────────────────────────────────────────── */}
+      <LargeModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={(config.name as string) || 'News'}
+      >
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+          {items.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Keine Nachrichten geladen.
+            </Typography>
+          )}
+          {items.map((item, idx) => (
+            <Box key={idx} sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 0.5 }}>
+                <Box sx={{ flex: 1 }}>
+                  {item.source && (
+                    <Chip
+                      label={item.source}
+                      size="small"
+                      sx={{ mb: 0.5, height: 18, fontSize: '0.6rem' }}
+                    />
+                  )}
+                  <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.4 }}>
+                    {item.title}
+                  </Typography>
+                  {item.description && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                      {item.description}
+                    </Typography>
+                  )}
+                </Box>
+                {item.link && (
+                  <Tooltip title="Artikel öffnen">
+                    <IconButton
+                      size="small"
+                      component="a"
+                      href={item.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <OpenInNewIcon fontSize="inherit" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+              <Divider />
+            </Box>
+          ))}
+        </Box>
+      </LargeModal>
+    </>
   )
 }
