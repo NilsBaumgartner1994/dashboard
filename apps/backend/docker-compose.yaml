@@ -71,6 +71,14 @@ services:
 
       EMAIL_TEMPLATES_PATH: "/directus/extensions/templates" # https://docs.directus.io/self-hosted/email-templates.html
 
+      # AI / Ollama configuration
+      # Base URL of the Ollama service reachable inside directus_network
+      OLLAMA_BASE_URL: "http://my-dashboard-ollama:11434"
+      # Default models used by the AI endpoint; can be overridden in .env
+      OLLAMA_MODEL_TEXT: "${OLLAMA_MODEL_TEXT:-llama3.2}"
+      OLLAMA_MODEL_CODE: "${OLLAMA_MODEL_CODE:-deepseek-coder-v2}"
+      OLLAMA_MODEL_VISION: "${OLLAMA_MODEL_VISION:-llava}"
+
       # Directus Database configuration
       KEY: "directus-key"
       SECRET: "directus-secret"

@@ -84,6 +84,22 @@ export class EnvVariableHelper {
     return this.getEnvVariable('OPENAI_API_KEY');
   }
 
+  static getOllamaBaseUrl(): string {
+    return this.getEnvVariable('OLLAMA_BASE_URL') || 'http://my-dashboard-ollama:11434';
+  }
+
+  static getOllamaModelText(): string {
+    return this.getEnvVariable('OLLAMA_MODEL_TEXT') || 'llama3.2';
+  }
+
+  static getOllamaModelCode(): string {
+    return this.getEnvVariable('OLLAMA_MODEL_CODE') || 'deepseek-coder-v2';
+  }
+
+  static getOllamaModelVision(): string {
+    return this.getEnvVariable('OLLAMA_MODEL_VISION') || 'llava';
+  }
+
   static getMarkingSyncMode() {
     return this.getEnvVariable('MARKING_SYNC_MODE'); // Options: "TL1CSV", "TL1WEB", "SWOSY"
   }

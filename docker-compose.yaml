@@ -1,4 +1,14 @@
 services:
+  my-dashboard-ollama:
+    image: ollama/ollama:latest
+    restart: always
+    networks:
+      - directus_network
+    volumes:
+      - ./data/ollama:/root/.ollama
+    # Ollama is intentionally NOT exposed to the host – it is only reachable
+    # from inside directus_network via http://my-dashboard-ollama:11434
+
   prepare-data:
     image: debian:bookworm-slim
     volumes:
@@ -22,6 +32,8 @@ services:
       prepare-data:
         condition: service_completed_successfully
       my-dashboard-cache:
+        condition: service_started
+      my-dashboard-ollama:
         condition: service_started
     extends:
       service: my-dashboard-directus

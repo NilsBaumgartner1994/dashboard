@@ -60,6 +60,11 @@
       },
       {
         "type": "endpoint",
+        "name": "ai-endpoint",
+        "source": "src/ai-endpoint/index.ts"
+      },
+      {
+        "type": "endpoint",
         "name": "cors-proxy-endpoint",
         "source": "src/cors-proxy-endpoint/index.ts"
       }
