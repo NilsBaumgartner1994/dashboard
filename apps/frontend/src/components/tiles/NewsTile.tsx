@@ -37,8 +37,11 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
 const buildGoogleNewsUrl = (query: string) =>
   `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
 
-// CORS proxy for browser RSS fetching
-const CORS_PROXY = 'https://api.allorigins.win/raw?url='
+// CORS proxies for browser RSS fetching (tried in order until one succeeds)
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+]
 
 // Duration in ms before navigation controls auto-hide
 const CONTROLS_HIDE_DELAY_MS = 10_000
@@ -110,7 +113,6 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
 }
 
 async function fetchFeed(url: string): Promise<{ items: NewsItem[]; error: string | null }> {
-  // Try direct fetch first, then via CORS proxy
   const tryFetch = async (fetchUrl: string): Promise<string | null> => {
     try {
       const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) })
@@ -126,8 +128,12 @@ async function fetchFeed(url: string): Promise<{ items: NewsItem[]; error: strin
     catch { return url }
   })()
 
-  // Try via CORS proxy
-  const text = await tryFetch(`${CORS_PROXY}${encodeURIComponent(url)}`)
+  // Try via CORS proxies in order until one succeeds
+  let text: string | null = null
+  for (const proxy of CORS_PROXIES) {
+    text = await tryFetch(`${proxy}${encodeURIComponent(url)}`)
+    if (text) break
+  }
   if (text) {
     const items = parseRssXml(text, sourceLabel)
     return { items, error: null }
