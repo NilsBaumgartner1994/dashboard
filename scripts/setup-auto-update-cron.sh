@@ -3,11 +3,11 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_SCHEDULE="0 20 * * 6"
+DEFAULT_SCHEDULE="*/5 * * * *"
 SCHEDULE="${CRON_SCHEDULE:-$DEFAULT_SCHEDULE}"
-LOG_FILE="${CRON_LOG_FILE:-$REPO_DIR/logs/weekly-update.log}"
-JOB_CMD="${CRON_JOB_COMMAND:-$REPO_DIR/scripts/weekly-update.sh >> $LOG_FILE 2>&1}"
-MARKER="# rocket-meals-weekly-update"
+LOG_FILE="${CRON_LOG_FILE:-$REPO_DIR/logs/auto-update.log}"
+JOB_CMD="${CRON_JOB_COMMAND:-$REPO_DIR/scripts/auto-update.sh >> $LOG_FILE 2>&1}"
+MARKER="# rocket-meals-auto-update"
 CRON_LINE="$SCHEDULE $JOB_CMD $MARKER"
 
 log() {
@@ -19,8 +19,8 @@ if ! command -v crontab >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -x "$REPO_DIR/scripts/weekly-update.sh" ]; then
-  echo "Fehler: $REPO_DIR/scripts/weekly-update.sh ist nicht ausführbar oder fehlt." >&2
+if [ ! -x "$REPO_DIR/scripts/auto-update.sh" ]; then
+  echo "Fehler: $REPO_DIR/scripts/auto-update.sh ist nicht ausführbar oder fehlt." >&2
   exit 1
 fi
 
