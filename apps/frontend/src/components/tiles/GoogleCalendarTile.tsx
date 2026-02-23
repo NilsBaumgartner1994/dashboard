@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google'
 import {
   Box,
@@ -128,15 +128,38 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [settingsDaysAhead, setSettingsDaysAhead] = useState(String(daysAhead))
 
   // ── Google login (implicit flow) ─────────────────────────────────────────
+  const isSilentRefresh = useRef(false)
+
   const login = useGoogleLogin({
     flow: 'implicit',
     scope: 'https://www.googleapis.com/auth/calendar.readonly',
     onSuccess: (tokenResponse) => {
+      isSilentRefresh.current = false
       setToken(tokenResponse.access_token, tokenResponse.expires_in ?? 3600)
       setError(null)
     },
-    onError: () => setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.'),
+    onError: () => {
+      if (!isSilentRefresh.current) {
+        setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.')
+      }
+      isSilentRefresh.current = false
+    },
   })
+
+  const loginRef = useRef(login)
+  useEffect(() => { loginRef.current = login }, [login])
+
+  // ── Automatic silent token refresh before expiry ─────────────────────────
+  useEffect(() => {
+    if (!tokenExpiry || !accessToken) return
+    const msUntilExpiry = tokenExpiry - Date.now()
+    const refreshDelay = Math.max(0, msUntilExpiry - 5 * 60 * 1000)
+    const timer = setTimeout(() => {
+      isSilentRefresh.current = true
+      loginRef.current({ prompt: 'none' })
+    }, refreshDelay)
+    return () => clearTimeout(timer)
+  }, [tokenExpiry, accessToken])
 
   // ── Fetch calendars ───────────────────────────────────────────────────────
   const fetchCalendars = useCallback(async (token: string): Promise<CalendarInfo[]> => {
@@ -463,6 +486,14 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     else grouped.push({ dateLabel: dateKey, events: [ev] })
   }
 
+  // Always include today at the top of the tile view
+  const now = new Date()
+  const todayLabel = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    .toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+  const groupedWithToday: DateGroup[] = grouped.find((g) => g.dateLabel === todayLabel)
+    ? grouped
+    : [{ dateLabel: todayLabel, events: [] }, ...grouped]
+
   // ── Tile body ────────────────────────────────────────────────────────────
   return (
     <>
@@ -526,15 +557,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         </Box>
       )}
 
-      {tokenOk && !loading && !error && events.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          Keine Ereignisse in den nächsten {daysAhead} Tagen.
-        </Typography>
-      )}
-
       {tokenOk && !loading && grouped.length > 0 && (
         <Box sx={{ overflow: 'auto', flex: 1 }}>
-          {grouped.map((group) => (
+          {groupedWithToday.map((group) => (
             <Box key={group.dateLabel}>
               <Typography
                 variant="caption"
@@ -544,20 +569,42 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
               >
                 {group.dateLabel}
               </Typography>
-              <List dense disablePadding>
-                {group.events.map((ev) => {
-                  const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
-                  return (
-                    <CalendarEventItem
-                      key={ev.id}
-                      ev={ev}
-                      color={evColor}
-                    />
-                  )
-                })}
-              </List>
+              {group.events.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ pl: 0.5, mb: 0.5 }}>
+                  Keine Termine
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {group.events.map((ev) => {
+                    const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
+                    return (
+                      <CalendarEventItem
+                        key={ev.id}
+                        ev={ev}
+                        color={evColor}
+                      />
+                    )
+                  })}
+                </List>
+              )}
             </Box>
           ))}
+        </Box>
+      )}
+
+      {tokenOk && !loading && !error && events.length === 0 && (
+        <Box sx={{ overflow: 'auto', flex: 1 }}>
+          <Typography
+            variant="caption"
+            fontWeight="bold"
+            color="text.secondary"
+            sx={{ display: 'block', mt: 0.5, mb: 0.25, textTransform: 'uppercase', letterSpacing: 0.5 }}
+          >
+            {todayLabel}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ pl: 0.5 }}>
+            Keine Termine
+          </Typography>
         </Box>
       )}
     </BaseTile>

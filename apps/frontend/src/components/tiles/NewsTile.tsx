@@ -25,6 +25,7 @@ import RssFeedIcon from '@mui/icons-material/RssFeed'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 
 // Pre-defined RSS feed presets
 const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
@@ -108,7 +109,7 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
   }
 }
 
-async function fetchFeed(url: string): Promise<{ items: NewsItem[]; error: string | null }> {
+async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null }> {
   const tryFetch = async (fetchUrl: string): Promise<string | null> => {
     try {
       const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) })
@@ -130,6 +131,12 @@ async function fetchFeed(url: string): Promise<{ items: NewsItem[]; error: strin
     text = await tryFetch(`${proxy}${encodeURIComponent(url)}`)
     if (text) break
   }
+
+  // Fallback: try via configured backend CORS proxy
+  if (!text && backendUrl) {
+    text = await tryFetch(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+  }
+
   if (text) {
     const items = parseRssXml(text, sourceLabel)
     return { items, error: null }
@@ -142,6 +149,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const config = (tile.config ?? {}) as NewsConfig
   const feeds: string[] = config.feeds ?? []
   const interval = config.interval ?? 10
+  const backendUrl = useStore((s) => s.backendUrl)
 
   const [items, setItems] = useState<NewsItem[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -164,7 +172,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     setLoading(true)
     setFetchErrors([])
     try {
-      const results = await Promise.all(feedUrls.map((url) => fetchFeed(url)))
+      const results = await Promise.all(feedUrls.map((url) => fetchFeed(url, backendUrl)))
       const allItems = results.flatMap((r) => r.items).filter((item) => item.title)
       const errors = results.map((r) => r.error).filter((e): e is string => e !== null)
       setItems(allItems)
@@ -173,7 +181,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [backendUrl])
 
   useEffect(() => {
     fetchAllFeeds(feeds)

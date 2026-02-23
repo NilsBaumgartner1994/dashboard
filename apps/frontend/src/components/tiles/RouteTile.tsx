@@ -9,10 +9,15 @@ import {
   Switch,
   FormControlLabel,
   List,
+  IconButton,
+  Tooltip,
 } from '@mui/material'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
 import SearchIcon from '@mui/icons-material/Search'
 import EventIcon from '@mui/icons-material/Event'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckIcon from '@mui/icons-material/Check'
+import MapIcon from '@mui/icons-material/Map'
 import BaseTile from './BaseTile'
 import CalendarEventItem from './CalendarEventItem'
 import type { CalendarEventData } from './CalendarEventItem'
@@ -40,16 +45,40 @@ interface RouteConfig {
 
 type CalendarEvent = CalendarEventData
 
+// Nominatim usage policy requires a meaningful User-Agent identifying the application.
+// See: https://operations.osmfoundation.org/policies/nominatim/
+const NOMINATIM_USER_AGENT = 'NilsBaumgartner1994-dashboard/1.0 (https://github.com/NilsBaumgartner1994/dashboard)'
+
 async function geocodeName(name: string): Promise<{ lat: number; lon: number; name: string } | null> {
-  try {
-    const res = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name.trim())}&count=1&language=de&format=json`,
-    )
-    const data = await res.json()
-    if (data.results?.length) {
-      return { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name }
-    }
-  } catch { /* ignore */ }
+  let query = name.trim()
+  while (query) {
+    // Try Nominatim first – handles both full addresses and place names
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`,
+        { headers: { 'User-Agent': NOMINATIM_USER_AGENT } },
+      )
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        const displayName: string = data[0].display_name ?? query
+        return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: displayName.split(',')[0].trim() }
+      }
+    } catch { /* ignore */ }
+    // Fallback: Open-Meteo geocoding (city/place names)
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=de&format=json`,
+      )
+      const data = await res.json()
+      if (data.results?.length) {
+        return { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name }
+      }
+    } catch { /* ignore */ }
+    // No result found – strip the first comma-separated segment and retry
+    const commaIdx = query.indexOf(',')
+    if (commaIdx === -1) break
+    query = query.slice(commaIdx + 1).trim()
+  }
   return null
 }
 
@@ -93,10 +122,13 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const [eventLat, setEventLat] = useState<number | null>(null)
   const [eventLon, setEventLon] = useState<number | null>(null)
   const [calLoading, setCalLoading] = useState(false)
+  const [eventGeoLoading, setEventGeoLoading] = useState(false)
+  const [eventGeoError, setEventGeoError] = useState<string | null>(null)
 
   // Countdown timer
   const [countdown, setCountdown] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [addressCopied, setAddressCopied] = useState(false)
 
   // Settings form state
   const [startInput, setStartInput] = useState(config.startName ?? '')
@@ -191,12 +223,24 @@ export default function RouteTile({ tile }: RouteTileProps) {
 
   // ── Geocode calendar event location ──────────────────────────────────────
   useEffect(() => {
-    if (!config.useCalendar || !nextEvent?.location) return
+    if (!config.useCalendar || !nextEvent?.location) {
+      setEventLat(null)
+      setEventLon(null)
+      setEventGeoError(null)
+      return
+    }
+    setEventGeoLoading(true)
+    setEventGeoError(null)
+    setEventLat(null)
+    setEventLon(null)
     geocodeName(nextEvent.location).then((r) => {
       if (r) {
         setEventLat(r.lat)
         setEventLon(r.lon)
+      } else {
+        setEventGeoError('Ort des Termins konnte nicht gefunden werden')
       }
+      setEventGeoLoading(false)
     })
   }, [config.useCalendar, nextEvent])
 
@@ -315,6 +359,20 @@ export default function RouteTile({ tile }: RouteTileProps) {
     const r = await geocodeName(tileDestInput)
     if (r) { setTileDestLat(r.lat); setTileDestLon(r.lon); setTileDestName(r.name) }
     setTileDestGeoLoading(false)
+  }
+
+  const handleTileStartInputChange = (value: string) => {
+    setTileStartInput(value)
+    setTileStartLat(undefined)
+    setTileStartLon(undefined)
+    setTileStartName(undefined)
+  }
+
+  const handleTileDestInputChange = (value: string) => {
+    setTileDestInput(value)
+    setTileDestLat(undefined)
+    setTileDestLon(undefined)
+    setTileDestName(undefined)
   }
 
   const getExtraConfig = (): Record<string, unknown> => ({
@@ -447,24 +505,34 @@ export default function RouteTile({ tile }: RouteTileProps) {
           <Typography variant="caption" color="text.secondary">Start</Typography>
           {/* Show inline input when start is not fixed in settings and no global default */}
           {!configHasStart && !defaultHasLocation ? (
-            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
-              <TextField
-                size="small"
-                placeholder="Startort eingeben"
-                value={tileStartInput}
-                onChange={(e) => setTileStartInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeStart() }}
-                sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
-              />
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={handleTileGeocodeStart}
-                disabled={tileStartGeoLoading || !tileStartInput.trim()}
-                sx={{ minWidth: 0, px: 1 }}
-              >
-                {tileStartGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
-              </Button>
+            <Box sx={{ mt: 0.25 }}>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <TextField
+                  size="small"
+                  placeholder="Startort eingeben"
+                  value={tileStartInput}
+                  onChange={(e) => handleTileStartInputChange(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeStart() }}
+                  sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={handleTileGeocodeStart}
+                  disabled={tileStartGeoLoading || !tileStartInput.trim()}
+                  sx={{ minWidth: 0, px: 1 }}
+                >
+                  {tileStartGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
+                </Button>
+              </Box>
+              {tileHasStart && (
+                <Typography variant="caption" color="success.main" sx={{ display: 'block' }}>
+                  ✓ {tileStartInput}
+                  {config.showCoordinates && tileStartLat !== undefined && tileStartLon !== undefined && (
+                    <span> ({tileStartLat.toFixed(3)}, {tileStartLon.toFixed(3)})</span>
+                  )}
+                </Typography>
+              )}
             </Box>
           ) : (
             <Typography variant="body2" noWrap>
@@ -491,14 +559,64 @@ export default function RouteTile({ tile }: RouteTileProps) {
           )}
           {config.useCalendar && nextEvent && (
             <List dense disablePadding sx={{ mt: 0.25 }}>
+              {/* Show date of the appointment */}
+              {(nextEvent.start.dateTime || nextEvent.start.date) && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pl: 0.5 }}>
+                  {new Date(nextEvent.start.dateTime ?? (nextEvent.start.date! + 'T00:00:00')).toLocaleDateString('de-DE', {
+                    weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
+                  })}
+                </Typography>
+              )}
               <CalendarEventItem ev={nextEvent} />
               {nextEvent.location && (
-                <Typography variant="caption" color="text.secondary" noWrap sx={{ pl: 0.5 }}>
-                  {nextEvent.location}
-                  {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
-                    <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
-                  )}
-                </Typography>
+                <Box sx={{ pl: 0.5, mt: 0.25 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+                      {nextEvent.location}
+                      {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
+                        <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
+                      )}
+                    </Typography>
+                    <Tooltip title={addressCopied ? 'Kopiert!' : 'Adresse kopieren'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(nextEvent.location ?? '').then(() => {
+                            setAddressCopied(true)
+                            setTimeout(() => setAddressCopied(false), 2000)
+                          }).catch(() => { /* ignore */ })
+                        }}
+                      >
+                        {addressCopied ? <CheckIcon fontSize="inherit" color="success" /> : <ContentCopyIcon fontSize="inherit" />}
+                      </IconButton>
+                    </Tooltip>
+                    {(displayDestLat !== undefined && displayDestLon !== undefined) ? (
+                      <Tooltip title="In Google Maps öffnen">
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={`https://www.google.com/maps?q=${displayDestLat},${displayDestLon}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <MapIcon fontSize="inherit" />
+                        </IconButton>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title="In Google Maps öffnen">
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(nextEvent.location)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <MapIcon fontSize="inherit" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                </Box>
               )}
             </List>
           )}
@@ -512,23 +630,14 @@ export default function RouteTile({ tile }: RouteTileProps) {
               )}
             </Typography>
           ) : !config.useCalendar && (
-            /* Destination not fixed in settings – show inline input */
-            tileHasDest ? (
-              <Typography variant="body2" noWrap>
-                {tileDestName ?? tileDestInput}
-                {config.showCoordinates && tileDestLat !== undefined && tileDestLon !== undefined && (
-                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                    ({tileDestLat.toFixed(3)}, {tileDestLon.toFixed(3)})
-                  </Typography>
-                )}
-              </Typography>
-            ) : (
-              <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
+            /* Destination not fixed in settings – always show inline input */
+            <Box sx={{ mt: 0.25 }}>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
                 <TextField
                   size="small"
                   placeholder="Zielort eingeben"
                   value={tileDestInput}
-                  onChange={(e) => setTileDestInput(e.target.value)}
+                  onChange={(e) => handleTileDestInputChange(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeDest() }}
                   sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
                 />
@@ -542,18 +651,29 @@ export default function RouteTile({ tile }: RouteTileProps) {
                   {tileDestGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
                 </Button>
               </Box>
-            )
+              {tileHasDest && (
+                <Typography variant="caption" color="success.main" sx={{ display: 'block' }}>
+                  ✓ {tileDestInput}
+                  {config.showCoordinates && tileDestLat !== undefined && tileDestLon !== undefined && (
+                    <span> ({tileDestLat.toFixed(3)}, {tileDestLon.toFixed(3)})</span>
+                  )}
+                </Typography>
+              )}
+            </Box>
           )}
         </Box>
 
         <Divider />
 
         {/* Travel time / departure */}
-        {routeLoading && <CircularProgress size={20} />}
+        {(routeLoading || eventGeoLoading) && <CircularProgress size={20} />}
+        {eventGeoError && !eventGeoLoading && (
+          <Typography variant="caption" color="error">{eventGeoError}</Typography>
+        )}
         {routeError && (
           <Typography variant="caption" color="error">{routeError}</Typography>
         )}
-        {!routeLoading && travelSeconds !== null && (
+        {!routeLoading && !eventGeoLoading && travelSeconds !== null && (
           <Box>
             <Typography variant="body2">
               🚗 {formatDuration(travelSeconds)}
@@ -570,7 +690,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
             )}
           </Box>
         )}
-        {!routeLoading && travelSeconds === null && !routeError && (
+        {!routeLoading && !eventGeoLoading && travelSeconds === null && !routeError && !eventGeoError && (
           <Typography variant="caption" color="text.secondary">
             {effectiveStartLat === undefined
               ? 'Startort eingeben oder Standard-Standort in Einstellungen setzen.'
