@@ -8,6 +8,7 @@ services:
       - ./data/ollama:/root/.ollama
     environment:
       OLLAMA_KEEP_ALIVE: "24h"
+    mem_limit: ${OLLAMA_MEMORY:-8g}
     # Pull the model on startup if not already present
     entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3.1:8b} && wait"]
 

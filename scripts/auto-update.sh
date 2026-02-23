@@ -62,6 +62,9 @@ yarn build
 log "Baue Images neu (docker compose build)"
 docker compose build
 
+log "Ermittle Host-RAM und konfiguriere Ollama-Speicherlimit"
+bash "$REPO_DIR/scripts/configure-ram.sh"
+
 log "Starte Container im Hintergrund (docker compose up -d)"
 docker compose up -d
 
