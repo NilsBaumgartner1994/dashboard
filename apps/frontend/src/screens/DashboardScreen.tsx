@@ -30,6 +30,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useStore } from '../store/useStore'
 import type { TileInstance } from '../store/useStore'
+import { useUIStore } from '../store/useUIStore'
 import SampleTile from '../components/tiles/SampleTile'
 import ServerTile from '../components/tiles/ServerTile'
 import RocketMealsTile from '../components/tiles/RocketMealsTile'
@@ -70,18 +71,20 @@ function DraggableTile({
   editMode,
   isMobile,
   gridColumns,
+  anyModalOpen,
 }: {
   tile: TileInstance
   editMode: boolean
   isMobile: boolean
   gridColumns: number
+  anyModalOpen: boolean
 }) {
   const { updateTile, removeTile } = useStore()
   const resizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
 
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: tile.id,
-    disabled: !editMode || isMobile,
+    disabled: !editMode || isMobile || anyModalOpen,
   })
 
   const { x: mobileX, w: mobileW } = getMobileTilePos(tile, gridColumns)
@@ -200,6 +203,7 @@ function DraggableTile({
 
 export default function DashboardScreen() {
   const { tiles, editMode, toggleEditMode, addTile, updateTile, gridColumns } = useStore()
+  const anyModalOpen = useUIStore((s) => s.openModalCount > 0)
   const [addOpen, setAddOpen] = useState(false)
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -264,7 +268,7 @@ export default function DashboardScreen() {
               }}
             >
               {tiles.map((tile) => (
-                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} />
+                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
               ))}
             </Box>
           </DndContext>
