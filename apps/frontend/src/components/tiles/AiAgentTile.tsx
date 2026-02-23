@@ -24,14 +24,36 @@ import ReactMarkdown from 'react-markdown'
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
 const POLL_INTERVAL_MS = 2000
 
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
+
+function formatSources(sources: string[]): string {
+  if (sources.length === 0) return 'Trainingsdaten'
+  const domains = [...new Set(sources.map(extractDomain))]
+  return domains.join(', ')
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  /** Time (ms) from send to final reply – only on assistant messages. */
+  responseTimeMs?: number
+  /** URLs visited while generating this reply – only on assistant messages. */
+  sources?: string[]
+  /** In debug mode: the full payload that was sent to Ollama – only on user messages. */
+  debugSentPayload?: Record<string, unknown>
 }
 
 interface JobStatusResponse {
   status: 'pending' | 'running' | 'done' | 'error'
   partialContent: string
+  currentActivity?: string
+  visitedUrls?: string[]
   message?: { role: string; content: string }
   error?: string
   debugPayload?: Record<string, unknown>
@@ -51,6 +73,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
+  const [currentActivity, setCurrentActivity] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [debugPayload, setDebugPayload] = useState<Record<string, unknown> | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -68,7 +91,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
   }, [])
 
   const pollJob = useCallback(
-    (jobId: string, newMessages: Message[]) => {
+    (jobId: string, newMessages: Message[], startTime: number) => {
       const poll = async () => {
         try {
           const res = await fetch(`${backendUrl}/ai-agent/job/${jobId}`)
@@ -78,19 +101,39 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
           const data = (await res.json()) as JobStatusResponse
 
           // Update partial content so the user sees the AI "thinking"
-          if (data.partialContent) {
+          if (data.partialContent !== undefined) {
             setPartialContent(data.partialContent)
+          }
+
+          // Update current activity status message
+          if (data.currentActivity !== undefined) {
+            setCurrentActivity(data.currentActivity)
           }
 
           if (data.status === 'done') {
             const reply = data.message?.content ?? ''
-            onMessages([...newMessages, { role: 'assistant', content: reply }])
+            const responseTimeMs = Date.now() - startTime
+            const sources = data.visitedUrls ?? []
+
+            // In debug mode replace the last user message with the actual payload sent to Ollama
+            const finalNewMessages: Message[] =
+              debugMode && data.debugPayload
+                ? newMessages.map((m, idx) =>
+                    idx === newMessages.length - 1 && m.role === 'user'
+                      ? { ...m, debugSentPayload: data.debugPayload }
+                      : m,
+                  )
+                : newMessages
+
+            onMessages([...finalNewMessages, { role: 'assistant', content: reply, responseTimeMs, sources }])
             setPartialContent('')
+            setCurrentActivity('')
             if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
             setPartialContent('')
+            setCurrentActivity('')
             setLoading(false)
           } else {
             // Still running – poll again after interval
@@ -100,12 +143,13 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
           const msg = err instanceof Error ? err.message : String(err)
           setError(msg)
           setPartialContent('')
+          setCurrentActivity('')
           setLoading(false)
         }
       }
       pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS)
     },
-    [backendUrl, onMessages],
+    [backendUrl, onMessages, debugMode],
   )
 
   const send = async () => {
@@ -114,10 +158,12 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
     setInput('')
     setError(null)
     setPartialContent('')
+    setCurrentActivity('')
     setDebugPayload(null)
     const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
     onMessages(newMessages)
     setLoading(true)
+    const startTime = Date.now()
     try {
       const res = await fetch(`${backendUrl}/ai-agent/chat`, {
         method: 'POST',
@@ -131,7 +177,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
       const data = (await res.json()) as { jobId?: string; error?: string }
       if (!data.jobId) throw new Error('Kein jobId in der Antwort')
       // Start polling for the job result
-      pollJob(data.jobId, newMessages)
+      pollJob(data.jobId, newMessages, startTime)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
@@ -178,11 +224,38 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
                 }}
               >
                 <ReactMarkdown>{msg.content}</ReactMarkdown>
+                {/* Source attribution */}
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, opacity: 0.8 }}>
+                  {`(Quellen: ${formatSources(msg.sources ?? [])})`}
+                </Typography>
+                {/* Response time */}
+                {msg.responseTimeMs !== undefined && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', opacity: 0.7 }}>
+                    ⏱ {(msg.responseTimeMs / 1000).toFixed(1)}s
+                  </Typography>
+                )}
               </Box>
             ) : (
-              <Typography variant={compact ? 'caption' : 'body2'} sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {msg.content}
-              </Typography>
+              // User message: in debug mode show what was actually sent to Ollama
+              debugMode && msg.debugSentPayload ? (
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    fontSize: '0.7rem',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    maxHeight: 300,
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(msg.debugSentPayload, null, 2)}
+                </Box>
+              ) : (
+                <Typography variant={compact ? 'caption' : 'body2'} sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {msg.content}
+                </Typography>
+              )
             )}
           </Box>
         ))}
@@ -216,7 +289,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
             <CircularProgress size={16} />
             <Typography variant="caption" color="text.secondary">
-              {partialContent ? 'KI schreibt…' : 'KI denkt nach…'}
+              {currentActivity || (partialContent ? 'KI schreibt…' : 'KI denkt nach…')}
             </Typography>
           </Box>
         )}
