@@ -16,6 +16,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import ServerTile, { resolveServerUrl, SERVER_PRESETS } from './ServerTile'
 import type { ServerConfig } from './ServerTile'
 import BaseTile from './BaseTile'
+import ReloadIntervalBar from './ReloadIntervalBar'
+import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { TileInstance } from '../../store/useStore'
 
 interface ProjectInfo {
@@ -27,6 +29,9 @@ interface RocketMealsConfig extends ServerConfig {
   multiServer?: boolean
   /** Preset keys to monitor. Empty array means "all" presets. */
   selectedServers?: string[]
+  reloadIntervalMinutes?: 1 | 5 | 60
+  showReloadBar?: boolean
+  showLastUpdate?: boolean
 }
 
 interface RocketMealsTileProps {
@@ -60,6 +65,9 @@ function MultiServerView({
 }) {
   const config = (tile.config ?? {}) as RocketMealsConfig
   const checkInterval = config.checkInterval ?? 60
+  const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 5
+  const showReloadBar = config.showReloadBar ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
 
   const serversToCheck =
     selectedServers.length === 0
@@ -67,6 +75,7 @@ function MultiServerView({
       : MONITORABLE_PRESETS.filter((p) => selectedServers.includes(p.key))
 
   const [statuses, setStatuses] = useState<Record<string, ServerStatus>>({})
+  const [lastCheckUpdate, setLastCheckUpdate] = useState<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const checkAll = useCallback(async () => {
@@ -85,6 +94,7 @@ function MultiServerView({
         }
       }),
     )
+    setLastCheckUpdate(Date.now())
   }, [serversToCheck])
 
   useEffect(() => {
@@ -165,6 +175,14 @@ function MultiServerView({
           />
         )}
       </Box>
+      <ReloadIntervalBar
+        show={showReloadBar}
+        lastUpdate={lastCheckUpdate}
+        intervalMs={reloadIntervalMinutes * 60 * 1000}
+        showLastUpdate={showLastUpdate}
+        label="Status"
+        onReload={checkAll}
+      />
     </BaseTile>
   )
 }
@@ -175,6 +193,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
   const serverUrl = resolveServerUrl(config)
 
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null)
+  const [lastProjectInfoUpdate, setLastProjectInfoUpdate] = useState<number | null>(null)
 
   // Settings state
   const [hideNameInput, setHideNameInput] = useState(config.hideName ?? false)
@@ -184,6 +203,12 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     config.selectedServers ?? [],
   )
   const [checkIntervalInput, setCheckIntervalInput] = useState(String(config.checkInterval ?? 60))
+  const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 5
+  const showReloadBar = config.showReloadBar ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
+  const [reloadIntervalInput, setReloadIntervalInput] = useState<1 | 5 | 60>(reloadIntervalMinutes)
+  const [showReloadBarInput, setShowReloadBarInput] = useState(showReloadBar)
+  const [showLastUpdateInput, setShowLastUpdateInput] = useState(showLastUpdate)
 
   const fetchProjectInfo = useCallback(async () => {
     if (!serverUrl) return
@@ -202,6 +227,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
           project_logo: proj.project_logo ?? null,
         })
       }
+      setLastProjectInfoUpdate(Date.now())
     } catch {
       // silently ignore – the ServerTile already shows offline status
     }
@@ -231,6 +257,9 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     setMultiServerInput(config.multiServer ?? false)
     setSelectedServersInput(config.selectedServers ?? [])
     setCheckIntervalInput(String(config.checkInterval ?? 60))
+    setReloadIntervalInput(reloadIntervalMinutes)
+    setShowReloadBarInput(showReloadBar)
+    setShowLastUpdateInput(showLastUpdate)
   }
 
   const allPresetKeys = MONITORABLE_PRESETS.map((p) => p.key)
@@ -258,6 +287,9 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     multiServer: multiServerInput,
     selectedServers: selectedServersInput,
     checkInterval: Math.max(10, Number(checkIntervalInput) || 60),
+    reloadIntervalMinutes: reloadIntervalInput,
+    showReloadBar: showReloadBarInput,
+    showLastUpdate: showLastUpdateInput,
   })
 
   const extraSettings = (
@@ -339,7 +371,27 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
         onChange={(e) => setCheckIntervalInput(e.target.value)}
         sx={{ mb: 2 }}
       />
+      <ReloadIntervalSettings
+        intervalMinutes={reloadIntervalInput}
+        onIntervalChange={setReloadIntervalInput}
+        showBar={showReloadBarInput}
+        onShowBarChange={setShowReloadBarInput}
+        showLastUpdate={showLastUpdateInput}
+        onShowLastUpdateChange={setShowLastUpdateInput}
+        label="Aktualisierung"
+      />
     </>
+  )
+
+  const reloadBar = (
+    <ReloadIntervalBar
+      show={showReloadBar}
+      lastUpdate={lastProjectInfoUpdate}
+      intervalMs={reloadIntervalMinutes * 60 * 1000}
+      showLastUpdate={showLastUpdate}
+      label="Server"
+      onReload={fetchProjectInfo}
+    />
   )
 
   if (config.multiServer) {
@@ -365,6 +417,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
       onExtraSettingsOpen={handleExtraSettingsOpen}
       getChildExtraConfig={getChildExtraConfig}
       extraSettingsChildren={extraSettings}
+      afterContent={reloadBar}
     />
   )
 }
