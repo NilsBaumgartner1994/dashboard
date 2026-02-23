@@ -10,9 +10,6 @@ import {
   FormGroup,
   Divider,
   List,
-  ListItem,
-  ListItemText,
-  Chip,
   TextField,
   Tooltip,
   IconButton,
@@ -25,6 +22,9 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import CalendarEventItem, { isCalendarWeekMarker } from './CalendarEventItem'
+import CalendarEventDetailModal from './CalendarEventDetailModal'
+import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 
@@ -34,13 +34,8 @@ interface CalendarInfo {
   backgroundColor?: string
 }
 
-interface CalendarEvent {
-  id: string
-  summary: string
-  start: { dateTime?: string; date?: string }
-  end: { dateTime?: string; date?: string }
+type CalendarEvent = CalendarEventData & {
   colorId?: string
-  calendarId?: string
 }
 
 interface GoogleCalendarConfig {
@@ -48,17 +43,6 @@ interface GoogleCalendarConfig {
   backgroundImage?: string
   selectedCalendarIds?: string[]
   daysAhead?: number
-}
-
-/** Returns true if white text has sufficient contrast on the given hex background color. */
-function shouldUseWhiteText(hexColor: string): boolean {
-  const hex = hexColor.replace('#', '')
-  const r = parseInt(hex.slice(0, 2), 16) / 255
-  const g = parseInt(hex.slice(2, 4), 16) / 255
-  const b = parseInt(hex.slice(4, 6), 16) / 255
-  const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
-  const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)
-  return luminance < 0.179
 }
 
 // ─── Tile shown when no Google Client-ID is configured ────────────────────────
@@ -123,6 +107,10 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [modalEvents, setModalEvents] = useState<CalendarEvent[]>([])
   const [modalLoading, setModalLoading] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
+
+  // Event detail state
+  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
 
   const handleCopyError = () => {
     if (error) {
@@ -317,7 +305,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   // ── Group modal events by date ────────────────────────────────────────────
   type DateGroup = { dateLabel: string; events: CalendarEvent[] }
   const modalGrouped: DateGroup[] = []
-  for (const ev of modalEvents) {
+  for (const ev of modalEvents.filter((e) => !isCalendarWeekMarker(e))) {
     const dateKey = ev.start.dateTime
       ? new Date(ev.start.dateTime).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
       : ev.start.date
@@ -449,13 +437,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   )
 
   // ── Event formatting helper ──────────────────────────────────────────────
-  const formatTime = (ev: CalendarEvent): string => {
-    if (ev.start.dateTime) {
-      const d = new Date(ev.start.dateTime)
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-    }
-    return 'Ganztag'
-  }
+  // (formatEventTime is now in CalendarEventItem.tsx)
 
   // ── Calendar color lookup ────────────────────────────────────────────────
   const calColorMap: Record<string, string> = {}
@@ -465,7 +447,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
   // ── Group events by date ─────────────────────────────────────────────────
   const grouped: DateGroup[] = []
-  for (const ev of events) {
+  for (const ev of events.filter((e) => !isCalendarWeekMarker(e))) {
     const dateKey = ev.start.dateTime
       ? new Date(ev.start.dateTime).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
       : ev.start.date
@@ -561,23 +543,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
                 {group.events.map((ev) => {
                   const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
                   return (
-                    <ListItem key={ev.id} disableGutters disablePadding sx={{ mb: 0.5 }}>
-                      <Chip
-                        size="small"
-                        label={formatTime(ev)}
-                        sx={{
-                          mr: 1,
-                          minWidth: 52,
-                          fontSize: '0.65rem',
-                          backgroundColor: evColor ?? undefined,
-                          color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
-                        }}
-                      />
-                      <ListItemText
-                        primary={ev.summary}
-                        primaryTypographyProps={{ variant: 'body2', noWrap: true }}
-                      />
-                    </ListItem>
+                    <CalendarEventItem
+                      key={ev.id}
+                      ev={ev}
+                      color={evColor}
+                    />
                   )
                 })}
               </List>
@@ -646,25 +616,16 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
                 {group.events.map((ev) => {
                   const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
                   return (
-                    <ListItem key={ev.id} disableGutters disablePadding sx={{ mb: 0.75, alignItems: 'flex-start' }}>
-                      <Chip
-                        size="small"
-                        label={formatTime(ev)}
-                        sx={{
-                          mr: 1,
-                          mt: 0.25,
-                          minWidth: 52,
-                          flexShrink: 0,
-                          fontSize: '0.65rem',
-                          backgroundColor: evColor ?? undefined,
-                          color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
-                        }}
-                      />
-                      <ListItemText
-                        primary={ev.summary}
-                        primaryTypographyProps={{ variant: 'body2' }}
-                      />
-                    </ListItem>
+                    <CalendarEventItem
+                      key={ev.id}
+                      ev={ev}
+                      color={evColor}
+                      noWrap={false}
+                      onClick={() => {
+                        setDetailEvent(ev)
+                        setDetailOpen(true)
+                      }}
+                    />
                   )
                 })}
               </List>
@@ -672,6 +633,14 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           ))}
         </Box>
       </LargeModal>
+
+      {/* ── Event detail modal ───────────────────────────────────────────── */}
+      <CalendarEventDetailModal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        event={detailEvent}
+        color={detailEvent?.calendarId ? calColorMap[detailEvent.calendarId] : undefined}
+      />
     </>
   )
 }
