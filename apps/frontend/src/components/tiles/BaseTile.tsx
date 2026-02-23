@@ -27,9 +27,6 @@ import type { ReactNode } from 'react'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 
-const GRID_COLS = 32
-const GRID_ROWS = 18
-
 interface BaseTileProps {
   tile: TileInstance
   children?: ReactNode
@@ -53,22 +50,28 @@ export default function BaseTile({
   overrideBackgroundImage,
   style,
 }: BaseTileProps) {
-  const { updateTile, duplicateTile, removeTile } = useStore()
+  const { updateTile, duplicateTile, removeTile, editMode, gridColumns } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [nameInput, setNameInput] = useState((tile.config?.name as string) ?? '')
   const [bgInput, setBgInput] = useState((tile.config?.backgroundImage as string) ?? '')
+  const [maxWidthInput, setMaxWidthInput] = useState(
+    tile.config?.maxWidth != null ? String(tile.config.maxWidth) : ''
+  )
 
   const handleOpenSettings = () => {
     setNameInput((tile.config?.name as string) ?? '')
     setBgInput((tile.config?.backgroundImage as string) ?? '')
+    setMaxWidthInput(tile.config?.maxWidth != null ? String(tile.config.maxWidth) : '')
     onSettingsOpen?.()
     setSettingsOpen(true)
   }
 
   const handleSave = () => {
     const extraCfg = getExtraConfig?.() ?? {}
+    const parsed = parseInt(maxWidthInput, 10)
+    const parsedMaxWidth = maxWidthInput !== '' && !isNaN(parsed) ? Math.max(1, Math.min(gridColumns, parsed)) : undefined
     updateTile(tile.id, {
-      config: { ...tile.config, name: nameInput, backgroundImage: bgInput, ...extraCfg },
+      config: { ...tile.config, name: nameInput, backgroundImage: bgInput, maxWidth: parsedMaxWidth, ...extraCfg },
     })
     setSettingsOpen(false)
   }
@@ -78,14 +81,15 @@ export default function BaseTile({
 
   // Move/resize handlers – applied immediately without requiring Save
   const move = (dx: number, dy: number) => {
-    const nx = Math.max(0, Math.min(GRID_COLS - tile.w, tile.x + dx))
-    const ny = Math.max(0, Math.min(GRID_ROWS - tile.h, tile.y + dy))
+    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dx))
+    const ny = Math.max(0, tile.y + dy)
     updateTile(tile.id, { x: nx, y: ny })
   }
 
+  const configMaxWidth = tile.config?.maxWidth != null ? (tile.config.maxWidth as number) : gridColumns
   const resize = (dw: number, dh: number) => {
-    const nw = Math.max(1, Math.min(GRID_COLS - tile.x, tile.w + dw))
-    const nh = Math.max(1, Math.min(GRID_ROWS - tile.y, tile.h + dh))
+    const nw = Math.max(1, Math.min(Math.min(configMaxWidth, gridColumns - tile.x), tile.w + dw))
+    const nh = Math.max(1, tile.h + dh)
     updateTile(tile.id, { w: nw, h: nh })
   }
 
@@ -116,24 +120,26 @@ export default function BaseTile({
         />
       )}
 
-      {/* Always-visible settings gear – top right */}
-      <Tooltip title="Einstellungen">
-        <IconButton
-          size="small"
-          onClick={handleOpenSettings}
-          sx={{
-            position: 'absolute',
-            top: 4,
-            right: 4,
-            zIndex: 10,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-            color: '#fff',
-            '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' },
-          }}
-        >
-          <SettingsIcon fontSize="inherit" />
-        </IconButton>
-      </Tooltip>
+      {/* Settings gear – only visible in edit mode */}
+      {editMode && (
+        <Tooltip title="Einstellungen">
+          <IconButton
+            size="small"
+            onClick={handleOpenSettings}
+            sx={{
+              position: 'absolute',
+              top: 4,
+              right: 4,
+              zIndex: 10,
+              backgroundColor: 'rgba(0,0,0,0.35)',
+              color: '#fff',
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' },
+            }}
+          >
+            <SettingsIcon fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
+      )}
 
       {/* Tile content */}
       <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', p: 1 }}>{children}</Box>
@@ -199,6 +205,16 @@ export default function BaseTile({
             placeholder="https://example.com/image.jpg (leer = auto)"
             value={bgInput}
             onChange={(e) => setBgInput(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label={`Max. Breite (1–${gridColumns}, leer = unbegrenzt)`}
+            placeholder={String(gridColumns)}
+            value={maxWidthInput}
+            onChange={(e) => setMaxWidthInput(e.target.value)}
+            type="number"
+            inputProps={{ min: 1, max: gridColumns }}
             sx={{ mb: 2 }}
           />
 

@@ -17,8 +17,18 @@ import { useGoogleAuthStore } from '../store/useGoogleAuthStore'
 export default function SettingsScreen() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  const gridColumns = useStore((s) => s.gridColumns)
+  const setGridColumns = useStore((s) => s.setGridColumns)
   const { clientId, setClientId, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
+  const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
+
+  const handleSaveGridColumns = () => {
+    const parsed = parseInt(gridColumnsInput, 10)
+    if (!isNaN(parsed) && parsed >= 1) {
+      setGridColumns(parsed)
+    }
+  }
 
   return (
     <Box sx={{ p: 4, pt: 8 }}>
@@ -45,6 +55,28 @@ export default function SettingsScreen() {
             <BrightnessAutoIcon sx={{ mr: 1 }} /> Auto
           </ToggleButton>
         </ToggleButtonGroup>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Dashboard Breiten-Begrenzung (Spalten)
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Legt die maximale Anzahl an Rasterspalten fest (z. B. 32 = volle Breite). Kacheln können
+          nicht breiter als dieser Wert sein.
+        </Typography>
+        <TextField
+          fullWidth
+          label="Anzahl Spalten"
+          value={gridColumnsInput}
+          onChange={(e) => setGridColumnsInput(e.target.value)}
+          type="number"
+          inputProps={{ min: 1 }}
+          sx={{ mb: 2 }}
+        />
+        <Button variant="contained" onClick={handleSaveGridColumns}>
+          Speichern
+        </Button>
       </Paper>
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
