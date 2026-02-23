@@ -331,13 +331,21 @@ export default function SettingsScreen() {
           <code>{window.location.origin + window.location.pathname}</code>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Außerdem muss die{' '}
+          Außerdem müssen die{' '}
           <a
             href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
             target="_blank"
             rel="noopener noreferrer"
           >
             Google Calendar API
+          </a>{' '}
+          und die{' '}
+          <a
+            href="https://console.cloud.google.com/apis/library/tasks.googleapis.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google Tasks API
           </a>{' '}
           aktiviert sein. Im{' '}
           <a
@@ -347,10 +355,12 @@ export default function SettingsScreen() {
           >
             OAuth-Consent-Screen
           </a>{' '}
-          muss der folgende Scope hinzugefügt werden:
+          müssen folgende Scopes hinzugefügt werden:
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           <code>https://www.googleapis.com/auth/calendar.readonly</code>
+          <br />
+          <code>https://www.googleapis.com/auth/tasks</code>
         </Typography>
         <TextField
           fullWidth

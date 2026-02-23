@@ -328,7 +328,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
   const loginImplicit = useGoogleLogin({
     flow: 'implicit',
-    scope: 'https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks',
     onSuccess: (tokenResponse) => {
       isSilentRefresh.current = false
       addLog(`Access-Token empfangen (läuft ab in ${tokenResponse.expires_in ?? 3600}s), gespeichert`)
@@ -349,7 +349,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   // ── Google login – auth-code flow (used when clientSecret is set) ─────────
   const loginAuthCode = useGoogleLogin({
     flow: 'auth-code',
-    scope: 'https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks',
     onSuccess: async (codeResponse) => {
       addLog(`Autorisierungscode empfangen, tausche gegen Tokens aus...`)
       try {
