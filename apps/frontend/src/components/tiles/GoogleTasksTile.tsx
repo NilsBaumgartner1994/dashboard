@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google'
 import {
   Box,
@@ -153,6 +153,10 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
   const [newDue, setNewDue] = useState('')
   const [newRepeat, setNewRepeat] = useState('never')
   const [addLoading, setAddLoading] = useState(false)
+
+  // Quick-add inline state
+  const [quickAddTitle, setQuickAddTitle] = useState('')
+  const [quickAddLoading, setQuickAddLoading] = useState(false)
 
   // Settings
   const [settingsListId, setSettingsListId] = useState(selectedListId)
@@ -444,6 +448,39 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
     }
   }
 
+  const handleQuickAddKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && quickAddTitle.trim()) {
+      e.stopPropagation()
+      handleQuickAdd()
+    }
+  }
+
+  const handleQuickAdd = async () => {
+    if (!accessToken || !quickAddTitle.trim()) return
+    setQuickAddLoading(true)
+    try {
+      const res = await fetch(
+        `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(selectedListId)}/tasks`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: quickAddTitle.trim() }),
+        },
+      )
+      if (res.status === 401) { clearToken(); setError('Sitzung abgelaufen (401). Bitte erneut anmelden.'); return }
+      if (res.ok) {
+        const created: Task = await res.json()
+        setTasks((prev) => [created, ...prev])
+        setQuickAddTitle('')
+      }
+    } catch { /* ignore */ } finally {
+      setQuickAddLoading(false)
+    }
+  }
+
   const openAddDialog = () => {
     setNewTitle('')
     setNewNotes('')
@@ -687,6 +724,28 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
               </Typography>
             )}
           </Box>
+        )}
+
+        {/* Inline quick-add input */}
+        {tokenOk && !loading && !error && (
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Neue Aufgabe…"
+            value={quickAddTitle}
+            onChange={(e) => setQuickAddTitle(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleQuickAddKeyDown}
+            disabled={quickAddLoading}
+            sx={{ mt: 1 }}
+            InputProps={{
+              endAdornment: quickAddLoading ? (
+                <InputAdornment position="end">
+                  <CircularProgress size={14} />
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
         )}
       </BaseTile>
 
