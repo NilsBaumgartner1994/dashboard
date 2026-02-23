@@ -83,9 +83,30 @@ export default function SettingsScreen() {
         <Typography variant="subtitle1" gutterBottom>
           Google Kalender – OAuth Client-ID
         </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Trage hier deine Google OAuth 2.0 Client-ID ein. Sie wird von allen Google Kalender Kacheln
           gemeinsam genutzt.
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Beim Erstellen der Credentials in der{' '}
+          <a
+            href="https://console.cloud.google.com/apis/credentials"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google Cloud Console
+          </a>{' '}
+          (Typ: <em>Webanwendung</em>) trage folgende Werte ein:
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+          <strong>Autorisierte JavaScript-Quellen:</strong>
+          <br />
+          <code>{window.location.origin}</code>
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <strong>Autorisierte Weiterleitungs-URIs:</strong>
+          <br />
+          <code>{window.location.origin + window.location.pathname}</code>
         </Typography>
         <TextField
           fullWidth
