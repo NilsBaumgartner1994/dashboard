@@ -8,11 +8,14 @@ import {
   Button,
   Switch,
   FormControlLabel,
+  List,
 } from '@mui/material'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
 import SearchIcon from '@mui/icons-material/Search'
 import EventIcon from '@mui/icons-material/Event'
 import BaseTile from './BaseTile'
+import CalendarEventItem from './CalendarEventItem'
+import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
@@ -34,12 +37,7 @@ interface RouteConfig {
   showCoordinates?: boolean
 }
 
-interface CalendarEvent {
-  id: string
-  summary: string
-  start: { dateTime?: string; date?: string }
-  location?: string
-}
+type CalendarEvent = CalendarEventData
 
 async function geocodeName(name: string): Promise<{ lat: number; lon: number; name: string } | null> {
   try {
@@ -468,17 +466,17 @@ export default function RouteTile({ tile }: RouteTileProps) {
             </Typography>
           )}
           {config.useCalendar && nextEvent && (
-            <>
-              <Typography variant="body2" noWrap fontWeight="medium">
-                {nextEvent.summary}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {nextEvent.location}
-                {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
-                  <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
-                )}
-              </Typography>
-            </>
+            <List dense disablePadding sx={{ mt: 0.25 }}>
+              <CalendarEventItem ev={nextEvent} />
+              {nextEvent.location && (
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ pl: 0.5 }}>
+                  {nextEvent.location}
+                  {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
+                    <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
+                  )}
+                </Typography>
+              )}
+            </List>
           )}
           {!config.useCalendar && configHasDest ? (
             <Typography variant="body2" noWrap>
