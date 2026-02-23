@@ -2,6 +2,8 @@
 
 A personal dashboard with a Google Calendar tile. Deployed via GitHub Pages.
 
+My little helper.
+
 ## Google OAuth Setup
 
 To enable the Google Calendar tile you need a **Google OAuth 2.0 Client ID**.
