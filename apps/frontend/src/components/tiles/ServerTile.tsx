@@ -12,7 +12,6 @@ import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
-import { useStore } from '../../store/useStore'
 
 export interface ServerConfig {
   serverPreset?: string
@@ -21,6 +20,8 @@ export interface ServerConfig {
   checkInterval?: number // seconds
   backgroundImage?: string
   name?: string
+  hideName?: boolean
+  hideLastUpdate?: boolean
 }
 
 export const SERVER_PRESETS: Record<string, { label: string; url: string }> = {
@@ -56,22 +57,27 @@ interface ServerTileProps {
   tile: TileInstance
   /** Override the display name (used by RocketMealsTile to supply project_name) */
   overrideName?: string
+  /** Override background image (auto-resolved from API when config backgroundImage is empty) */
+  overrideBackgroundImage?: string
   /** Extra settings content rendered below the server-specific settings */
   extraSettingsChildren?: React.ReactNode
-  /** Called when the settings modal Save is clicked (for subclass extra saves) */
-  onExtraSave?: () => void
+  /** Returns extra config fields to merge from child tile (e.g. RocketMealsTile) */
+  getChildExtraConfig?: () => Record<string, unknown>
   /** Called when settings modal opens (for subclass to re-sync inputs) */
   onExtraSettingsOpen?: () => void
+  /** When true, the status chip is pinned to the bottom of the tile */
+  statusAtBottom?: boolean
 }
 
 export default function ServerTile({
   tile,
   overrideName,
+  overrideBackgroundImage,
   extraSettingsChildren,
-  onExtraSave,
+  getChildExtraConfig,
   onExtraSettingsOpen,
+  statusAtBottom,
 }: ServerTileProps) {
-  const updateTile = useStore((s) => s.updateTile)
   const config = (tile.config ?? {}) as ServerConfig
 
   const serverUrl = resolveServerUrl(config)
@@ -85,6 +91,9 @@ export default function ServerTile({
     serverUrl
 
   const checkInterval = config.checkInterval ?? 60
+
+  const hideName = config.hideName ?? false
+  const hideLastUpdate = config.hideLastUpdate ?? false
 
   // Settings form state
   const [presetInput, setPresetInput] = useState(config.serverPreset ?? 'custom')
@@ -131,18 +140,15 @@ export default function ServerTile({
     onExtraSettingsOpen?.()
   }
 
-  const handleSaveSettings = () => {
+  const getServerExtraConfig = (): Record<string, unknown> => {
     const resolvedPreset = presetInput in SERVER_PRESETS ? presetInput : 'custom'
-    updateTile(tile.id, {
-      config: {
-        ...tile.config,
-        serverPreset: resolvedPreset,
-        serverUrl: resolvedPreset === 'custom' ? urlInput : SERVER_PRESETS[resolvedPreset].url,
-        customName: nameInput,
-        checkInterval: Math.max(10, Number(intervalInput) || 60),
-      },
-    })
-    onExtraSave?.()
+    return {
+      serverPreset: resolvedPreset,
+      serverUrl: resolvedPreset === 'custom' ? urlInput : SERVER_PRESETS[resolvedPreset].url,
+      customName: nameInput,
+      checkInterval: Math.max(10, Number(intervalInput) || 60),
+      ...(getChildExtraConfig?.() ?? {}),
+    }
   }
 
   const statusColor: 'success' | 'error' | 'default' =
@@ -155,6 +161,26 @@ export default function ServerTile({
         : status === 'offline'
           ? 'Offline'
           : 'Unbekannt'
+
+  // Whether a background image is displayed (config value or override)
+  const hasBgImage = !!(config.backgroundImage || overrideBackgroundImage)
+
+  const statusChip = (
+    <Chip
+      size="small"
+      label={statusLabel}
+      color={statusColor}
+      icon={
+        status === 'online' ? (
+          <CheckCircleIcon />
+        ) : status === 'offline' ? (
+          <ErrorIcon />
+        ) : (
+          <HelpOutlineIcon />
+        )
+      }
+    />
+  )
 
   const settingsContent = (
     <>
@@ -207,62 +233,69 @@ export default function ServerTile({
     <BaseTile
       tile={tile}
       settingsChildren={settingsContent}
-      onSaveSettings={handleSaveSettings}
+      getExtraConfig={getServerExtraConfig}
       onSettingsOpen={handleSettingsOpen}
+      overrideBackgroundImage={overrideBackgroundImage}
     >
-      {/* Name */}
-      {displayName ? (
-        <Box
-          sx={{
-            display: 'inline-block',
-            backgroundColor: 'rgba(0,0,0,0.55)',
-            borderRadius: 1,
-            px: 1,
-            py: 0.25,
-            mb: 1,
-            maxWidth: 'calc(100% - 32px)', // leave room for gear icon
-          }}
-        >
-          <Typography
-            variant="subtitle2"
-            fontWeight="bold"
-            sx={{ color: '#fff', wordBreak: 'break-word' }}
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* Name */}
+        {!hideName && displayName ? (
+          <Box
+            sx={{
+              display: 'inline-block',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              borderRadius: 1,
+              px: 1,
+              py: 0.25,
+              mb: 1,
+              maxWidth: 'calc(100% - 32px)',
+            }}
           >
-            {displayName}
+            <Typography
+              variant="subtitle2"
+              fontWeight="bold"
+              sx={{ color: '#fff', wordBreak: 'break-word' }}
+            >
+              {displayName}
+            </Typography>
+          </Box>
+        ) : null}
+
+        {/* Last checked */}
+        {!hideLastUpdate && lastChecked && (
+          hasBgImage ? (
+            <Box
+              sx={{
+                display: 'inline-block',
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                borderRadius: 1,
+                px: 1,
+                py: 0.25,
+                mb: 0.5,
+              }}
+            >
+              <Typography variant="caption" sx={{ color: '#fff', display: 'block' }}>
+                {formatCheckedDate(lastChecked)}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              {formatCheckedDate(lastChecked)}
+            </Typography>
+          )
+        )}
+
+        {!serverUrl && (
+          <Typography variant="caption" color="text.secondary">
+            Kein Server konfiguriert. ⚙ drücken.
           </Typography>
+        )}
+
+        {/* Status chip – bottom or inline */}
+        <Box sx={statusAtBottom ? { mt: 'auto', pb: 0.5 } : { mt: 0.5 }}>
+          {statusChip}
         </Box>
-      ) : null}
-
-      {/* Status */}
-      <Box sx={{ mb: 0.5 }}>
-        <Chip
-          size="small"
-          label={statusLabel}
-          color={statusColor}
-          icon={
-            status === 'online' ? (
-              <CheckCircleIcon />
-            ) : status === 'offline' ? (
-              <ErrorIcon />
-            ) : (
-              <HelpOutlineIcon />
-            )
-          }
-        />
       </Box>
-
-      {/* Last checked */}
-      {lastChecked && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          {formatCheckedDate(lastChecked)}
-        </Typography>
-      )}
-
-      {!serverUrl && (
-        <Typography variant="caption" color="text.secondary">
-          Kein Server konfiguriert. ⚙ drücken.
-        </Typography>
-      )}
     </BaseTile>
   )
 }

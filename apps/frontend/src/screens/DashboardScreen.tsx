@@ -16,15 +16,9 @@ import {
 } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
 import AddIcon from '@mui/icons-material/Add'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import DeleteIcon from '@mui/icons-material/Delete'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
-import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import {
   DndContext,
   PointerSensor,
@@ -63,19 +57,6 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   rocketmeals: { label: 'Rocket Meals Server', component: RocketMealsTile },
 }
 
-type ControlDef = { label: string; icon: React.ReactNode; dx: number; dy: number; isResize: boolean }
-
-const TILE_CONTROLS: ControlDef[] = [
-  { label: 'Move left',  icon: <ArrowBackIcon fontSize="inherit" />,           dx: -1, dy:  0, isResize: false },
-  { label: 'Move right', icon: <ArrowForwardIcon fontSize="inherit" />,        dx:  1, dy:  0, isResize: false },
-  { label: 'Move up',    icon: <ArrowUpwardIcon fontSize="inherit" />,         dx:  0, dy: -1, isResize: false },
-  { label: 'Move down',  icon: <ArrowDownwardIcon fontSize="inherit" />,       dx:  0, dy:  1, isResize: false },
-  { label: 'Wider',      icon: <AddCircleOutlineIcon fontSize="inherit" />,    dx:  1, dy:  0, isResize: true  },
-  { label: 'Narrower',   icon: <RemoveCircleOutlineIcon fontSize="inherit" />, dx: -1, dy:  0, isResize: true  },
-  { label: 'Taller',     icon: <AddCircleOutlineIcon fontSize="inherit" />,    dx:  0, dy:  1, isResize: true  },
-  { label: 'Shorter',    icon: <RemoveCircleOutlineIcon fontSize="inherit" />, dx:  0, dy: -1, isResize: true  },
-]
-
 function DraggableTile({
   tile,
   editMode,
@@ -104,20 +85,6 @@ function DraggableTile({
     opacity: tile.hidden ? 0.4 : 1,
   }
 
-  const move = (dx: number, dy: number) => {
-    const step = isMobile ? MOBILE_STEP * dx : dx
-    const nx = Math.max(0, Math.min(GRID_COLS - tile.w, tile.x + step))
-    const ny = Math.max(0, Math.min(GRID_ROWS - tile.h, tile.y + dy))
-    updateTile(tile.id, { x: nx, y: ny })
-  }
-
-  const resize = (dw: number, dh: number) => {
-    const step = isMobile ? MOBILE_STEP * dw : dw
-    const nw = Math.max(isMobile ? MOBILE_STEP : 1, Math.min(GRID_COLS - tile.x, tile.w + step))
-    const nh = Math.max(1, Math.min(GRID_ROWS - tile.y, tile.h + dh))
-    updateTile(tile.id, { w: nw, h: nh })
-  }
-
   const TileComp = tileRegistry[tile.type]?.component ?? SampleTile
 
   return (
@@ -135,24 +102,14 @@ function DraggableTile({
             bottom: 4,
             right: 4,
             display: 'flex',
-            flexWrap: 'wrap',
             gap: 0.25,
             backgroundColor: 'background.paper',
             borderRadius: 1,
             p: 0.5,
             zIndex: 10,
-            maxWidth: 160,
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {TILE_CONTROLS.map(({ label, icon, dx, dy, isResize }) => (
-            <Tooltip key={label} title={label}>
-              <IconButton
-                size="small"
-                onClick={() => isResize ? resize(dx, dy) : move(dx, dy)}
-              >{icon}</IconButton>
-            </Tooltip>
-          ))}
           <Tooltip title={tile.hidden ? 'Show' : 'Hide'}>
             <IconButton size="small" onClick={() => updateTile(tile.id, { hidden: !tile.hidden })}>
               {tile.hidden ? <VisibilityIcon fontSize="inherit" /> : <VisibilityOffIcon fontSize="inherit" />}

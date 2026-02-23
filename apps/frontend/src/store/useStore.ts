@@ -47,7 +47,7 @@ export const useStore = create<AppState>()(
               x: 0,
               y: 0,
               w: 4,
-              h: 2,
+              h: type === 'server' || type === 'rocketmeals' ? 4 : 2,
               hidden: false,
             },
           ],
