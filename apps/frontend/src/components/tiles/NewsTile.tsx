@@ -36,9 +36,9 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
   { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/' },
 ]
 
-// Build a Google News search page URL for a given German search query (scraped, not RSS)
+// Build a Google News RSS feed URL for a given German search query
 const buildGoogleNewsUrl = (query: string) =>
-  `https://news.google.com/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
+  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
 
 // CORS proxies for browser RSS fetching (tried in order until one succeeds)
 const CORS_PROXIES = [
@@ -56,6 +56,16 @@ function isGoogleNewsHtmlUrl(url: string): boolean {
     return u.hostname === 'news.google.com' && !u.pathname.startsWith('/rss/')
   } catch {
     return false
+  }
+}
+
+/** Convert a Google News HTML page URL to its RSS feed equivalent. */
+function toGoogleNewsRssUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    return `https://news.google.com/rss${u.pathname}${u.search}`
+  } catch {
+    return url
   }
 }
 
@@ -223,45 +233,22 @@ async function tryFetchText(fetchUrl: string): Promise<string | null> {
 
 async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null; debugInfo: string[] }> {
   const debugInfo: string[] = []
+
+  // Convert Google News HTML page URLs to their RSS equivalents so we get
+  // structured data instead of relying on client-side-rendered HTML.
+  if (isGoogleNewsHtmlUrl(url)) {
+    const rssUrl = toGoogleNewsRssUrl(url)
+    debugInfo.push(`Google News URL → RSS: ${rssUrl}`)
+    url = rssUrl
+  }
+
   const sourceLabel = (() => {
     try { return new URL(url).hostname.replace('www.', '') }
     catch { return url }
   })()
   debugInfo.push(`URL: ${url}`)
 
-  // For Google News HTML pages, fetch and parse the HTML directly to get images
-  if (isGoogleNewsHtmlUrl(url)) {
-    let html: string | null = null
-    for (const proxy of CORS_PROXIES) {
-      html = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
-      if (html) {
-        debugInfo.push(`✓ Proxy erfolgreich: ${proxy}`)
-        break
-      } else {
-        debugInfo.push(`✗ Proxy fehlgeschlagen: ${proxy}`)
-      }
-    }
-    if (!html && backendUrl) {
-      html = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
-      if (html) {
-        debugInfo.push(`✓ Backend-Proxy erfolgreich`)
-      } else {
-        debugInfo.push(`✗ Backend-Proxy fehlgeschlagen`)
-      }
-    }
-    if (html) {
-      debugInfo.push(`HTML geladen (${html.length} Zeichen)`)
-      const items = parseGoogleNewsHtml(html, sourceLabel, url)
-      debugInfo.push(`Artikel gefunden: ${items.length}`)
-      if (items.length === 0) {
-        debugInfo.push(`Kein Artikel konnte geparst werden – HTML-Struktur möglicherweise geändert (keine <article>-Elemente gefunden)`)
-      }
-      if (items.length > 0) return { items, error: null, debugInfo }
-    }
-    return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
-  }
-
-  // For all other URLs use the RSS path
+  // For all URLs use the RSS path
   let text: string | null = null
   for (const proxy of CORS_PROXIES) {
     text = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
