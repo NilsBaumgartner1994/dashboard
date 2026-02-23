@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Ensure common Node.js/yarn binary locations are in PATH (needed when run from cron)
+export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.yarn/bin:$HOME/.local/bin:$PATH"
+# Source nvm if available
+[ -s "$HOME/.nvm/nvm.sh" ] && source "$HOME/.nvm/nvm.sh"
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_FILE="${BACKUP_FILE:-$REPO_DIR/../envCopy}"
 
