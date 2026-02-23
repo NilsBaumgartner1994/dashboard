@@ -13,6 +13,7 @@ import {
   ListItem,
   ListItemText,
   Chip,
+  TextField,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
@@ -23,6 +24,7 @@ import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore
 interface CalendarInfo {
   id: string
   summary: string
+  backgroundColor?: string
 }
 
 interface CalendarEvent {
@@ -30,12 +32,26 @@ interface CalendarEvent {
   summary: string
   start: { dateTime?: string; date?: string }
   end: { dateTime?: string; date?: string }
+  colorId?: string
+  calendarId?: string
 }
 
 interface GoogleCalendarConfig {
   name?: string
   backgroundImage?: string
   selectedCalendarIds?: string[]
+  daysAhead?: number
+}
+
+/** Returns true if white text has sufficient contrast on the given hex background color. */
+function shouldUseWhiteText(hexColor: string): boolean {
+  const hex = hexColor.replace('#', '')
+  const r = parseInt(hex.slice(0, 2), 16) / 255
+  const g = parseInt(hex.slice(2, 4), 16) / 255
+  const b = parseInt(hex.slice(4, 6), 16) / 255
+  const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)
+  return luminance < 0.179
 }
 
 // ─── Tile shown when no Google Client-ID is configured ────────────────────────
@@ -62,6 +78,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const { accessToken, tokenExpiry, setToken, clearToken } = useGoogleAuthStore()
   const config = (tile.config ?? {}) as GoogleCalendarConfig
   const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
+  const daysAhead = config.daysAhead ?? 7
 
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
@@ -73,6 +90,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
   // Settings form state (calendar selection inside settings modal)
   const [settingsCalendars, setSettingsCalendars] = useState<(CalendarInfo & { selected: boolean })[]>([])
+  const [settingsDaysAhead, setSettingsDaysAhead] = useState(String(daysAhead))
 
   // ── Google login (implicit flow) ─────────────────────────────────────────
   const login = useGoogleLogin({
@@ -97,18 +115,19 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     }
     if (!res.ok) throw new Error(`Kalender laden fehlgeschlagen (${res.status})`)
     const data = await res.json()
-    return (data.items ?? []).map((c: { id: string; summary: string }) => ({
+    return (data.items ?? []).map((c: CalendarInfo & { backgroundColor?: string }) => ({
       id: c.id,
       summary: c.summary,
+      backgroundColor: c.backgroundColor,
     }))
   }, [clearToken])
 
-  // ── Fetch today's events ─────────────────────────────────────────────────
-  const fetchTodayEvents = useCallback(
-    async (token: string, calIds: string[]): Promise<CalendarEvent[]> => {
+  // ── Fetch events for N days ahead ────────────────────────────────────────
+  const fetchEvents = useCallback(
+    async (token: string, calIds: string[], days: number): Promise<CalendarEvent[]> => {
       const now = new Date()
       const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
-      const timeMax = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString()
+      const timeMax = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days).toISOString()
 
       const targetCals = calIds.length > 0 ? calIds : ['primary']
       const results = await Promise.all(
@@ -129,7 +148,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           }
           if (!res.ok) return []
           const data = await res.json()
-          return (data.items ?? []) as CalendarEvent[]
+          return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
         }),
       )
       return results.flat().sort((a, b) => {
@@ -153,17 +172,15 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           selectedCalendarIds.length > 0
             ? selectedCalendarIds
             : cals.map((c) => c.id)
-        return fetchTodayEvents(accessToken, ids)
+        return fetchEvents(accessToken, ids, daysAhead)
       })
       .then(setEvents)
       .catch((err: Error) => {
         if (err.message !== 'TOKEN_EXPIRED') setError(err.message)
       })
       .finally(() => setLoading(false))
-  // Re-run when token status, the token itself, or the selected calendar list changes.
-  // fetchCalendars/fetchTodayEvents are stable (only depend on clearToken).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenOk, accessToken, selectedCalendarIds.join(','), fetchCalendars, fetchTodayEvents])
+  }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents])
 
   // ── Settings helpers ─────────────────────────────────────────────────────
   const handleSettingsOpen = () => {
@@ -174,11 +191,13 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           selectedCalendarIds.length === 0 ? true : selectedCalendarIds.includes(c.id),
       })),
     )
+    setSettingsDaysAhead(String(daysAhead))
   }
 
   const getExtraConfig = () => {
     const ids = settingsCalendars.filter((c) => c.selected).map((c) => c.id)
-    return { selectedCalendarIds: ids }
+    const parsed = parseInt(settingsDaysAhead, 10)
+    return { selectedCalendarIds: ids, daysAhead: !isNaN(parsed) && parsed >= 1 ? parsed : 7 }
   }
 
   const toggleCalendar = (id: string) => {
@@ -193,6 +212,16 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       <Divider sx={{ mb: 2 }}>Google Kalender</Divider>
       {tokenOk ? (
         <>
+          <TextField
+            fullWidth
+            label="Tage im Voraus laden"
+            type="number"
+            inputProps={{ min: 1, max: 30 }}
+            value={settingsDaysAhead}
+            onChange={(e) => setSettingsDaysAhead(e.target.value)}
+            size="small"
+            sx={{ mb: 2 }}
+          />
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Kalender auswählen (leer = alle)
           </Typography>
@@ -209,6 +238,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
                   <Checkbox
                     checked={cal.selected}
                     onChange={() => toggleCalendar(cal.id)}
+                    sx={cal.backgroundColor ? { color: cal.backgroundColor, '&.Mui-checked': { color: cal.backgroundColor } } : undefined}
                   />
                 }
                 label={cal.summary}
@@ -238,15 +268,27 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     return 'Ganztag'
   }
 
-  // ── Tile body ────────────────────────────────────────────────────────────
-  const today = new Date()
-  const todayLabel = today.toLocaleDateString('de-DE', {
-    weekday: 'long',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  })
+  // ── Calendar color lookup ────────────────────────────────────────────────
+  const calColorMap: Record<string, string> = {}
+  for (const cal of calendars) {
+    if (cal.backgroundColor) calColorMap[cal.id] = cal.backgroundColor
+  }
 
+  // ── Group events by date ─────────────────────────────────────────────────
+  type DateGroup = { dateLabel: string; events: CalendarEvent[] }
+  const grouped: DateGroup[] = []
+  for (const ev of events) {
+    const dateKey = ev.start.dateTime
+      ? new Date(ev.start.dateTime).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+      : ev.start.date
+      ? new Date(ev.start.date + 'T00:00:00').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+      : 'Unbekannt'
+    const existing = grouped.find((g) => g.dateLabel === dateKey)
+    if (existing) existing.events.push(ev)
+    else grouped.push({ dateLabel: dateKey, events: [ev] })
+  }
+
+  // ── Tile body ────────────────────────────────────────────────────────────
   return (
     <BaseTile
       tile={tile}
@@ -261,9 +303,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           {(tile.config?.name as string) || 'Google Kalender'}
         </Typography>
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        {todayLabel}
-      </Typography>
 
       {/* Body */}
       {!tokenOk && (
@@ -292,26 +331,49 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
       {tokenOk && !loading && !error && events.length === 0 && (
         <Typography variant="body2" color="text.secondary">
-          Keine Ereignisse heute.
+          Keine Ereignisse in den nächsten {daysAhead} Tagen.
         </Typography>
       )}
 
-      {tokenOk && !loading && events.length > 0 && (
-        <List dense disablePadding>
-          {events.map((ev) => (
-            <ListItem key={ev.id} disableGutters disablePadding sx={{ mb: 0.5 }}>
-              <Chip
-                size="small"
-                label={formatTime(ev)}
-                sx={{ mr: 1, minWidth: 52, fontSize: '0.65rem' }}
-              />
-              <ListItemText
-                primary={ev.summary}
-                primaryTypographyProps={{ variant: 'body2', noWrap: true }}
-              />
-            </ListItem>
+      {tokenOk && !loading && grouped.length > 0 && (
+        <Box sx={{ overflow: 'auto', flex: 1 }}>
+          {grouped.map((group) => (
+            <Box key={group.dateLabel}>
+              <Typography
+                variant="caption"
+                fontWeight="bold"
+                color="text.secondary"
+                sx={{ display: 'block', mt: 0.5, mb: 0.25, textTransform: 'uppercase', letterSpacing: 0.5 }}
+              >
+                {group.dateLabel}
+              </Typography>
+              <List dense disablePadding>
+                {group.events.map((ev) => {
+                  const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
+                  return (
+                    <ListItem key={ev.id} disableGutters disablePadding sx={{ mb: 0.5 }}>
+                      <Chip
+                        size="small"
+                        label={formatTime(ev)}
+                        sx={{
+                          mr: 1,
+                          minWidth: 52,
+                          fontSize: '0.65rem',
+                          backgroundColor: evColor ?? undefined,
+                          color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                        }}
+                      />
+                      <ListItemText
+                        primary={ev.summary}
+                        primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                      />
+                    </ListItem>
+                  )
+                })}
+              </List>
+            </Box>
           ))}
-        </List>
+        </Box>
       )}
     </BaseTile>
   )
