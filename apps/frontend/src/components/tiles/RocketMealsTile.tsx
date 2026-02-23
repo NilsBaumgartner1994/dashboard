@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Typography } from '@mui/material'
+import { Typography, FormControlLabel, Switch } from '@mui/material'
 import ServerTile, { resolveServerUrl } from './ServerTile'
 import type { ServerConfig } from './ServerTile'
-import { useStore } from '../../store/useStore'
 import type { TileInstance } from '../../store/useStore'
 
 interface ProjectInfo {
@@ -15,12 +14,15 @@ interface RocketMealsTileProps {
 }
 
 export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
-  const updateTile = useStore((s) => s.updateTile)
   const config = (tile.config ?? {}) as ServerConfig
 
   const serverUrl = resolveServerUrl(config)
 
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null)
+
+  // Settings toggle state (synced to config on save)
+  const [hideNameInput, setHideNameInput] = useState(config.hideName ?? false)
+  const [hideLastUpdateInput, setHideLastUpdateInput] = useState(config.hideLastUpdate ?? false)
 
   const fetchProjectInfo = useCallback(async () => {
     if (!serverUrl) return
@@ -34,30 +36,27 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
       }
       const proj = json?.data?.project
       if (proj) {
-        const info: ProjectInfo = {
+        setProjectInfo({
           project_name: proj.project_name ?? null,
           project_logo: proj.project_logo ?? null,
-        }
-        setProjectInfo(info)
-
-        // Persist logo as background image when none is set yet
-        if (info.project_logo && !config.backgroundImage) {
-          const logoUrl = `${serverUrl}/assets/${info.project_logo}`
-          updateTile(tile.id, {
-            config: { ...tile.config, backgroundImage: logoUrl },
-          })
-        }
+        })
       }
     } catch {
       // silently ignore – the ServerTile already shows offline status
     }
-  }, [serverUrl, config.backgroundImage, tile.id, tile.config, updateTile])
+  }, [serverUrl])
 
   useEffect(() => {
     fetchProjectInfo()
   }, [fetchProjectInfo])
 
-  // Display name: customName > config.name > project_name from API
+  // Auto-resolve background image: use API logo when config backgroundImage is empty/unset
+  const autoBackgroundImage =
+    serverUrl && projectInfo?.project_logo
+      ? `${serverUrl}/assets/${projectInfo.project_logo}`
+      : undefined
+
+  // Display name: server customName > config.name > project_name from API
   const projectName = projectInfo?.project_name ?? null
   const overrideName =
     (config.customName ?? '').trim() ||
@@ -65,16 +64,52 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     projectName ||
     ''
 
+  const handleExtraSettingsOpen = () => {
+    setHideNameInput(config.hideName ?? false)
+    setHideLastUpdateInput(config.hideLastUpdate ?? false)
+  }
+
+  const getChildExtraConfig = (): Record<string, unknown> => ({
+    hideName: hideNameInput,
+    hideLastUpdate: hideLastUpdateInput,
+  })
+
   return (
     <ServerTile
       tile={tile}
       overrideName={overrideName || undefined}
+      overrideBackgroundImage={autoBackgroundImage}
+      statusAtBottom
+      onExtraSettingsOpen={handleExtraSettingsOpen}
+      getChildExtraConfig={getChildExtraConfig}
       extraSettingsChildren={
-        projectName ? (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            Projektname: {projectName}
-          </Typography>
-        ) : undefined
+        <>
+          {projectName ? (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              Projektname: {projectName}
+            </Typography>
+          ) : null}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={hideNameInput}
+                onChange={(e) => setHideNameInput(e.target.checked)}
+              />
+            }
+            label="Namen verbergen"
+            sx={{ display: 'block', mb: 1 }}
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={hideLastUpdateInput}
+                onChange={(e) => setHideLastUpdateInput(e.target.checked)}
+              />
+            }
+            label="Update-Zeit verbergen"
+            sx={{ display: 'block', mb: 1 }}
+          />
+        </>
       }
     />
   )

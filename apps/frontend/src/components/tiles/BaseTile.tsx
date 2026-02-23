@@ -10,22 +10,35 @@ import {
   DialogActions,
   Button,
   TextField,
+  Typography,
+  Divider,
 } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import type { ReactNode } from 'react'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 
+const GRID_COLS = 32
+const GRID_ROWS = 18
+
 interface BaseTileProps {
   tile: TileInstance
   children?: ReactNode
-  /** Tile-specific settings rendered inside the settings modal */
+  /** Tile-specific settings rendered inside the settings modal (shown first) */
   settingsChildren?: ReactNode
-  /** Called when the modal "Save" button is clicked (after base settings are persisted) */
-  onSaveSettings?: () => void
+  /** Returns extra config fields to merge into the single save call */
+  getExtraConfig?: () => Record<string, unknown>
   /** Called when the settings modal is opened (allows tiles to re-sync form state) */
   onSettingsOpen?: () => void
+  /** Override background image (e.g. auto-resolved from API) when config backgroundImage is empty */
+  overrideBackgroundImage?: string
   style?: React.CSSProperties
 }
 
@@ -33,8 +46,9 @@ export default function BaseTile({
   tile,
   children,
   settingsChildren,
-  onSaveSettings,
+  getExtraConfig,
   onSettingsOpen,
+  overrideBackgroundImage,
   style,
 }: BaseTileProps) {
   const { updateTile, duplicateTile } = useStore()
@@ -50,14 +64,28 @@ export default function BaseTile({
   }
 
   const handleSave = () => {
+    const extraCfg = getExtraConfig?.() ?? {}
     updateTile(tile.id, {
-      config: { ...tile.config, name: nameInput, backgroundImage: bgInput },
+      config: { ...tile.config, name: nameInput, backgroundImage: bgInput, ...extraCfg },
     })
-    onSaveSettings?.()
     setSettingsOpen(false)
   }
 
-  const bgImage = tile.config?.backgroundImage as string | undefined
+  const configBgImage = tile.config?.backgroundImage as string | undefined
+  const bgImage = configBgImage || overrideBackgroundImage || undefined
+
+  // Move/resize handlers – applied immediately without requiring Save
+  const move = (dx: number, dy: number) => {
+    const nx = Math.max(0, Math.min(GRID_COLS - tile.w, tile.x + dx))
+    const ny = Math.max(0, Math.min(GRID_ROWS - tile.h, tile.y + dy))
+    updateTile(tile.id, { x: nx, y: ny })
+  }
+
+  const resize = (dw: number, dh: number) => {
+    const nw = Math.max(1, Math.min(GRID_COLS - tile.x, tile.w + dw))
+    const nh = Math.max(1, Math.min(GRID_ROWS - tile.y, tile.h + dh))
+    updateTile(tile.id, { w: nw, h: nh })
+  }
 
   return (
     <Paper
@@ -129,6 +157,10 @@ export default function BaseTile({
       >
         <DialogTitle>Kachel Einstellungen</DialogTitle>
         <DialogContent dividers>
+          {/* Tile-specific settings first */}
+          {settingsChildren}
+
+          <Divider sx={{ my: 2 }}>Kachel</Divider>
           <TextField
             fullWidth
             label="Name"
@@ -139,12 +171,52 @@ export default function BaseTile({
           <TextField
             fullWidth
             label="Hintergrundbild URL"
-            placeholder="https://example.com/image.jpg"
+            placeholder="https://example.com/image.jpg (leer = auto)"
             value={bgInput}
             onChange={(e) => setBgInput(e.target.value)}
             sx={{ mb: 2 }}
           />
-          {settingsChildren}
+
+          {/* Position & size controls – applied immediately */}
+          <Divider sx={{ my: 2 }}>Position & Größe</Divider>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+            <Typography variant="body2" sx={{ minWidth: 24 }}>X</Typography>
+            <Tooltip title="Links">
+              <IconButton size="small" onClick={() => move(-1, 0)}><ArrowBackIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Typography variant="body2" sx={{ minWidth: 20, textAlign: 'center' }}>{tile.x}</Typography>
+            <Tooltip title="Rechts">
+              <IconButton size="small" onClick={() => move(1, 0)}><ArrowForwardIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="body2">Breite</Typography>
+            <Tooltip title="Schmaler">
+              <IconButton size="small" onClick={() => resize(-1, 0)}><RemoveCircleOutlineIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Typography variant="body2" sx={{ minWidth: 20, textAlign: 'center' }}>{tile.w}</Typography>
+            <Tooltip title="Breiter">
+              <IconButton size="small" onClick={() => resize(1, 0)}><AddCircleOutlineIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Typography variant="body2" sx={{ minWidth: 24 }}>Y</Typography>
+            <Tooltip title="Hoch">
+              <IconButton size="small" onClick={() => move(0, -1)}><ArrowUpwardIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Typography variant="body2" sx={{ minWidth: 20, textAlign: 'center' }}>{tile.y}</Typography>
+            <Tooltip title="Runter">
+              <IconButton size="small" onClick={() => move(0, 1)}><ArrowDownwardIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="body2">Höhe</Typography>
+            <Tooltip title="Kürzer">
+              <IconButton size="small" onClick={() => resize(0, -1)}><RemoveCircleOutlineIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+            <Typography variant="body2" sx={{ minWidth: 20, textAlign: 'center' }}>{tile.h}</Typography>
+            <Tooltip title="Länger">
+              <IconButton size="small" onClick={() => resize(0, 1)}><AddCircleOutlineIcon fontSize="inherit" /></IconButton>
+            </Tooltip>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button
