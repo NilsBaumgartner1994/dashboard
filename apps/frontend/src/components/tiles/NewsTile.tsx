@@ -37,9 +37,9 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
   { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/' },
 ]
 
-// Build a Google News RSS feed URL for a given German search query
+// Build a Google News RSS feed URL for a given search query
 const buildGoogleNewsUrl = (query: string) =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
+  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}`
 
 // CORS proxies for browser RSS fetching (tried in order until one succeeds)
 const CORS_PROXIES = [
