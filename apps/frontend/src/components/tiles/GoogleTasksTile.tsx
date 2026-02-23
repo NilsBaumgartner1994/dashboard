@@ -424,7 +424,6 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
           <ListItem key={task.id} disableGutters dense sx={{ alignItems: 'flex-start', pr: 4 }}>
             <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
               <Checkbox
-                edge="start"
                 checked={task.status === 'completed'}
                 size="small"
                 onChange={() => handleComplete(task)}

@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface Note {
+  id: string
+  title: string
+  content: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface TileInstance {
   id: string
   type: string
@@ -15,6 +23,7 @@ export interface TileInstance {
 interface AppState {
   theme: 'light' | 'dark' | 'auto'
   tiles: TileInstance[]
+  notes: Note[]
   editMode: boolean
   gridColumns: number
   defaultLat?: number
@@ -24,6 +33,10 @@ interface AppState {
   backendUrl: string
   setTheme: (t: 'light' | 'dark' | 'auto') => void
   setTiles: (tiles: TileInstance[]) => void
+  setNotes: (notes: Note[]) => void
+  addNote: (title: string, content: string) => void
+  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'content'>>) => void
+  removeNote: (id: string) => void
   toggleEditMode: () => void
   setGridColumns: (n: number) => void
   setDefaultLocation: (lat: number, lon: number, name: string) => void
@@ -43,6 +56,7 @@ export const useStore = create<AppState>()(
         { id: 'tile-1', type: 'sample', x: 0, y: 0, w: 4, h: 2, hidden: false },
         { id: 'tile-2', type: 'sample', x: 4, y: 0, w: 4, h: 2, hidden: false },
       ],
+      notes: [],
       editMode: false,
       gridColumns: 32,
       defaultLat: undefined,
@@ -52,6 +66,27 @@ export const useStore = create<AppState>()(
       backendUrl: 'https://test.rocket-meals.de/my-dashboard/api',
       setTheme: (theme) => set({ theme }),
       setTiles: (tiles) => set({ tiles }),
+      setNotes: (notes) => set({ notes }),
+      addNote: (title, content) =>
+        set((s) => ({
+          notes: [
+            ...s.notes,
+            {
+              id: `note-${crypto.randomUUID()}`,
+              title: title || 'Neue Notiz',
+              content,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+        })),
+      updateNote: (id, patch) =>
+        set((s) => ({
+          notes: s.notes.map((n) =>
+            n.id === id ? { ...n, ...patch, updatedAt: Date.now() } : n,
+          ),
+        })),
+      removeNote: (id) => set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
       toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),
       setGridColumns: (gridColumns) => set({ gridColumns }),
       setDefaultLocation: (defaultLat, defaultLon, defaultLocationName) =>
@@ -60,7 +95,7 @@ export const useStore = create<AppState>()(
       setBackendUrl: (backendUrl) => set({ backendUrl }),
       addTile: (type) =>
         set((s) => {
-          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks'].includes(type) ? 4 : 2
+          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks', 'notes'].includes(type) ? 4 : 2
           const bottomY = s.tiles.reduce((max, t) => Math.max(max, t.y + t.h), 0)
           return {
             tiles: [
