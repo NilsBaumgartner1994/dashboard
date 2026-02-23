@@ -24,6 +24,8 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import SettingsIcon from '@mui/icons-material/Settings'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import ReloadIntervalBar from './ReloadIntervalBar'
+import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -34,9 +36,9 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
   { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/' },
 ]
 
-// Build a Google News RSS URL for a given German search query
+// Build a Google News search page URL for a given German search query (scraped, not RSS)
 const buildGoogleNewsUrl = (query: string) =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
+  `https://news.google.com/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
 
 // CORS proxies for browser RSS fetching (tried in order until one succeeds)
 const CORS_PROXIES = [
@@ -142,6 +144,9 @@ interface NewsConfig {
   interval?: number       // seconds per item
   name?: string
   backgroundImage?: string
+  reloadIntervalMinutes?: 1 | 5 | 60
+  showReloadBar?: boolean
+  showLastUpdate?: boolean
 }
 
 interface NewsTileProps {
@@ -226,26 +231,6 @@ async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: New
       const items = parseGoogleNewsHtml(html, sourceLabel)
       if (items.length > 0) return { items, error: null }
     }
-    // Fallback: convert to RSS when HTML scraping yields no results
-    const rssUrl = (() => {
-      try {
-        const u = new URL(url)
-        u.pathname = '/rss' + u.pathname
-        return u.toString()
-      } catch { return url }
-    })()
-    let text: string | null = null
-    for (const proxy of CORS_PROXIES) {
-      text = await tryFetchText(`${proxy}${encodeURIComponent(rssUrl)}`)
-      if (text) break
-    }
-    if (!text && backendUrl) {
-      text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(rssUrl)}`)
-    }
-    if (text) {
-      const items = parseRssXml(text, sourceLabel)
-      return { items, error: null }
-    }
     return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
   }
 
@@ -297,7 +282,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const config = (tile.config ?? {}) as NewsConfig
   const feeds: string[] = config.feeds ?? []
   const interval = config.interval ?? 10
+  const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 5
+  const showReloadBar = config.showReloadBar ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
   const backendUrl = useStore((s) => s.backendUrl)
+  const debugMode = useStore((s) => s.debugMode)
   const openModal = useUIStore((s) => s.openModal)
   const closeModal = useUIStore((s) => s.closeModal)
 
@@ -307,12 +296,16 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [fetchErrors, setFetchErrors] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [imageCache, setImageCache] = useState<Record<string, string>>({})
+  const [lastFeedUpdate, setLastFeedUpdate] = useState<number | null>(null)
 
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
   const [customUrlInput, setCustomUrlInput] = useState('')
   const [googleSearchInput, setGoogleSearchInput] = useState('')
   const [intervalInput, setIntervalInput] = useState(String(config.interval ?? 10))
+  const [reloadIntervalInput, setReloadIntervalInput] = useState<1 | 5 | 60>(reloadIntervalMinutes)
+  const [showReloadBarInput, setShowReloadBarInput] = useState(showReloadBar)
+  const [showLastUpdateInput, setShowLastUpdateInput] = useState(showLastUpdate)
 
   // Timers / refs
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -373,6 +366,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
       setItems(allItems)
       setFetchErrors(errors)
       setCurrentIndex(0)
+      setLastFeedUpdate(Date.now())
     } finally {
       setLoading(false)
     }
@@ -400,6 +394,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
     setCustomUrlInput('')
     setGoogleSearchInput('')
     setIntervalInput(String(config.interval ?? 10))
+    setReloadIntervalInput(reloadIntervalMinutes)
+    setShowReloadBarInput(showReloadBar)
+    setShowLastUpdateInput(showLastUpdate)
   }
 
   const togglePreset = (url: string) => {
@@ -432,6 +429,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const getExtraConfig = (): Record<string, unknown> => ({
     feeds: feedsInput,
     interval: Math.max(5, Number(intervalInput) || 10),
+    reloadIntervalMinutes: reloadIntervalInput,
+    showReloadBar: showReloadBarInput,
+    showLastUpdate: showLastUpdateInput,
   })
 
   // Settings content
@@ -480,7 +480,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
       {/* Google News keyword search */}
       <Divider sx={{ mb: 2 }}>Google News Suche</Divider>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Suchbegriff eingeben – erzeugt einen Google News RSS-Feed für diesen Begriff.
+        Suchbegriff eingeben – lädt die Google News Seite für diesen Begriff und parst die Einträge.
       </Typography>
       <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
         <TextField
@@ -540,6 +540,15 @@ export default function NewsTile({ tile }: NewsTileProps) {
         onChange={(e) => setIntervalInput(e.target.value)}
         sx={{ mb: 2 }}
       />
+      <ReloadIntervalSettings
+        intervalMinutes={reloadIntervalInput}
+        onIntervalChange={setReloadIntervalInput}
+        showBar={showReloadBarInput}
+        onShowBarChange={setShowReloadBarInput}
+        showLastUpdate={showLastUpdateInput}
+        onShowLastUpdateChange={setShowLastUpdateInput}
+        label="Aktualisierung"
+      />
     </>
   )
 
@@ -547,6 +556,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const currentImageUrl = currentItem
     ? (currentItem.imageUrl || imageCache[currentItem.link] || undefined)
     : undefined
+
+  // Use a ref so the reload callback always sees the latest feeds without causing extra re-renders
+  const feedsRef = useRef(feeds)
+  useEffect(() => { feedsRef.current = feeds })
+  const handleFeedsReload = useCallback(() => { fetchAllFeeds(feedsRef.current) }, [fetchAllFeeds])
 
   return (
     <>
@@ -613,7 +627,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 px: 1.5,
                 py: 1,
                 mx: -1,
-                mb: -1,
+                mb: showReloadBar ? 0 : -1,
               }}
             >
               {currentItem.source && (
@@ -650,8 +664,43 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 </Typography>
               )}
             </Box>
+
+            {/* Debug: current news item as JSON */}
+            {debugMode && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                  Debug – Aktueller Eintrag:
+                </Typography>
+                <Box
+                  component="pre"
+                  role="region"
+                  aria-label="Debug JSON output"
+                  sx={{
+                    fontSize: '0.65rem',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    bgcolor: 'action.hover',
+                    p: 0.5,
+                    borderRadius: 1,
+                    mt: 0.25,
+                    maxHeight: 200,
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(currentItem, null, 2)}
+                </Box>
+              </Box>
+            )}
           </>
         )}
+        <ReloadIntervalBar
+          show={showReloadBar}
+          lastUpdate={lastFeedUpdate}
+          intervalMs={reloadIntervalMinutes * 60 * 1000}
+          showLastUpdate={showLastUpdate}
+          label="Feeds"
+          onReload={handleFeedsReload}
+        />
       </BaseTile>
 
       {/* ── News detail modal ─────────────────────────────────────────────── */}

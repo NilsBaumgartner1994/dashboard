@@ -6,6 +6,7 @@ interface GoogleAuthState {
   accessToken: string | null
   tokenExpiry: number | null
   refreshToken: string | null
+  tokenIssuedAt: number | null
   setClientId: (clientId: string) => void
   setToken: (accessToken: string, expiresIn: number) => void
   setRefreshToken: (refreshToken: string) => void
@@ -19,11 +20,13 @@ export const useGoogleAuthStore = create<GoogleAuthState>()(
       accessToken: null,
       tokenExpiry: null,
       refreshToken: null,
-      setClientId: (clientId) => set({ clientId }),
-      setToken: (accessToken, expiresIn) =>
-        set({ accessToken, tokenExpiry: Date.now() + expiresIn * 1000 }),
       setRefreshToken: (refreshToken) => set({ refreshToken }),
       clearToken: () => set({ accessToken: null, tokenExpiry: null, refreshToken: null }),
+      tokenIssuedAt: null,
+      setClientId: (clientId) => set({ clientId }),
+      setToken: (accessToken, expiresIn) =>
+        set({ accessToken, tokenExpiry: Date.now() + expiresIn * 1000, tokenIssuedAt: Date.now() }),
+      clearToken: () => set({ accessToken: null, tokenExpiry: null, tokenIssuedAt: null }),
     }),
     {
       name: 'google-auth-store',

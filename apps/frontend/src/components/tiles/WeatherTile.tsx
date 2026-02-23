@@ -20,6 +20,8 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import SearchIcon from '@mui/icons-material/Search'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import ReloadIntervalBar from './ReloadIntervalBar'
+import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 
@@ -80,6 +82,9 @@ interface WeatherConfig {
   lon?: number
   name?: string
   backgroundImage?: string
+  reloadIntervalMinutes?: 1 | 5 | 60
+  showReloadBar?: boolean
+  showLastUpdate?: boolean
 }
 
 interface WeatherData {
@@ -116,13 +121,23 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   const effectiveLon = config.lon ?? defaultLon
   const effectiveName = config.location ?? defaultLocationName
 
+  const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 60
+  const showReloadBar = config.showReloadBar ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
+  const reloadIntervalMs = reloadIntervalMinutes * 60 * 1000
+
   const [weather, setWeather] = useState<WeatherData | null>(() => {
     const cached = loadWeatherCache(tile.id)
-    if (cached && Date.now() - cached.ts < WEATHER_CACHE_TTL_MS) return cached.data
+    if (cached && Date.now() - cached.ts < reloadIntervalMs) return cached.data
     return null
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastWeatherUpdate, setLastWeatherUpdate] = useState<number | null>(() => {
+    const cached = loadWeatherCache(tile.id)
+    if (cached && Date.now() - cached.ts < reloadIntervalMs) return cached.ts
+    return null
+  })
 
   // Settings form state
   const [locationInput, setLocationInput] = useState(config.location ?? '')
@@ -131,6 +146,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   const [geocodedName, setGeocodedName] = useState<string>(config.location ?? '')
   const [geocodeLoading, setGeocodeLoading] = useState(false)
   const [geocodeError, setGeocodeError] = useState<string | null>(null)
+  const [reloadIntervalInput, setReloadIntervalInput] = useState<1 | 5 | 60>(reloadIntervalMinutes)
+  const [showReloadBarInput, setShowReloadBarInput] = useState(showReloadBar)
+  const [showLastUpdateInput, setShowLastUpdateInput] = useState(showLastUpdate)
 
   // Detail modal state
   const [detailOpen, setDetailOpen] = useState(false)
@@ -145,8 +163,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   const fetchWeather = useCallback(async (lat: number, lon: number, force = false) => {
     if (!force) {
       const cached = loadWeatherCache(tile.id)
-      if (cached && Date.now() - cached.ts < WEATHER_CACHE_TTL_MS) {
+      if (cached && Date.now() - cached.ts < reloadIntervalMs) {
         setWeather(cached.data)
+        setLastWeatherUpdate(cached.ts)
         return
       }
     }
@@ -175,12 +194,13 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
       }
       setWeather(result)
       saveWeatherCache(tile.id, result)
+      setLastWeatherUpdate(Date.now())
     } catch {
       setError('Wetter konnte nicht geladen werden')
     } finally {
       setLoading(false)
     }
-  }, [tile.id])
+  }, [tile.id, reloadIntervalMs])
 
   const fetchDetailWeather = useCallback(async (lat: number, lon: number) => {
     setDetailLoading(true)
@@ -225,16 +245,16 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   useEffect(() => {
     if (effectiveLat !== undefined && effectiveLon !== undefined) {
       fetchWeather(effectiveLat, effectiveLon)
-      // Refresh every 60 minutes
+      // Refresh every configured interval
       fetchIntervalRef.current = setInterval(
         () => fetchWeather(effectiveLat!, effectiveLon!, true),
-        WEATHER_CACHE_TTL_MS,
+        reloadIntervalMs,
       )
     }
     return () => {
       if (fetchIntervalRef.current) clearInterval(fetchIntervalRef.current)
     }
-  }, [effectiveLat, effectiveLon, fetchWeather])
+  }, [effectiveLat, effectiveLon, fetchWeather, reloadIntervalMs])
 
   const handleSettingsOpen = () => {
     setLocationInput(config.location ?? '')
@@ -242,6 +262,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
     setGeocodedLon(config.lon)
     setGeocodedName(config.location ?? '')
     setGeocodeError(null)
+    setReloadIntervalInput(reloadIntervalMinutes)
+    setShowReloadBarInput(showReloadBar)
+    setShowLastUpdateInput(showLastUpdate)
   }
 
   const handleGeocode = async () => {
@@ -272,6 +295,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
     location: geocodedName || locationInput,
     lat: geocodedLat,
     lon: geocodedLon,
+    reloadIntervalMinutes: reloadIntervalInput,
+    showReloadBar: showReloadBarInput,
+    showLastUpdate: showLastUpdateInput,
   })
 
   const hasLocation = effectiveLat !== undefined && effectiveLon !== undefined
@@ -320,6 +346,15 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
           ✓ {geocodedName} ({geocodedLat.toFixed(3)}, {geocodedLon.toFixed(3)})
         </Typography>
       )}
+      <ReloadIntervalSettings
+        intervalMinutes={reloadIntervalInput}
+        onIntervalChange={setReloadIntervalInput}
+        showBar={showReloadBarInput}
+        onShowBarChange={setShowReloadBarInput}
+        showLastUpdate={showLastUpdateInput}
+        onShowLastUpdateChange={setShowLastUpdateInput}
+        label="Aktualisierung"
+      />
     </>
   )
 
@@ -330,6 +365,12 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   const hourBarMinTemp = selectedDay && selectedDay.hours.length ? Math.min(...selectedDay.hours.map((h) => h.temp)) : 0
   const hourBarMaxTemp = selectedDay && selectedDay.hours.length ? Math.max(...selectedDay.hours.map((h) => h.temp)) : 1
   const hourRange = hourBarMaxTemp - hourBarMinTemp || 1
+
+  const handleWeatherReload = useCallback(() => {
+    if (effectiveLat !== undefined && effectiveLon !== undefined) {
+      fetchWeather(effectiveLat, effectiveLon, true)
+    }
+  }, [effectiveLat, effectiveLon, fetchWeather])
 
   return (
     <>
@@ -431,6 +472,14 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
             </>
           )}
         </Box>
+        <ReloadIntervalBar
+          show={showReloadBar}
+          lastUpdate={lastWeatherUpdate}
+          intervalMs={reloadIntervalMs}
+          showLastUpdate={showLastUpdate}
+          label="Wetter"
+          onReload={handleWeatherReload}
+        />
       </BaseTile>
 
       {/* ── Weather detail modal ─────────────────────────────────────────── */}

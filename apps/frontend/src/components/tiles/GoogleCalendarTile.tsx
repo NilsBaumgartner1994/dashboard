@@ -27,6 +27,8 @@ import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import CalendarEventItem, { isCalendarWeekMarker } from './CalendarEventItem'
 import CalendarEventDetailModal from './CalendarEventDetailModal'
+import ReloadIntervalBar from './ReloadIntervalBar'
+import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
@@ -49,6 +51,9 @@ interface GoogleCalendarConfig {
   daysAhead?: number
   clientSecret?: string
   debugMode?: boolean
+  eventsReloadIntervalMinutes?: 1 | 5 | 60
+  showReloadBars?: boolean
+  showLastUpdate?: boolean
 }
 
 // ─── Tile shown when no Google Client-ID is configured ────────────────────────
@@ -100,6 +105,13 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const daysAhead = config.daysAhead ?? 7
   const clientSecret = config.clientSecret ?? ''
   const debugMode = config.debugMode ?? false
+  const { accessToken, tokenExpiry, tokenIssuedAt, setToken, clearToken } = useGoogleAuthStore()
+  const config = (tile.config ?? {}) as GoogleCalendarConfig
+  const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
+  const daysAhead = config.daysAhead ?? 7
+  const eventsReloadIntervalMinutes: 1 | 5 | 60 = config.eventsReloadIntervalMinutes ?? 5
+  const showReloadBars = config.showReloadBars ?? false
+  const showLastUpdate = config.showLastUpdate ?? false
 
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
   const setCalendarEvents = useCalendarEventsStore((s) => s.setEvents)
@@ -143,6 +155,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [lastEventsUpdate, setLastEventsUpdate] = useState<number | null>(null)
+  // Incrementing this triggers an events reload
+  const [reloadTrigger, setReloadTrigger] = useState(0)
+
+  const triggerEventsReload = useCallback(() => setReloadTrigger((n) => n + 1), [])
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false)
@@ -224,6 +241,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     }
     return JSON.parse(body)
   }, [clientId, clientSecret, refreshToken, addLog])
+  const [settingsEventsInterval, setSettingsEventsInterval] = useState<1 | 5 | 60>(eventsReloadIntervalMinutes)
+  const [settingsShowReloadBars, setSettingsShowReloadBars] = useState(showReloadBars)
+  const [settingsShowLastUpdate, setSettingsShowLastUpdate] = useState(showLastUpdate)
 
   // ── Google login – implicit flow ──────────────────────────────────────────
   const isSilentRefresh = useRef(false)
@@ -530,6 +550,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       .then((evts) => {
         setEvents(evts)
         setCalendarEvents(evts)
+        setLastEventsUpdate(Date.now())
       })
       .catch((err: Error) => {
         if (err.message === 'TOKEN_EXPIRED') {
@@ -540,7 +561,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       })
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents])
+  }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents, reloadTrigger])
 
   // ── Settings helpers ─────────────────────────────────────────────────────
   const handleSettingsOpen = () => {
@@ -554,6 +575,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     setSettingsDaysAhead(String(daysAhead))
     setSettingsClientSecret(clientSecret)
     setSettingsDebugMode(debugMode)
+    setSettingsEventsInterval(eventsReloadIntervalMinutes)
+    setSettingsShowReloadBars(showReloadBars)
+    setSettingsShowLastUpdate(showLastUpdate)
   }
 
   const getExtraConfig = () => {
@@ -564,6 +588,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       daysAhead: !isNaN(parsed) && parsed >= 1 ? parsed : 7,
       clientSecret: settingsClientSecret.trim(),
       debugMode: settingsDebugMode,
+      eventsReloadIntervalMinutes: settingsEventsInterval,
+      showReloadBars: settingsShowReloadBars,
+      showLastUpdate: settingsShowLastUpdate,
     }
   }
 
@@ -666,6 +693,14 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           />
         }
         label="Debug-Modus anzeigen"
+      <ReloadIntervalSettings
+        intervalMinutes={settingsEventsInterval}
+        onIntervalChange={setSettingsEventsInterval}
+        showBar={settingsShowReloadBars}
+        onShowBarChange={setSettingsShowReloadBars}
+        showLastUpdate={settingsShowLastUpdate}
+        onShowLastUpdateChange={setSettingsShowLastUpdate}
+        label="Aktualisierung"
       />
     </>
   )
@@ -701,6 +736,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     : [{ dateLabel: todayLabel, events: [] }, ...grouped]
 
   // ── Tile body ────────────────────────────────────────────────────────────
+  const tokenLifetimeMs = tokenIssuedAt && tokenExpiry ? tokenExpiry - tokenIssuedAt : 3600 * 1000
+
   return (
     <>
       <BaseTile
@@ -870,6 +907,25 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             )}
           </Box>
         </Paper>
+      {/* ── Reload bars at the bottom ── */}
+      {tokenOk && (
+        <Box sx={{ mt: 'auto' }}>
+          <ReloadIntervalBar
+            show={showReloadBars}
+            lastUpdate={lastEventsUpdate}
+            intervalMs={eventsReloadIntervalMinutes * 60 * 1000}
+            showLastUpdate={showLastUpdate}
+            label="Events"
+            onReload={triggerEventsReload}
+          />
+          <ReloadIntervalBar
+            show={showReloadBars}
+            lastUpdate={tokenIssuedAt}
+            intervalMs={tokenLifetimeMs}
+            showLastUpdate={showLastUpdate}
+            label="Token"
+          />
+        </Box>
       )}
     </BaseTile>
 
