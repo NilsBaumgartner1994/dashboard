@@ -45,17 +45,51 @@ const CORS_PROXIES = [
 ]
 
 const MEDIA_NS = 'http://search.yahoo.com/mrss/'
+const MAX_NEWS_ITEMS = 20
 
-/** Convert a Google News HTML topic/search URL to its RSS counterpart if needed. */
-function normalizeRssUrl(url: string): string {
+/** Return true when the URL points to a Google News HTML page (not an RSS endpoint). */
+function isGoogleNewsHtmlUrl(url: string): boolean {
   try {
     const u = new URL(url)
-    if (u.hostname === 'news.google.com' && !u.pathname.startsWith('/rss/')) {
-      u.pathname = '/rss' + u.pathname
-      return u.toString()
-    }
-  } catch { /* ignore */ }
-  return url
+    return u.hostname === 'news.google.com' && !u.pathname.startsWith('/rss/')
+  } catch {
+    return false
+  }
+}
+
+/** Parse a Google News HTML page and return news items (title, date, image from <figure>). */
+function parseGoogleNewsHtml(html: string, sourceLabel: string): NewsItem[] {
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const articles = Array.from(doc.querySelectorAll('article'))
+    if (articles.length === 0) return []
+
+    return articles.slice(0, MAX_NEWS_ITEMS).flatMap((article): NewsItem[] => {
+      // Title – prefer the first heading, fall back to any anchor text
+      const headingEl = article.querySelector('h3, h4, h2')
+      const title = headingEl?.textContent?.trim() ?? article.querySelector('a')?.textContent?.trim() ?? ''
+      if (!title) return []
+
+      // Link – prefer anchors that point to article pages
+      const linkEl = article.querySelector('a[href*="articles"]') ?? article.querySelector('a[href]')
+      const rawHref = linkEl?.getAttribute('href') ?? ''
+      let link = ''
+      try { link = rawHref ? new URL(rawHref, 'https://news.google.com').toString() : '' } catch { link = rawHref }
+
+      // Date from <time datetime="...">
+      const timeEl = article.querySelector('time')
+      const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.textContent?.trim() ?? ''
+
+      // Image from <figure><img>
+      const imgEl = article.querySelector('figure img')
+      const imageUrl = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? ''
+
+      return [{ title, description: '', link, pubDate, source: sourceLabel, imageUrl }]
+    })
+  } catch {
+    return []
+  }
 }
 
 /** Format a RSS pubDate string into a human-readable German locale string. */
@@ -142,7 +176,7 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
     // Detect XML parse errors (DOMParser returns a <parseerror> document on failure)
     if (doc.querySelector('parsererror')) return []
     const items = Array.from(doc.querySelectorAll('item'))
-    return items.slice(0, 20).map((item) => ({
+    return items.slice(0, MAX_NEWS_ITEMS).map((item) => ({
       title: item.querySelector('title')?.textContent?.trim() ?? '',
       description: (() => {
         const raw = item.querySelector('description')?.textContent ?? ''
@@ -173,30 +207,61 @@ async function tryFetchText(fetchUrl: string): Promise<string | null> {
 }
 
 async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null }> {
-  const normalizedUrl = normalizeRssUrl(url)
-
   const sourceLabel = (() => {
-    try { return new URL(normalizedUrl).hostname.replace('www.', '') }
-    catch { return normalizedUrl }
+    try { return new URL(url).hostname.replace('www.', '') }
+    catch { return url }
   })()
 
-  // Try via CORS proxies in order until one succeeds
+  // For Google News HTML pages, fetch and parse the HTML directly to get images
+  if (isGoogleNewsHtmlUrl(url)) {
+    let html: string | null = null
+    for (const proxy of CORS_PROXIES) {
+      html = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
+      if (html) break
+    }
+    if (!html && backendUrl) {
+      html = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+    }
+    if (html) {
+      const items = parseGoogleNewsHtml(html, sourceLabel)
+      if (items.length > 0) return { items, error: null }
+    }
+    // Fallback: convert to RSS when HTML scraping yields no results
+    const rssUrl = (() => {
+      try {
+        const u = new URL(url)
+        u.pathname = '/rss' + u.pathname
+        return u.toString()
+      } catch { return url }
+    })()
+    let text: string | null = null
+    for (const proxy of CORS_PROXIES) {
+      text = await tryFetchText(`${proxy}${encodeURIComponent(rssUrl)}`)
+      if (text) break
+    }
+    if (!text && backendUrl) {
+      text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(rssUrl)}`)
+    }
+    if (text) {
+      const items = parseRssXml(text, sourceLabel)
+      return { items, error: null }
+    }
+    return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
+  }
+
+  // For all other URLs use the RSS path
   let text: string | null = null
   for (const proxy of CORS_PROXIES) {
-    text = await tryFetchText(`${proxy}${encodeURIComponent(normalizedUrl)}`)
+    text = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
     if (text) break
   }
-
-  // Fallback: try via configured backend CORS proxy
   if (!text && backendUrl) {
-    text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(normalizedUrl)}`)
+    text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
   }
-
   if (text) {
     const items = parseRssXml(text, sourceLabel)
     return { items, error: null }
   }
-
   return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
 }
 
