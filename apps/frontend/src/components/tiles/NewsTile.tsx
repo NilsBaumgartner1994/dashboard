@@ -59,61 +59,6 @@ function isGoogleNewsHtmlUrl(url: string): boolean {
   }
 }
 
-/** Convert a Google News HTML page URL to its RSS feed equivalent. */
-function toGoogleNewsRssUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    return `https://news.google.com/rss${u.pathname}${u.search}`
-  } catch {
-    return url
-  }
-}
-
-/** Parse a Google News HTML page and return news items (title, date, image from <figure>). */
-function parseGoogleNewsHtml(html: string, sourceLabel: string, baseUrl?: string): NewsItem[] {
-  try {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
-    const articles = Array.from(doc.querySelectorAll('article'))
-    if (articles.length === 0) return []
-
-    // Determine the base origin for resolving relative URLs (e.g. /api/attachments/...)
-    let baseOrigin = 'https://news.google.com'
-    if (baseUrl) {
-      try { baseOrigin = new URL(baseUrl).origin } catch { /* keep default */ }
-    }
-
-    return articles.slice(0, MAX_NEWS_ITEMS).flatMap((article): NewsItem[] => {
-      // Title – prefer the first heading, fall back to any anchor text
-      const headingEl = article.querySelector('h3, h4, h2')
-      const title = headingEl?.textContent?.trim() ?? article.querySelector('a')?.textContent?.trim() ?? ''
-      if (!title) return []
-
-      // Link – prefer anchors that point to article pages
-      const linkEl = article.querySelector('a[href*="articles"]') ?? article.querySelector('a[href]')
-      const rawHref = linkEl?.getAttribute('href') ?? ''
-      let link = ''
-      try { link = rawHref ? new URL(rawHref, 'https://news.google.com').toString() : '' } catch { link = rawHref }
-
-      // Date from <time datetime="...">
-      const timeEl = article.querySelector('time')
-      const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.textContent?.trim() ?? ''
-
-      // Image from <figure><img> – resolve relative src against the Google News origin
-      const imgEl = article.querySelector('figure img')
-      const rawSrc = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? ''
-      let imageUrl = rawSrc
-      if (rawSrc) {
-        try { imageUrl = new URL(rawSrc, baseOrigin).toString() } catch { imageUrl = rawSrc }
-      }
-
-      return [{ title, description: '', link, pubDate, source: sourceLabel, imageUrl }]
-    })
-  } catch {
-    return []
-  }
-}
-
 /** Format a RSS pubDate string into a human-readable German locale string. */
 function formatPubDate(pubDate: string): string {
   if (!pubDate) return ''
@@ -233,22 +178,46 @@ async function tryFetchText(fetchUrl: string): Promise<string | null> {
 
 async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null; debugInfo: string[] }> {
   const debugInfo: string[] = []
-
-  // Convert Google News HTML page URLs to their RSS equivalents so we get
-  // structured data instead of relying on client-side-rendered HTML.
-  if (isGoogleNewsHtmlUrl(url)) {
-    const rssUrl = toGoogleNewsRssUrl(url)
-    debugInfo.push(`Google News URL → RSS: ${rssUrl}`)
-    url = rssUrl
-  }
+  debugInfo.push(`URL: ${url}`)
 
   const sourceLabel = (() => {
     try { return new URL(url).hostname.replace('www.', '') }
     catch { return url }
   })()
-  debugInfo.push(`URL: ${url}`)
 
-  // For all URLs use the RSS path
+  // Google News HTML pages (e.g. /topics/...) must be fetched and parsed server-side
+  // using the dedicated backend endpoint (which uses cheerio).
+  // Only /rss/... URLs are true RSS feeds and use the standard RSS path below.
+  if (isGoogleNewsHtmlUrl(url)) {
+    if (!backendUrl) {
+      debugInfo.push(`✗ Kein Backend verfügbar – Google News HTML-Seite kann nicht geparst werden`)
+      return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
+    }
+    try {
+      const res = await fetch(`${backendUrl}/google-news-html-parse?url=${encodeURIComponent(url)}`, {
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { items: NewsItem[]; debug?: { htmlLength: number; itemCount: number } }
+        if (data.debug) {
+          debugInfo.push(`HTML geladen (${data.debug.htmlLength} Zeichen)`)
+          debugInfo.push(`Artikel gefunden: ${data.debug.itemCount}`)
+        }
+        if (Array.isArray(data.items) && data.items.length > 0) {
+          debugInfo.push(`✓ Backend-Parse erfolgreich`)
+          return { items: data.items.map((it) => ({ ...it, source: it.source || sourceLabel })), error: null, debugInfo }
+        }
+        debugInfo.push(`✗ Backend-Parse: keine Artikel gefunden`)
+      } else {
+        debugInfo.push(`✗ Backend-Parse fehlgeschlagen: HTTP ${res.status}`)
+      }
+    } catch (err) {
+      debugInfo.push(`✗ Backend-Parse Fehler: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
+  }
+
+  // For all other URLs (including Google News /rss/...) use the RSS path
   let text: string | null = null
   for (const proxy of CORS_PROXIES) {
     text = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
