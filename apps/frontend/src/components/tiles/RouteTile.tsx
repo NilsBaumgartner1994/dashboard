@@ -19,6 +19,7 @@ import type { CalendarEventData } from './CalendarEventItem'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
+import { useCalendarEventsStore } from '../../store/useCalendarEventsStore'
 
 interface RouteConfig {
   name?: string
@@ -79,6 +80,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const debugMode = useStore((s) => s.debugMode)
   const { accessToken, tokenExpiry } = useGoogleAuthStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
+  const storeEvents = useCalendarEventsStore((s) => s.events)
 
   // Runtime state
   const [travelSeconds, setTravelSeconds] = useState<number | null>(null)
@@ -219,12 +221,31 @@ export default function RouteTile({ tile }: RouteTileProps) {
     fetchRoute,
   ])
 
-  // ── Fetch calendar events when calendar mode on ───────────────────────────
+  // ── Sync calendar events from shared store or fetch directly ─────────────
   useEffect(() => {
-    if (config.useCalendar && tokenOk && accessToken) {
+    if (!config.useCalendar) return
+    if (storeEvents.length > 0) {
+      const now = new Date()
+      const future = storeEvents
+        .filter((e) => {
+          const start = e.start.dateTime
+            ? new Date(e.start.dateTime)
+            : e.start.date
+            ? new Date(e.start.date + 'T00:00:00')
+            : null
+          return start !== null && start >= now
+        })
+        .sort((a, b) => {
+          const ta = a.start.dateTime ?? a.start.date ?? ''
+          const tb = b.start.dateTime ?? b.start.date ?? ''
+          return ta.localeCompare(tb)
+        })
+      setNextEventAny(future[0] ?? null)
+      setNextEvent(future.find((e) => e.location?.trim()) ?? null)
+    } else if (tokenOk && accessToken) {
       fetchNextCalendarEvent(accessToken)
     }
-  }, [config.useCalendar, tokenOk, accessToken, fetchNextCalendarEvent])
+  }, [config.useCalendar, storeEvents, tokenOk, accessToken, fetchNextCalendarEvent])
 
   // ── Countdown timer ───────────────────────────────────────────────────────
   useEffect(() => {
