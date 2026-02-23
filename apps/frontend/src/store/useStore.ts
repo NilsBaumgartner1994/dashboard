@@ -56,7 +56,7 @@ export const useStore = create<AppState>()(
       setDebugMode: (debugMode) => set({ debugMode }),
       addTile: (type) =>
         set((s) => {
-          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route'].includes(type) ? 4 : 2
+          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks'].includes(type) ? 4 : 2
           const bottomY = s.tiles.reduce((max, t) => Math.max(max, t.y + t.h), 0)
           return {
             tiles: [
