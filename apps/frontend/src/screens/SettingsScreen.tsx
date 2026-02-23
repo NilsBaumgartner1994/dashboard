@@ -11,6 +11,8 @@ import {
   Alert,
   FormControlLabel,
   Switch,
+  InputAdornment,
+  IconButton as MuiIconButton,
 } from '@mui/material'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -20,6 +22,8 @@ import DownloadIcon from '@mui/icons-material/Download'
 import UploadIcon from '@mui/icons-material/Upload'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useStore } from '../store/useStore'
 import { useGoogleAuthStore } from '../store/useGoogleAuthStore'
 
@@ -33,12 +37,15 @@ export default function SettingsScreen() {
   const defaultLocationName = useStore((s) => s.defaultLocationName)
   const setDefaultLocation = useStore((s) => s.setDefaultLocation)
   const setTiles = useStore((s) => s.setTiles)
+  const setNotes = useStore((s) => s.setNotes)
   const debugMode = useStore((s) => s.debugMode)
   const setDebugMode = useStore((s) => s.setDebugMode)
   const backendUrl = useStore((s) => s.backendUrl)
   const setBackendUrl = useStore((s) => s.setBackendUrl)
-  const { clientId, setClientId, clearToken } = useGoogleAuthStore()
+  const { clientId, setClientId, clientSecret, setClientSecret, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
+  const [clientSecretInput, setClientSecretInput] = useState(clientSecret)
+  const [showClientSecret, setShowClientSecret] = useState(false)
   const [backendUrlInput, setBackendUrlInput] = useState(backendUrl)
   const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
   const [locationInput, setLocationInput] = useState(defaultLocationName ?? '')
@@ -89,6 +96,7 @@ export default function SettingsScreen() {
     store: {
       theme,
       tiles: useStore.getState().tiles,
+      notes: useStore.getState().notes,
       gridColumns: useStore.getState().gridColumns,
       defaultLat: useStore.getState().defaultLat,
       defaultLon: useStore.getState().defaultLon,
@@ -96,6 +104,7 @@ export default function SettingsScreen() {
     },
     googleAuth: {
       clientId: useGoogleAuthStore.getState().clientId,
+      clientSecret: useGoogleAuthStore.getState().clientSecret,
     },
   })
 
@@ -131,6 +140,7 @@ export default function SettingsScreen() {
       const s = data.store
       if (s.theme) setTheme(s.theme)
       if (Array.isArray(s.tiles)) setTiles(s.tiles)
+      if (Array.isArray(s.notes)) setNotes(s.notes)
       if (typeof s.gridColumns === 'number') setGridColumns(s.gridColumns)
       if (typeof s.defaultLat === 'number' && typeof s.defaultLon === 'number') {
         setDefaultLocation(s.defaultLat, s.defaultLon, s.defaultLocationName ?? '')
@@ -138,6 +148,10 @@ export default function SettingsScreen() {
       if (data.googleAuth?.clientId) {
         setClientId(data.googleAuth.clientId)
         setClientIdInput(data.googleAuth.clientId)
+      }
+      if (data.googleAuth?.clientSecret !== undefined) {
+        setClientSecret(data.googleAuth.clientSecret)
+        setClientSecretInput(data.googleAuth.clientSecret)
       }
       setImportSuccess(true)
       setImportJson('')
@@ -289,11 +303,11 @@ export default function SettingsScreen() {
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
         <Typography variant="subtitle1" gutterBottom>
-          Google Kalender – OAuth Client-ID
+          Google – OAuth Client-ID &amp; Client-Secret
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Trage hier deine Google OAuth 2.0 Client-ID ein. Sie wird von allen Google Kalender Kacheln
-          gemeinsam genutzt.
+          Trage hier deine Google OAuth 2.0 Client-ID ein. Sie wird von allen Google Kalender- und
+          Aufgaben-Kacheln gemeinsam genutzt.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Beim Erstellen der Credentials in der{' '}
@@ -346,11 +360,36 @@ export default function SettingsScreen() {
           onChange={(e) => setClientIdInput(e.target.value)}
           sx={{ mb: 2 }}
         />
+        <TextField
+          fullWidth
+          label="Google OAuth Client-Secret (optional)"
+          placeholder="GOCSPX-..."
+          value={clientSecretInput}
+          onChange={(e) => setClientSecretInput(e.target.value)}
+          type={showClientSecret ? 'text' : 'password'}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                <MuiIconButton
+                  size="small"
+                  onClick={() => setShowClientSecret((v) => !v)}
+                  edge="end"
+                  aria-label={showClientSecret ? 'Secret verbergen' : 'Secret anzeigen'}
+                >
+                  {showClientSecret ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </MuiIconButton>
+              </InputAdornment>
+            ),
+          }}
+          helperText="Wird für den Auth-Code-Flow (Refresh-Token) benötigt. Wird im localStorage gespeichert."
+          sx={{ mb: 2 }}
+        />
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             variant="contained"
             onClick={() => {
               setClientId(clientIdInput.trim())
+              setClientSecret(clientSecretInput.trim())
               clearToken()
             }}
           >

@@ -16,6 +16,7 @@ import {
   IconButton,
   Switch,
   Paper,
+  InputAdornment,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
@@ -24,6 +25,8 @@ import CheckIcon from '@mui/icons-material/Check'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import BugReportIcon from '@mui/icons-material/BugReport'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import CalendarEventItem, { isCalendarWeekMarker, formatEventTime, shouldUseWhiteText } from './CalendarEventItem'
@@ -167,10 +170,12 @@ function ErrorMessage({ message, copied, onCopy }: { message: string; copied: bo
 function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const { accessToken, tokenExpiry, tokenIssuedAt, refreshToken, setToken, setRefreshToken, clearToken } = useGoogleAuthStore()
   const clientId = useGoogleAuthStore((s) => s.clientId)
+  const globalClientSecret = useGoogleAuthStore((s) => s.clientSecret)
   const config = (tile.config ?? {}) as GoogleCalendarConfig
   const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
   const daysAhead = config.daysAhead ?? 7
-  const clientSecret = config.clientSecret ?? ''
+  // Tile-specific secret takes priority; falls back to global secret
+  const clientSecret = config.clientSecret?.trim() ? config.clientSecret.trim() : globalClientSecret
   const debugMode = config.debugMode ?? false
   const eventsReloadIntervalMinutes: 1 | 5 | 60 = config.eventsReloadIntervalMinutes ?? 5
   const showReloadBars = config.showReloadBars ?? false
@@ -253,6 +258,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [settingsCalendars, setSettingsCalendars] = useState<(CalendarInfo & { selected: boolean })[]>([])
   const [settingsDaysAhead, setSettingsDaysAhead] = useState(String(daysAhead))
   const [settingsClientSecret, setSettingsClientSecret] = useState(clientSecret)
+  const [showSettingsSecret, setShowSettingsSecret] = useState(false)
   const [settingsDebugMode, setSettingsDebugMode] = useState(debugMode)
   const [settingsEventsInterval, setSettingsEventsInterval] = useState<1 | 5 | 60>(eventsReloadIntervalMinutes)
   const [settingsShowReloadBars, setSettingsShowReloadBars] = useState(showReloadBars)
@@ -774,12 +780,25 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       <TextField
         fullWidth
         label="Client Secret (optional, für Refresh-Token)"
-        type="password"
+        type={showSettingsSecret ? 'text' : 'password'}
         value={settingsClientSecret}
         onChange={(e) => setSettingsClientSecret(e.target.value)}
         size="small"
         sx={{ mb: 0.5 }}
-        helperText="Wenn angegeben, wird der Auth-Code-Flow verwendet und ein Refresh-Token gespeichert."
+        helperText="Leer lassen = globales Secret aus den Einstellungen verwenden."
+        InputProps={{
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                onClick={() => setShowSettingsSecret((v) => !v)}
+                edge="end"
+              >
+                {showSettingsSecret ? <VisibilityOffIcon fontSize="inherit" /> : <VisibilityIcon fontSize="inherit" />}
+              </IconButton>
+            </InputAdornment>
+          ),
+        }}
       />
       <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1, fontSize: '0.65rem' }}>
         ⚠️ Nur für selbst gehostete Instanzen geeignet. Das Client-Secret wird im Browser (localStorage) gespeichert und ist für Browser-Devtools sichtbar.
