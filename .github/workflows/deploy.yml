@@ -13,7 +13,7 @@ jobs:
         with:
           node-version: 20
           cache: yarn
-      - run: yarn install --frozen-lockfile
+      - run: yarn install --immutable
       - run: yarn workspace frontend build
       - uses: peaceiris/actions-gh-pages@v3
         with:
