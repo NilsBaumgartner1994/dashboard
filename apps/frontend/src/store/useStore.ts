@@ -17,10 +17,14 @@ interface AppState {
   tiles: TileInstance[]
   editMode: boolean
   gridColumns: number
+  defaultLat?: number
+  defaultLon?: number
+  defaultLocationName?: string
   setTheme: (t: 'light' | 'dark' | 'auto') => void
   setTiles: (tiles: TileInstance[]) => void
   toggleEditMode: () => void
   setGridColumns: (n: number) => void
+  setDefaultLocation: (lat: number, lon: number, name: string) => void
   addTile: (type: string) => void
   removeTile: (id: string) => void
   updateTile: (id: string, patch: Partial<TileInstance>) => void
@@ -37,13 +41,18 @@ export const useStore = create<AppState>()(
       ],
       editMode: false,
       gridColumns: 32,
+      defaultLat: undefined,
+      defaultLon: undefined,
+      defaultLocationName: undefined,
       setTheme: (theme) => set({ theme }),
       setTiles: (tiles) => set({ tiles }),
       toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),
       setGridColumns: (gridColumns) => set({ gridColumns }),
+      setDefaultLocation: (defaultLat, defaultLon, defaultLocationName) =>
+        set({ defaultLat, defaultLon, defaultLocationName }),
       addTile: (type) =>
         set((s) => {
-          const newH = ['server', 'rocketmeals', 'weather', 'news'].includes(type) ? 4 : 2
+          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route'].includes(type) ? 4 : 2
           const bottomY = s.tiles.reduce((max, t) => Math.max(max, t.y + t.h), 0)
           return {
             tiles: [

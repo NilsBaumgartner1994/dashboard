@@ -7,10 +7,12 @@ import {
   Paper,
   TextField,
   Button,
+  CircularProgress,
 } from '@mui/material'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import BrightnessAutoIcon from '@mui/icons-material/BrightnessAuto'
+import SearchIcon from '@mui/icons-material/Search'
 import { useStore } from '../store/useStore'
 import { useGoogleAuthStore } from '../store/useGoogleAuthStore'
 
@@ -19,14 +21,44 @@ export default function SettingsScreen() {
   const setTheme = useStore((s) => s.setTheme)
   const gridColumns = useStore((s) => s.gridColumns)
   const setGridColumns = useStore((s) => s.setGridColumns)
+  const defaultLat = useStore((s) => s.defaultLat)
+  const defaultLon = useStore((s) => s.defaultLon)
+  const defaultLocationName = useStore((s) => s.defaultLocationName)
+  const setDefaultLocation = useStore((s) => s.setDefaultLocation)
   const { clientId, setClientId, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
   const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
+  const [locationInput, setLocationInput] = useState(defaultLocationName ?? '')
+  const [geocodeLoading, setGeocodeLoading] = useState(false)
+  const [geocodeError, setGeocodeError] = useState<string | null>(null)
 
   const handleSaveGridColumns = () => {
     const parsed = parseInt(gridColumnsInput, 10)
     if (!isNaN(parsed) && parsed >= 1) {
       setGridColumns(parsed)
+    }
+  }
+
+  const handleGeocode = async () => {
+    if (!locationInput.trim()) return
+    setGeocodeLoading(true)
+    setGeocodeError(null)
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationInput.trim())}&count=1&language=de&format=json`,
+      )
+      const data = await res.json()
+      if (data.results?.length) {
+        setDefaultLocation(data.results[0].latitude, data.results[0].longitude, data.results[0].name)
+        setLocationInput(data.results[0].name)
+        setGeocodeError(null)
+      } else {
+        setGeocodeError('Ort nicht gefunden')
+      }
+    } catch {
+      setGeocodeError('Geocodierung fehlgeschlagen')
+    } finally {
+      setGeocodeLoading(false)
     }
   }
 
@@ -55,6 +87,45 @@ export default function SettingsScreen() {
             <BrightnessAutoIcon sx={{ mr: 1 }} /> Auto
           </ToggleButton>
         </ToggleButtonGroup>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Standard-Standort
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Dieser Standort wird als Standard für Wetter- und Routenkacheln genutzt.
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+          <TextField
+            fullWidth
+            label="Ort / Stadt"
+            placeholder="z.B. Berlin"
+            value={locationInput}
+            onChange={(e) => setLocationInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleGeocode() }}
+            size="small"
+          />
+          <Button
+            variant="outlined"
+            onClick={handleGeocode}
+            disabled={geocodeLoading || !locationInput.trim()}
+            startIcon={geocodeLoading ? <CircularProgress size={14} /> : <SearchIcon />}
+            sx={{ whiteSpace: 'nowrap', minWidth: 100 }}
+          >
+            Suchen
+          </Button>
+        </Box>
+        {geocodeError && (
+          <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>
+            {geocodeError}
+          </Typography>
+        )}
+        {defaultLat !== undefined && defaultLon !== undefined && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            ✓ {defaultLocationName} ({defaultLat.toFixed(3)}, {defaultLon.toFixed(3)})
+          </Typography>
+        )}
       </Paper>
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>

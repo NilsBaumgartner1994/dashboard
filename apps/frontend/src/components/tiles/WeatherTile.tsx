@@ -20,6 +20,29 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import SearchIcon from '@mui/icons-material/Search'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
+
+const WEATHER_CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+function getWeatherCacheKey(tileId: string) {
+  return `weather-cache-${tileId}`
+}
+
+function loadWeatherCache(tileId: string): { data: WeatherData; ts: number } | null {
+  try {
+    const raw = localStorage.getItem(getWeatherCacheKey(tileId))
+    if (!raw) return null
+    return JSON.parse(raw) as { data: WeatherData; ts: number }
+  } catch {
+    return null
+  }
+}
+
+function saveWeatherCache(tileId: string, data: WeatherData) {
+  try {
+    localStorage.setItem(getWeatherCacheKey(tileId), JSON.stringify({ data, ts: Date.now() }))
+  } catch { /* ignore */ }
+}
 
 // WMO Weather interpretation codes
 // https://open-meteo.com/en/docs#weathervariables
@@ -59,8 +82,20 @@ interface WeatherTileProps {
 
 export default function WeatherTile({ tile }: WeatherTileProps) {
   const config = (tile.config ?? {}) as WeatherConfig
+  const defaultLat = useStore((s) => s.defaultLat)
+  const defaultLon = useStore((s) => s.defaultLon)
+  const defaultLocationName = useStore((s) => s.defaultLocationName)
 
-  const [weather, setWeather] = useState<WeatherData | null>(null)
+  // Effective location: tile-specific first, then global default
+  const effectiveLat = config.lat ?? defaultLat
+  const effectiveLon = config.lon ?? defaultLon
+  const effectiveName = config.location ?? defaultLocationName
+
+  const [weather, setWeather] = useState<WeatherData | null>(() => {
+    const cached = loadWeatherCache(tile.id)
+    if (cached && Date.now() - cached.ts < WEATHER_CACHE_TTL_MS) return cached.data
+    return null
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,7 +109,14 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
 
   const fetchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchWeather = useCallback(async (lat: number, lon: number) => {
+  const fetchWeather = useCallback(async (lat: number, lon: number, force = false) => {
+    if (!force) {
+      const cached = loadWeatherCache(tile.id)
+      if (cached && Date.now() - cached.ts < WEATHER_CACHE_TTL_MS) {
+        setWeather(cached.data)
+        return
+      }
+    }
     setLoading(true)
     setError(null)
     try {
@@ -86,7 +128,7 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setWeather({
+      const result: WeatherData = {
         current: {
           temp: Math.round(data.current.temperature_2m),
           code: data.current.weathercode,
@@ -97,24 +139,29 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
           code: data.daily.weathercode[i + 1],
           maxTemp: Math.round(data.daily.temperature_2m_max[i + 1]),
         })),
-      })
+      }
+      setWeather(result)
+      saveWeatherCache(tile.id, result)
     } catch {
       setError('Wetter konnte nicht geladen werden')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [tile.id])
 
   useEffect(() => {
-    if (config.lat !== undefined && config.lon !== undefined) {
-      fetchWeather(config.lat, config.lon)
-      // Refresh every 30 minutes
-      fetchIntervalRef.current = setInterval(() => fetchWeather(config.lat!, config.lon!), 30 * 60 * 1000)
+    if (effectiveLat !== undefined && effectiveLon !== undefined) {
+      fetchWeather(effectiveLat, effectiveLon)
+      // Refresh every 60 minutes
+      fetchIntervalRef.current = setInterval(
+        () => fetchWeather(effectiveLat!, effectiveLon!, true),
+        WEATHER_CACHE_TTL_MS,
+      )
     }
     return () => {
       if (fetchIntervalRef.current) clearInterval(fetchIntervalRef.current)
     }
-  }, [config.lat, config.lon, fetchWeather])
+  }, [effectiveLat, effectiveLon, fetchWeather])
 
   const handleSettingsOpen = () => {
     setLocationInput(config.location ?? '')
@@ -192,7 +239,7 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   )
 
   // ── Render helpers ────────────────────────────────────────────────────────
-  const hasLocation = config.lat !== undefined && config.lon !== undefined
+  const hasLocation = effectiveLat !== undefined && effectiveLon !== undefined
   const currentInfo = weather ? getWeatherInfo(weather.current.code) : null
 
   return (
@@ -224,7 +271,7 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1 }}>
             <Typography variant="body2" color="error">{error}</Typography>
             <Tooltip title="Neu laden">
-              <IconButton size="small" onClick={() => fetchWeather(config.lat!, config.lon!)}>
+              <IconButton size="small" onClick={() => fetchWeather(effectiveLat!, effectiveLon!, true)}>
                 <RefreshIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -246,9 +293,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
                 pb: 1,
               }}
             >
-              {config.location && (
+              {effectiveName && (
                 <Typography variant="caption" color="text.secondary" noWrap>
-                  {config.location}
+                  {effectiveName}
                 </Typography>
               )}
               <currentInfo.Icon sx={{ fontSize: 56, color: currentInfo.color }} />
