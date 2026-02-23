@@ -36,9 +36,9 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
   { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/' },
 ]
 
-// Build a Google News RSS URL for a given German search query
+// Build a Google News search page URL for a given German search query (scraped, not RSS)
 const buildGoogleNewsUrl = (query: string) =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
+  `https://news.google.com/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
 
 // CORS proxies for browser RSS fetching (tried in order until one succeeds)
 const CORS_PROXIES = [
@@ -231,26 +231,6 @@ async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: New
       const items = parseGoogleNewsHtml(html, sourceLabel)
       if (items.length > 0) return { items, error: null }
     }
-    // Fallback: convert to RSS when HTML scraping yields no results
-    const rssUrl = (() => {
-      try {
-        const u = new URL(url)
-        u.pathname = '/rss' + u.pathname
-        return u.toString()
-      } catch { return url }
-    })()
-    let text: string | null = null
-    for (const proxy of CORS_PROXIES) {
-      text = await tryFetchText(`${proxy}${encodeURIComponent(rssUrl)}`)
-      if (text) break
-    }
-    if (!text && backendUrl) {
-      text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(rssUrl)}`)
-    }
-    if (text) {
-      const items = parseRssXml(text, sourceLabel)
-      return { items, error: null }
-    }
     return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
   }
 
@@ -306,6 +286,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const showReloadBar = config.showReloadBar ?? false
   const showLastUpdate = config.showLastUpdate ?? false
   const backendUrl = useStore((s) => s.backendUrl)
+  const debugMode = useStore((s) => s.debugMode)
   const openModal = useUIStore((s) => s.openModal)
   const closeModal = useUIStore((s) => s.closeModal)
 
@@ -499,7 +480,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
       {/* Google News keyword search */}
       <Divider sx={{ mb: 2 }}>Google News Suche</Divider>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Suchbegriff eingeben – erzeugt einen Google News RSS-Feed für diesen Begriff.
+        Suchbegriff eingeben – lädt die Google News Seite für diesen Begriff und parst die Einträge.
       </Typography>
       <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
         <TextField
@@ -683,6 +664,33 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 </Typography>
               )}
             </Box>
+
+            {/* Debug: current news item as JSON */}
+            {debugMode && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                  Debug – Aktueller Eintrag:
+                </Typography>
+                <Box
+                  component="pre"
+                  role="region"
+                  aria-label="Debug JSON output"
+                  sx={{
+                    fontSize: '0.65rem',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    bgcolor: 'action.hover',
+                    p: 0.5,
+                    borderRadius: 1,
+                    mt: 0.25,
+                    maxHeight: 200,
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(currentItem, null, 2)}
+                </Box>
+              </Box>
+            )}
           </>
         )}
         <ReloadIntervalBar
