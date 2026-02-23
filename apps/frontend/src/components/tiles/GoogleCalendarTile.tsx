@@ -14,9 +14,13 @@ import {
   ListItemText,
   Chip,
   TextField,
+  Tooltip,
+  IconButton,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckIcon from '@mui/icons-material/Check'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
@@ -72,6 +76,27 @@ function GoogleCalendarTileUnconfigured({ tile }: { tile: TileInstance }) {
   )
 }
 
+// ─── Reusable error display with copy button ──────────────────────────────────
+
+function ErrorMessage({ message, copied, onCopy }: { message: string; copied: boolean; onCopy: () => void }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, width: '100%' }}>
+      <Typography
+        variant="body2"
+        color="error"
+        sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', flex: 1, fontFamily: 'monospace', fontSize: '0.7rem' }}
+      >
+        {message}
+      </Typography>
+      <Tooltip title={copied ? 'Kopiert!' : 'Fehlermeldung kopieren'}>
+        <IconButton size="small" onClick={onCopy}>
+          {copied ? <CheckIcon fontSize="inherit" color="success" /> : <ContentCopyIcon fontSize="inherit" />}
+        </IconButton>
+      </Tooltip>
+    </Box>
+  )
+}
+
 // ─── Inner component (needs GoogleOAuthProvider in tree) ──────────────────────
 
 function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
@@ -87,6 +112,16 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyError = () => {
+    if (error) {
+      navigator.clipboard.writeText(error).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }).catch(() => { /* clipboard unavailable */ })
+    }
+  }
 
   // Settings form state (calendar selection inside settings modal)
   const [settingsCalendars, setSettingsCalendars] = useState<(CalendarInfo & { selected: boolean })[]>([])
@@ -113,11 +148,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       clearToken()
       throw new Error('TOKEN_EXPIRED')
     }
-    if (res.status === 403) {
-      clearToken()
-      throw new Error('TOKEN_FORBIDDEN')
+    if (!res.ok) {
+      let body = ''
+      try { body = await res.text() } catch { /* ignore */ }
+      throw new Error(`HTTP ${res.status} – ${res.statusText}\n\n${body}`)
     }
-    if (!res.ok) throw new Error(`Kalender laden fehlgeschlagen (${res.status})`)
     const data = await res.json()
     return (data.items ?? []).map((c: CalendarInfo & { backgroundColor?: string }) => ({
       id: c.id,
@@ -150,11 +185,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
-          if (res.status === 403) {
-            clearToken()
-            throw new Error('TOKEN_FORBIDDEN')
+          if (!res.ok) {
+            let body = ''
+            try { body = await res.text() } catch { /* ignore */ }
+            throw new Error(`HTTP ${res.status} – ${res.statusText} (${calId})\n\n${body}`)
           }
-          if (!res.ok) return []
           const data = await res.json()
           return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
         }),
@@ -186,13 +221,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       .catch((err: Error) => {
         if (err.message === 'TOKEN_EXPIRED') {
           setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
-        } else if (err.message === 'TOKEN_FORBIDDEN') {
-          setError(
-            'Zugriff verweigert (403). Mögliche Ursachen:\n' +
-            '1. Google Calendar API ist in der Google Cloud Console nicht aktiviert.\n' +
-            '2. OAuth-Consent-Screen fehlt der Scope „calendar.readonly".\n' +
-            'Token zurücksetzen und erneut anmelden.',
-          )
         } else {
           setError(err.message)
         }
@@ -235,9 +263,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     <>
       <Divider sx={{ mb: 2 }}>Google Kalender</Divider>
       {error && (
-        <Typography variant="body2" color="error" sx={{ mb: 2, whiteSpace: 'pre-line' }}>
-          {error}
-        </Typography>
+        <Box sx={{ mb: 2 }}>
+          <ErrorMessage message={error} copied={copied} onCopy={handleCopyError} />
+        </Box>
       )}
       {tokenOk ? (
         <>
@@ -346,9 +374,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       {!tokenOk && (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
           {error ? (
-            <Typography variant="body2" color="error" sx={{ whiteSpace: 'pre-line' }}>
-              {error}
-            </Typography>
+            <Box sx={{ width: '100%' }}>
+              <ErrorMessage message={error} copied={copied} onCopy={handleCopyError} />
+            </Box>
           ) : (
             <Typography variant="body2" color="text.secondary">
               Nicht angemeldet.
@@ -375,10 +403,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       {tokenOk && loading && <CircularProgress size={20} />}
 
       {tokenOk && error && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
-          <Typography variant="body2" color="error" sx={{ whiteSpace: 'pre-line' }}>
-            {error}
-          </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, width: '100%' }}>
+          <ErrorMessage message={error} copied={copied} onCopy={handleCopyError} />
           <Button
             size="small"
             variant="text"
