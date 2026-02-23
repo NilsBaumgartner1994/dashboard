@@ -187,7 +187,12 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         if (err.message === 'TOKEN_EXPIRED') {
           setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
         } else if (err.message === 'TOKEN_FORBIDDEN') {
-          setError('Zugriff verweigert (403). Bitte Token zurücksetzen und erneut anmelden.')
+          setError(
+            'Zugriff verweigert (403). Mögliche Ursachen:\n' +
+            '1. Google Calendar API ist in der Google Cloud Console nicht aktiviert.\n' +
+            '2. OAuth-Consent-Screen fehlt der Scope „calendar.readonly".\n' +
+            'Token zurücksetzen und erneut anmelden.',
+          )
         } else {
           setError(err.message)
         }
@@ -229,6 +234,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const settingsContent = (
     <>
       <Divider sx={{ mb: 2 }}>Google Kalender</Divider>
+      {error && (
+        <Typography variant="body2" color="error" sx={{ mb: 2, whiteSpace: 'pre-line' }}>
+          {error}
+        </Typography>
+      )}
       {tokenOk ? (
         <>
           <TextField
@@ -336,7 +346,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       {!tokenOk && (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
           {error ? (
-            <Typography variant="body2" color="error">
+            <Typography variant="body2" color="error" sx={{ whiteSpace: 'pre-line' }}>
               {error}
             </Typography>
           ) : (
@@ -366,7 +376,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
       {tokenOk && error && (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
-          <Typography variant="body2" color="error">
+          <Typography variant="body2" color="error" sx={{ whiteSpace: 'pre-line' }}>
             {error}
           </Typography>
           <Button
