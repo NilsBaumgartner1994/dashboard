@@ -45,29 +45,35 @@ type CalendarEvent = CalendarEventData
 const NOMINATIM_USER_AGENT = 'NilsBaumgartner1994-dashboard/1.0 (https://github.com/NilsBaumgartner1994/dashboard)'
 
 async function geocodeName(name: string): Promise<{ lat: number; lon: number; name: string } | null> {
-  const query = name.trim()
-  // Try Nominatim first – handles both full addresses and place names
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`,
-      { headers: { 'User-Agent': NOMINATIM_USER_AGENT } },
-    )
-    const data = await res.json()
-    if (Array.isArray(data) && data.length > 0) {
-      const displayName: string = data[0].display_name ?? query
-      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: displayName.split(',')[0].trim() }
-    }
-  } catch { /* ignore */ }
-  // Fallback: Open-Meteo geocoding (city/place names)
-  try {
-    const res = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=de&format=json`,
-    )
-    const data = await res.json()
-    if (data.results?.length) {
-      return { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name }
-    }
-  } catch { /* ignore */ }
+  let query = name.trim()
+  while (query) {
+    // Try Nominatim first – handles both full addresses and place names
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`,
+        { headers: { 'User-Agent': NOMINATIM_USER_AGENT } },
+      )
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        const displayName: string = data[0].display_name ?? query
+        return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: displayName.split(',')[0].trim() }
+      }
+    } catch { /* ignore */ }
+    // Fallback: Open-Meteo geocoding (city/place names)
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=de&format=json`,
+      )
+      const data = await res.json()
+      if (data.results?.length) {
+        return { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name }
+      }
+    } catch { /* ignore */ }
+    // No result found – strip the first comma-separated segment and retry
+    const commaIdx = query.indexOf(',')
+    if (commaIdx === -1) break
+    query = query.slice(commaIdx + 1).trim()
+  }
   return null
 }
 
@@ -349,6 +355,20 @@ export default function RouteTile({ tile }: RouteTileProps) {
     setTileDestGeoLoading(false)
   }
 
+  const handleTileStartInputChange = (value: string) => {
+    setTileStartInput(value)
+    setTileStartLat(undefined)
+    setTileStartLon(undefined)
+    setTileStartName(undefined)
+  }
+
+  const handleTileDestInputChange = (value: string) => {
+    setTileDestInput(value)
+    setTileDestLat(undefined)
+    setTileDestLon(undefined)
+    setTileDestName(undefined)
+  }
+
   const getExtraConfig = (): Record<string, unknown> => ({
     startName: startGeoName || startInput || undefined,
     startLat,
@@ -479,24 +499,34 @@ export default function RouteTile({ tile }: RouteTileProps) {
           <Typography variant="caption" color="text.secondary">Start</Typography>
           {/* Show inline input when start is not fixed in settings and no global default */}
           {!configHasStart && !defaultHasLocation ? (
-            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
-              <TextField
-                size="small"
-                placeholder="Startort eingeben"
-                value={tileStartInput}
-                onChange={(e) => setTileStartInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeStart() }}
-                sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
-              />
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={handleTileGeocodeStart}
-                disabled={tileStartGeoLoading || !tileStartInput.trim()}
-                sx={{ minWidth: 0, px: 1 }}
-              >
-                {tileStartGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
-              </Button>
+            <Box sx={{ mt: 0.25 }}>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <TextField
+                  size="small"
+                  placeholder="Startort eingeben"
+                  value={tileStartInput}
+                  onChange={(e) => handleTileStartInputChange(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeStart() }}
+                  sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={handleTileGeocodeStart}
+                  disabled={tileStartGeoLoading || !tileStartInput.trim()}
+                  sx={{ minWidth: 0, px: 1 }}
+                >
+                  {tileStartGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
+                </Button>
+              </Box>
+              {tileHasStart && (
+                <Typography variant="caption" color="success.main" sx={{ display: 'block' }}>
+                  ✓ {tileStartInput}
+                  {config.showCoordinates && tileStartLat !== undefined && tileStartLon !== undefined && (
+                    <span> ({tileStartLat.toFixed(3)}, {tileStartLon.toFixed(3)})</span>
+                  )}
+                </Typography>
+              )}
             </Box>
           ) : (
             <Typography variant="body2" noWrap>
@@ -544,23 +574,14 @@ export default function RouteTile({ tile }: RouteTileProps) {
               )}
             </Typography>
           ) : !config.useCalendar && (
-            /* Destination not fixed in settings – show inline input */
-            tileHasDest ? (
-              <Typography variant="body2" noWrap>
-                {tileDestName ?? tileDestInput}
-                {config.showCoordinates && tileDestLat !== undefined && tileDestLon !== undefined && (
-                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                    ({tileDestLat.toFixed(3)}, {tileDestLon.toFixed(3)})
-                  </Typography>
-                )}
-              </Typography>
-            ) : (
-              <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
+            /* Destination not fixed in settings – always show inline input */
+            <Box sx={{ mt: 0.25 }}>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
                 <TextField
                   size="small"
                   placeholder="Zielort eingeben"
                   value={tileDestInput}
-                  onChange={(e) => setTileDestInput(e.target.value)}
+                  onChange={(e) => handleTileDestInputChange(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeDest() }}
                   sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
                 />
@@ -574,7 +595,15 @@ export default function RouteTile({ tile }: RouteTileProps) {
                   {tileDestGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
                 </Button>
               </Box>
-            )
+              {tileHasDest && (
+                <Typography variant="caption" color="success.main" sx={{ display: 'block' }}>
+                  ✓ {tileDestInput}
+                  {config.showCoordinates && tileDestLat !== undefined && tileDestLon !== undefined && (
+                    <span> ({tileDestLat.toFixed(3)}, {tileDestLon.toFixed(3)})</span>
+                  )}
+                </Typography>
+              )}
+            </Box>
           )}
         </Box>
 
