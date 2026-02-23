@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Box,
   IconButton,
@@ -75,6 +75,8 @@ function DraggableTile({
   gridColumns: number
 }) {
   const { updateTile, removeTile } = useStore()
+  const resizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: tile.id,
     disabled: !editMode || isMobile,
@@ -95,6 +97,33 @@ function DraggableTile({
 
   const TileComp = tileRegistry[tile.type]?.component ?? SampleTile
 
+  const handleResizePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    resizeStartRef.current = { x: e.clientX, y: e.clientY, w: tile.w, h: tile.h }
+  }
+
+  const handleResizePointerMove = (e: React.PointerEvent) => {
+    if (!resizeStartRef.current) return
+    const gridEl = document.getElementById('dashboard-grid')
+    if (!gridEl) return
+    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
+    const cellW = gridEl.clientWidth / gridColCount
+    const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
+    const dx = Math.round((e.clientX - resizeStartRef.current.x) / cellW)
+    const dy = Math.round((e.clientY - resizeStartRef.current.y) / cellH)
+    const newW = Math.max(1, Math.min(gridColCount - tile.x, resizeStartRef.current.w + dx))
+    const newH = Math.max(1, resizeStartRef.current.h + dy)
+    if (newW !== tile.w || newH !== tile.h) {
+      updateTile(tile.id, { w: newW, h: newH })
+    }
+  }
+
+  const handleResizePointerUp = () => {
+    resizeStartRef.current = null
+  }
+
   return (
     <Box ref={setNodeRef} style={style}>
       <Box
@@ -104,31 +133,64 @@ function DraggableTile({
         <TileComp tile={tile} />
       </Box>
       {editMode && (
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: 4,
-            right: 4,
-            display: 'flex',
-            gap: 0.25,
-            backgroundColor: 'background.paper',
-            borderRadius: 1,
-            p: 0.5,
-            zIndex: 10,
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <Tooltip title={tile.hidden ? 'Show' : 'Hide'}>
-            <IconButton size="small" onClick={() => updateTile(tile.id, { hidden: !tile.hidden })}>
-              {tile.hidden ? <VisibilityIcon fontSize="inherit" /> : <VisibilityOffIcon fontSize="inherit" />}
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton size="small" color="error" onClick={() => removeTile(tile.id)}>
-              <DeleteIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-        </Box>
+        <>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 4,
+              right: 4,
+              display: 'flex',
+              gap: 0.25,
+              backgroundColor: 'background.paper',
+              borderRadius: 1,
+              p: 0.5,
+              zIndex: 10,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <Tooltip title={tile.hidden ? 'Show' : 'Hide'}>
+              <IconButton size="small" onClick={() => updateTile(tile.id, { hidden: !tile.hidden })}>
+                {tile.hidden ? <VisibilityIcon fontSize="inherit" /> : <VisibilityOffIcon fontSize="inherit" />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Delete">
+              <IconButton size="small" color="error" onClick={() => removeTile(tile.id)}>
+                <DeleteIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          {!isMobile && (
+            <Box
+              sx={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 20,
+                height: 20,
+                cursor: 'se-resize',
+                zIndex: 11,
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'flex-end',
+                p: '3px',
+              }}
+              onPointerDown={handleResizePointerDown}
+              onPointerMove={handleResizePointerMove}
+              onPointerUp={handleResizePointerUp}
+            >
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRight: '2px solid',
+                  borderBottom: '2px solid',
+                  borderColor: 'primary.main',
+                  opacity: 0.8,
+                }}
+              />
+            </Box>
+          )}
+        </>
       )}
     </Box>
   )
