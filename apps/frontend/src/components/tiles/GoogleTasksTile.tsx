@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google'
 import {
   Box,
@@ -146,15 +146,38 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
   const [settingsListId, setSettingsListId] = useState(selectedListId)
 
   // ── Google login (implicit flow, tasks scope) ──────────────────────────────
+  const isSilentRefresh = useRef(false)
+
   const login = useGoogleLogin({
     flow: 'implicit',
     scope: 'https://www.googleapis.com/auth/tasks',
     onSuccess: (tokenResponse) => {
+      isSilentRefresh.current = false
       setToken(tokenResponse.access_token, tokenResponse.expires_in ?? 3600)
       setError(null)
     },
-    onError: () => setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.'),
+    onError: () => {
+      if (!isSilentRefresh.current) {
+        setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.')
+      }
+      isSilentRefresh.current = false
+    },
   })
+
+  const loginRef = useRef(login)
+  useEffect(() => { loginRef.current = login }, [login])
+
+  // ── Automatic silent token refresh before expiry ─────────────────────────
+  useEffect(() => {
+    if (!tokenExpiry || !tasksToken) return
+    const msUntilExpiry = tokenExpiry - Date.now()
+    const refreshDelay = Math.max(0, msUntilExpiry - 5 * 60 * 1000)
+    const timer = setTimeout(() => {
+      isSilentRefresh.current = true
+      loginRef.current({ prompt: 'none' })
+    }, refreshDelay)
+    return () => clearTimeout(timer)
+  }, [tokenExpiry, tasksToken])
 
   // ── Fetch task lists ───────────────────────────────────────────────────────
   const fetchTaskLists = useCallback(
