@@ -18,7 +18,6 @@ import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
-import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 
 interface CalendarInfo {
@@ -60,7 +59,6 @@ function GoogleCalendarTileUnconfigured({ tile }: { tile: TileInstance }) {
 // ─── Inner component (needs GoogleOAuthProvider in tree) ──────────────────────
 
 function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
-  const updateTile = useStore((s) => s.updateTile)
   const { accessToken, tokenExpiry, setToken, clearToken } = useGoogleAuthStore()
   const config = (tile.config ?? {}) as GoogleCalendarConfig
   const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
@@ -178,11 +176,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     )
   }
 
-  const handleSaveSettings = () => {
+  const getExtraConfig = () => {
     const ids = settingsCalendars.filter((c) => c.selected).map((c) => c.id)
-    updateTile(tile.id, {
-      config: { ...tile.config, selectedCalendarIds: ids },
-    })
+    return { selectedCalendarIds: ids }
   }
 
   const toggleCalendar = (id: string) => {
@@ -255,7 +251,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     <BaseTile
       tile={tile}
       settingsChildren={settingsContent}
-      onSaveSettings={handleSaveSettings}
+      getExtraConfig={getExtraConfig}
       onSettingsOpen={handleSettingsOpen}
     >
       {/* Header */}
