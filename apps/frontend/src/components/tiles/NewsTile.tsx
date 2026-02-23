@@ -26,6 +26,7 @@ import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { useUIStore } from '../../store/useUIStore'
 
 // Pre-defined RSS feed presets
 const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
@@ -43,12 +44,63 @@ const CORS_PROXIES = [
   'https://corsproxy.io/?url=',
 ]
 
+const MEDIA_NS = 'http://search.yahoo.com/mrss/'
+
+/** Convert a Google News HTML topic/search URL to its RSS counterpart if needed. */
+function normalizeRssUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.hostname === 'news.google.com' && !u.pathname.startsWith('/rss/')) {
+      u.pathname = '/rss' + u.pathname
+      return u.toString()
+    }
+  } catch { /* ignore */ }
+  return url
+}
+
+/** Format a RSS pubDate string into a human-readable German locale string. */
+function formatPubDate(pubDate: string): string {
+  if (!pubDate) return ''
+  try {
+    const d = new Date(pubDate)
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleString('de-DE', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
+/** Try to extract an image URL from an RSS <item> element. */
+function extractRssImage(item: Element): string {
+  // media:content
+  const mc = item.getElementsByTagNameNS(MEDIA_NS, 'content')[0]
+  if (mc?.getAttribute('url')) return mc.getAttribute('url') ?? ''
+  // media:thumbnail
+  const mt = item.getElementsByTagNameNS(MEDIA_NS, 'thumbnail')[0]
+  if (mt?.getAttribute('url')) return mt.getAttribute('url') ?? ''
+  // enclosure (image/...)
+  const enc = item.querySelector('enclosure')
+  if (enc?.getAttribute('type')?.startsWith('image/')) {
+    const u = enc.getAttribute('url')
+    if (u) return u
+  }
+  // img tag inside <description> text (CDATA containing HTML)
+  const rawDesc = item.querySelector('description')?.textContent ?? ''
+  const m = rawDesc.match(/<img[^>]+src="([^"]+)"/i)
+  if (m?.[1]) return m[1]
+  return ''
+}
+
 interface NewsItem {
   title: string
   description: string
   link: string
   pubDate: string
   source: string
+  imageUrl: string
 }
 
 interface NewsConfig {
@@ -103,38 +155,41 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
       link: getRssItemLink(item),
       pubDate: item.querySelector('pubDate')?.textContent?.trim() ?? '',
       source: item.querySelector('source')?.textContent?.trim() || sourceLabel,
+      imageUrl: extractRssImage(item),
     }))
   } catch {
     return []
   }
 }
 
-async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null }> {
-  const tryFetch = async (fetchUrl: string): Promise<string | null> => {
-    try {
-      const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) return null
-      return await res.text()
-    } catch {
-      return null
-    }
+async function tryFetchText(fetchUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return null
+    return await res.text()
+  } catch {
+    return null
   }
+}
+
+async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null }> {
+  const normalizedUrl = normalizeRssUrl(url)
 
   const sourceLabel = (() => {
-    try { return new URL(url).hostname.replace('www.', '') }
-    catch { return url }
+    try { return new URL(normalizedUrl).hostname.replace('www.', '') }
+    catch { return normalizedUrl }
   })()
 
   // Try via CORS proxies in order until one succeeds
   let text: string | null = null
   for (const proxy of CORS_PROXIES) {
-    text = await tryFetch(`${proxy}${encodeURIComponent(url)}`)
+    text = await tryFetchText(`${proxy}${encodeURIComponent(normalizedUrl)}`)
     if (text) break
   }
 
   // Fallback: try via configured backend CORS proxy
   if (!text && backendUrl) {
-    text = await tryFetch(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+    text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(normalizedUrl)}`)
   }
 
   if (text) {
@@ -145,17 +200,48 @@ async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: New
   return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
 }
 
+/** Asynchronously fetch the og:image from an article URL via CORS proxy. */
+async function fetchArticleImage(articleUrl: string, backendUrl?: string): Promise<string> {
+  const extractOgImage = (html: string): string => {
+    const m =
+      html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/) ??
+      html.match(/<meta[^>]+content="([^"]+)"[^>]+property="og:image"/)
+    return m?.[1] ?? ''
+  }
+
+  for (const proxy of CORS_PROXIES) {
+    const html = await tryFetchText(`${proxy}${encodeURIComponent(articleUrl)}`)
+    if (html) {
+      const img = extractOgImage(html)
+      if (img) return img
+    }
+  }
+
+  if (backendUrl) {
+    const html = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(articleUrl)}`)
+    if (html) {
+      const img = extractOgImage(html)
+      if (img) return img
+    }
+  }
+
+  return ''
+}
+
 export default function NewsTile({ tile }: NewsTileProps) {
   const config = (tile.config ?? {}) as NewsConfig
   const feeds: string[] = config.feeds ?? []
   const interval = config.interval ?? 10
   const backendUrl = useStore((s) => s.backendUrl)
+  const openModal = useUIStore((s) => s.openModal)
+  const closeModal = useUIStore((s) => s.closeModal)
 
   const [items, setItems] = useState<NewsItem[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [fetchErrors, setFetchErrors] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [imageCache, setImageCache] = useState<Record<string, string>>({})
 
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
@@ -163,15 +249,58 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [googleSearchInput, setGoogleSearchInput] = useState('')
   const [intervalInput, setIntervalInput] = useState(String(config.interval ?? 10))
 
-  // Timers
+  // Timers / refs
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const settingsOpenerRef = useRef<(() => void) | null>(null)
+  const imageCacheRef = useRef<Record<string, string>>({})
+  const imageFetchingRef = useRef<Set<string>>(new Set())
+
+  const handleModalOpen = () => {
+    setModalOpen(true)
+    openModal()
+  }
+
+  const handleModalClose = () => {
+    setModalOpen(false)
+    closeModal()
+  }
+
+  // Preload og:image from an article URL (current + next item while current is displayed)
+  const prefetchImage = useCallback(async (item: NewsItem) => {
+    if (!item.link) return
+    // Item already has image from RSS – no need to fetch
+    if (item.imageUrl) return
+    // Already cached or in flight
+    if (imageCacheRef.current[item.link] !== undefined) return
+    if (imageFetchingRef.current.has(item.link)) return
+
+    imageFetchingRef.current.add(item.link)
+    try {
+      const img = await fetchArticleImage(item.link, backendUrl)
+      imageCacheRef.current[item.link] = img
+      setImageCache((prev) => ({ ...prev, [item.link]: img }))
+    } finally {
+      imageFetchingRef.current.delete(item.link)
+    }
+  }, [backendUrl])
+
+  // Prefetch images for current and next item whenever the displayed item changes
+  useEffect(() => {
+    if (items.length === 0) return
+    const cur = items[currentIndex]
+    const next = items[(currentIndex + 1) % items.length]
+    if (cur) void prefetchImage(cur)
+    if (next && next !== cur) void prefetchImage(next)
+  }, [currentIndex, items, prefetchImage])
 
   // Fetch all feeds
   const fetchAllFeeds = useCallback(async (feedUrls: string[]) => {
     if (!feedUrls.length) return
     setLoading(true)
     setFetchErrors([])
+    setImageCache({})
+    imageCacheRef.current = {}
+    imageFetchingRef.current.clear()
     try {
       const results = await Promise.all(feedUrls.map((url) => fetchFeed(url, backendUrl)))
       const allItems = results.flatMap((r) => r.items).filter((item) => item.title)
@@ -266,8 +395,8 @@ export default function NewsTile({ tile }: NewsTileProps) {
         <TextField
           fullWidth
           size="small"
-          label="Eigene RSS-URL"
-          placeholder="https://example.com/feed.rss"
+          label="RSS-URL oder Google News/Topics-URL"
+          placeholder="https://example.com/feed.rss oder https://news.google.com/topics/..."
           value={customUrlInput}
           onChange={(e) => setCustomUrlInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') addCustomUrl() }}
@@ -350,6 +479,9 @@ export default function NewsTile({ tile }: NewsTileProps) {
   )
 
   const currentItem = items[currentIndex] ?? null
+  const currentImageUrl = currentItem
+    ? (currentItem.imageUrl || imageCache[currentItem.link] || undefined)
+    : undefined
 
   return (
     <>
@@ -358,7 +490,8 @@ export default function NewsTile({ tile }: NewsTileProps) {
         settingsChildren={settingsContent}
         getExtraConfig={getExtraConfig}
         onSettingsOpen={handleSettingsOpen}
-        onTileClick={items.length > 0 ? () => setModalOpen(true) : undefined}
+        onTileClick={items.length > 0 ? handleModalOpen : undefined}
+        overrideBackgroundImage={currentImageUrl}
         settingsOpenerRef={settingsOpenerRef}
       >
         {/* No feeds configured */}
@@ -446,6 +579,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
               >
                 {currentItem.title}
               </Typography>
+              {currentItem.pubDate && (
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.55)', display: 'block', mt: 0.25 }}>
+                  {formatPubDate(currentItem.pubDate)}
+                </Typography>
+              )}
             </Box>
           </>
         )}
@@ -454,7 +592,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
       {/* ── News detail modal ─────────────────────────────────────────────── */}
       <LargeModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={handleModalClose}
         title={(config.name as string) || 'News'}
       >
         <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
@@ -477,6 +615,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
                   <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.4 }}>
                     {item.title}
                   </Typography>
+                  {item.pubDate && (
+                    <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.25 }}>
+                      {formatPubDate(item.pubDate)}
+                    </Typography>
+                  )}
                   {item.description && (
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
                       {item.description}
