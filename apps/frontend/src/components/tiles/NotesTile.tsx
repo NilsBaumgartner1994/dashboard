@@ -41,12 +41,12 @@ interface NoteEditorProps {
 }
 
 function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) {
-  const [title, setTitle] = useState(note?.title ?? '')
   const [content, setContent] = useState(note?.content ?? '')
   const [mode, setMode] = useState<'edit' | 'preview'>('edit')
 
   const handleSave = () => {
-    onSave(title.trim() || 'Neue Notiz', content)
+    const firstLine = content.split('\n').find((line) => line.trim() !== '')?.replace(/^#+\s*/, '').trim() ?? ''
+    onSave(firstLine || 'Neue Notiz', content)
   }
 
   return (
@@ -58,15 +58,7 @@ function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) 
       maxWidth="md"
       PaperProps={{ sx: { height: '80vh', display: 'flex', flexDirection: 'column' } }}
     >
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 1 }}>
-        <TextField
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Titel"
-          variant="standard"
-          sx={{ flex: 1, '& input': { fontSize: '1.1rem', fontWeight: 'bold' } }}
-          inputProps={{ 'aria-label': 'Notiz Titel' }}
-        />
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 1, justifyContent: 'flex-end' }}>
         <ToggleButtonGroup
           value={mode}
           exclusive
@@ -99,6 +91,7 @@ function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) 
           <TextField
             multiline
             fullWidth
+            autoFocus
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Notiz in Markdown eingeben…"
