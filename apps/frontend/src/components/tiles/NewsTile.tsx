@@ -782,20 +782,37 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 mb: -1,
               }}
             >
-              {currentItem.source && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+                {currentItem.source && (
                   <Chip
                     label={currentItem.source}
                     size="small"
                     sx={{ height: 16, fontSize: '0.6rem', backgroundColor: 'rgba(255,255,255,0.15)', color: '#fff' }}
                   />
+                )}
+                <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   {items.length > 1 && (
-                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', ml: 'auto' }}>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
                       {currentIndex + 1}/{items.length}
                     </Typography>
                   )}
+                  {currentItem.link && (
+                    <Tooltip title="Artikel öffnen">
+                      <IconButton
+                        size="small"
+                        component="a"
+                        href={currentItem.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{ color: 'rgba(255,255,255,0.7)', p: 0.25 }}
+                      >
+                        <OpenInNewIcon sx={{ fontSize: '0.9rem' }} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Box>
-              )}
+              </Box>
               <Typography
                 variant="body2"
                 sx={{
