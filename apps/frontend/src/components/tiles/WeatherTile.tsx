@@ -565,6 +565,7 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
                           Math.round(((hour.temp - hourBarMinTemp) / hourRange) * MAX_BAR_HEIGHT),
                         )
                         const barColor = getTempBarColor(hour.temp)
+                        const hourInfo = getWeatherInfo(hour.code)
                         return (
                           <Box
                             key={hour.time}
@@ -579,6 +580,9 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
                             <Typography variant="caption" sx={{ fontSize: '0.65rem', lineHeight: 1.2 }}>
                               {hour.temp}°
                             </Typography>
+                            <Tooltip title={hourInfo.label}>
+                              <hourInfo.Icon aria-label={hourInfo.label} sx={{ fontSize: 16, color: hourInfo.color }} />
+                            </Tooltip>
                             <Box sx={{ height: MAX_BAR_HEIGHT, display: 'flex', alignItems: 'flex-end' }}>
                               <Box
                                 sx={{
