@@ -21,7 +21,7 @@ import {
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
-import RssFeedIcon from '@mui/icons-material/RssFeed'
+import SettingsIcon from '@mui/icons-material/Settings'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -165,6 +165,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
 
   // Timers
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const settingsOpenerRef = useRef<(() => void) | null>(null)
 
   // Fetch all feeds
   const fetchAllFeeds = useCallback(async (feedUrls: string[]) => {
@@ -358,13 +359,18 @@ export default function NewsTile({ tile }: NewsTileProps) {
         getExtraConfig={getExtraConfig}
         onSettingsOpen={handleSettingsOpen}
         onTileClick={items.length > 0 ? () => setModalOpen(true) : undefined}
+        settingsOpenerRef={settingsOpenerRef}
       >
         {/* No feeds configured */}
         {feeds.length === 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1, flexDirection: 'column' }}>
-            <RssFeedIcon sx={{ fontSize: 32, color: 'text.disabled' }} />
+            <Tooltip title="Feeds konfigurieren">
+              <IconButton onClick={() => settingsOpenerRef.current?.()} sx={{ p: 1 }}>
+                <SettingsIcon sx={{ fontSize: 40, color: 'text.disabled' }} />
+              </IconButton>
+            </Tooltip>
             <Typography variant="body2" color="text.secondary" textAlign="center">
-              Keine Feeds konfiguriert.{'\n'}⚙ drücken und Quellen wählen.
+              Keine Feeds konfiguriert. Klicken zum Konfigurieren.
             </Typography>
           </Box>
         )}
