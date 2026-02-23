@@ -31,6 +31,7 @@ interface RouteConfig {
   // Options
   useCalendar?: boolean
   showTimer?: boolean
+  showCoordinates?: boolean
 }
 
 interface CalendarEvent {
@@ -80,11 +81,6 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const { accessToken, tokenExpiry } = useGoogleAuthStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
-  // Effective start: tile-specific or global default
-  const effectiveStartLat = config.startLat ?? defaultLat
-  const effectiveStartLon = config.startLon ?? defaultLon
-  const effectiveStartName = config.startName ?? defaultLocationName
-
   // Runtime state
   const [travelSeconds, setTravelSeconds] = useState<number | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
@@ -117,6 +113,35 @@ export default function RouteTile({ tile }: RouteTileProps) {
 
   const [useCalendar, setUseCalendar] = useState(config.useCalendar ?? false)
   const [showTimer, setShowTimer] = useState(config.showTimer ?? false)
+  const [showCoordinates, setShowCoordinates] = useState(config.showCoordinates ?? false)
+
+  // Inline tile inputs (used when locations are not fixed in settings)
+  const [tileStartInput, setTileStartInput] = useState('')
+  const [tileDestInput, setTileDestInput] = useState('')
+  const [tileStartGeoLoading, setTileStartGeoLoading] = useState(false)
+  const [tileDestGeoLoading, setTileDestGeoLoading] = useState(false)
+  const [tileStartLat, setTileStartLat] = useState<number | undefined>(undefined)
+  const [tileStartLon, setTileStartLon] = useState<number | undefined>(undefined)
+  const [tileStartName, setTileStartName] = useState<string | undefined>(undefined)
+  const [tileDestLat, setTileDestLat] = useState<number | undefined>(undefined)
+  const [tileDestLon, setTileDestLon] = useState<number | undefined>(undefined)
+  const [tileDestName, setTileDestName] = useState<string | undefined>(undefined)
+
+  // Effective start: tile-specific > global default > inline tile input
+  // Always use lat/lon from the same source to avoid mismatched pairs
+  const configHasStart = config.startLat !== undefined && config.startLon !== undefined
+  const defaultHasLocation = defaultLat !== undefined && defaultLon !== undefined
+  const tileHasStart = tileStartLat !== undefined && tileStartLon !== undefined
+  const effectiveStartLat = configHasStart ? config.startLat : defaultHasLocation ? defaultLat : tileHasStart ? tileStartLat : undefined
+  const effectiveStartLon = configHasStart ? config.startLon : defaultHasLocation ? defaultLon : tileHasStart ? tileStartLon : undefined
+  const effectiveStartName = configHasStart ? config.startName : defaultHasLocation ? defaultLocationName : tileHasStart ? tileStartName : undefined
+
+  // Effective dest for non-calendar mode: tile config > inline tile input
+  const configHasDest = config.destLat !== undefined && config.destLon !== undefined
+  const tileHasDest = tileDestLat !== undefined && tileDestLon !== undefined
+  const effectiveDestLat = configHasDest ? config.destLat : tileHasDest ? tileDestLat : undefined
+  const effectiveDestLon = configHasDest ? config.destLon : tileHasDest ? tileDestLon : undefined
+  const effectiveDestName = configHasDest ? config.destName : tileHasDest ? tileDestName : undefined
 
   // ── Fetch route ───────────────────────────────────────────────────────────
   const fetchRoute = useCallback(async (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -179,13 +204,13 @@ export default function RouteTile({ tile }: RouteTileProps) {
       if (eventLat !== null && eventLon !== null) {
         fetchRoute(effectiveStartLat, effectiveStartLon, eventLat, eventLon)
       }
-    } else if (config.destLat !== undefined && config.destLon !== undefined) {
-      fetchRoute(effectiveStartLat, effectiveStartLon, config.destLat, config.destLon)
+    } else if (effectiveDestLat !== undefined && effectiveDestLon !== undefined) {
+      fetchRoute(effectiveStartLat, effectiveStartLon, effectiveDestLat, effectiveDestLon)
     }
   }, [
     config.useCalendar,
-    config.destLat,
-    config.destLon,
+    effectiveDestLat,
+    effectiveDestLon,
     effectiveStartLat,
     effectiveStartLon,
     eventLat,
@@ -231,6 +256,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
     setDestGeoError(null)
     setUseCalendar(config.useCalendar ?? false)
     setShowTimer(config.showTimer ?? false)
+    setShowCoordinates(config.showCoordinates ?? false)
   }
 
   const handleGeocodeStart = async () => {
@@ -253,6 +279,22 @@ export default function RouteTile({ tile }: RouteTileProps) {
     setDestGeoLoading(false)
   }
 
+  const handleTileGeocodeStart = async () => {
+    if (!tileStartInput.trim()) return
+    setTileStartGeoLoading(true)
+    const r = await geocodeName(tileStartInput)
+    if (r) { setTileStartLat(r.lat); setTileStartLon(r.lon); setTileStartName(r.name) }
+    setTileStartGeoLoading(false)
+  }
+
+  const handleTileGeocodeDest = async () => {
+    if (!tileDestInput.trim()) return
+    setTileDestGeoLoading(true)
+    const r = await geocodeName(tileDestInput)
+    if (r) { setTileDestLat(r.lat); setTileDestLon(r.lon); setTileDestName(r.name) }
+    setTileDestGeoLoading(false)
+  }
+
   const getExtraConfig = (): Record<string, unknown> => ({
     startName: startGeoName || startInput || undefined,
     startLat,
@@ -262,12 +304,13 @@ export default function RouteTile({ tile }: RouteTileProps) {
     destLon,
     useCalendar,
     showTimer,
+    showCoordinates,
   })
 
   // ── Display values ────────────────────────────────────────────────────────
-  const displayDestName = config.useCalendar ? nextEvent?.location : config.destName
-  const displayDestLat = config.useCalendar ? eventLat ?? undefined : config.destLat
-  const displayDestLon = config.useCalendar ? eventLon ?? undefined : config.destLon
+  const displayDestName = config.useCalendar ? nextEvent?.location : effectiveDestName
+  const displayDestLat = config.useCalendar ? eventLat ?? undefined : effectiveDestLat
+  const displayDestLon = config.useCalendar ? eventLon ?? undefined : effectiveDestLon
 
   const departureTime =
     config.useCalendar && nextEvent?.start?.dateTime && travelSeconds !== null
@@ -351,6 +394,10 @@ export default function RouteTile({ tile }: RouteTileProps) {
         control={<Switch checked={showTimer} onChange={(e) => setShowTimer(e.target.checked)} />}
         label="Abfahrt-Timer anzeigen (HH:MM)"
       />
+      <FormControlLabel
+        control={<Switch checked={showCoordinates} onChange={(e) => setShowCoordinates(e.target.checked)} />}
+        label="Koordinaten (Lat/Lon) auf der Kachel anzeigen"
+      />
     </>
   )
 
@@ -376,14 +423,37 @@ export default function RouteTile({ tile }: RouteTileProps) {
         {/* Start */}
         <Box>
           <Typography variant="caption" color="text.secondary">Start</Typography>
-          <Typography variant="body2" noWrap>
-            {effectiveStartName ?? '—'}
-            {effectiveStartLat !== undefined && effectiveStartLon !== undefined && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                ({effectiveStartLat.toFixed(3)}, {effectiveStartLon.toFixed(3)})
-              </Typography>
-            )}
-          </Typography>
+          {/* Show inline input when start is not fixed in settings and no global default */}
+          {!configHasStart && !defaultHasLocation ? (
+            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
+              <TextField
+                size="small"
+                placeholder="Startort eingeben"
+                value={tileStartInput}
+                onChange={(e) => setTileStartInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeStart() }}
+                sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={handleTileGeocodeStart}
+                disabled={tileStartGeoLoading || !tileStartInput.trim()}
+                sx={{ minWidth: 0, px: 1 }}
+              >
+                {tileStartGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
+              </Button>
+            </Box>
+          ) : (
+            <Typography variant="body2" noWrap>
+              {effectiveStartName ?? '—'}
+              {config.showCoordinates && effectiveStartLat !== undefined && effectiveStartLon !== undefined && (
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                  ({effectiveStartLat.toFixed(3)}, {effectiveStartLon.toFixed(3)})
+                </Typography>
+              )}
+            </Typography>
+          )}
         </Box>
 
         {/* Destination */}
@@ -404,21 +474,53 @@ export default function RouteTile({ tile }: RouteTileProps) {
               </Typography>
               <Typography variant="caption" color="text.secondary" noWrap>
                 {nextEvent.location}
-                {displayDestLat !== undefined && displayDestLon !== undefined && (
+                {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
                   <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
                 )}
               </Typography>
             </>
           )}
-          {!config.useCalendar && (
+          {!config.useCalendar && configHasDest ? (
             <Typography variant="body2" noWrap>
               {displayDestName ?? '—'}
-              {displayDestLat !== undefined && displayDestLon !== undefined && (
+              {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
                 <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
                   ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})
                 </Typography>
               )}
             </Typography>
+          ) : !config.useCalendar && (
+            /* Destination not fixed in settings – show inline input */
+            tileHasDest ? (
+              <Typography variant="body2" noWrap>
+                {tileDestName ?? tileDestInput}
+                {config.showCoordinates && tileDestLat !== undefined && tileDestLon !== undefined && (
+                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                    ({tileDestLat.toFixed(3)}, {tileDestLon.toFixed(3)})
+                  </Typography>
+                )}
+              </Typography>
+            ) : (
+              <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25 }}>
+                <TextField
+                  size="small"
+                  placeholder="Zielort eingeben"
+                  value={tileDestInput}
+                  onChange={(e) => setTileDestInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTileGeocodeDest() }}
+                  sx={{ flex: 1, '& .MuiInputBase-input': { py: 0.5, fontSize: '0.75rem' } }}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={handleTileGeocodeDest}
+                  disabled={tileDestGeoLoading || !tileDestInput.trim()}
+                  sx={{ minWidth: 0, px: 1 }}
+                >
+                  {tileDestGeoLoading ? <CircularProgress size={12} /> : <SearchIcon fontSize="small" />}
+                </Button>
+              </Box>
+            )
           )}
         </Box>
 
@@ -449,9 +551,9 @@ export default function RouteTile({ tile }: RouteTileProps) {
         {!routeLoading && travelSeconds === null && !routeError && (
           <Typography variant="caption" color="text.secondary">
             {effectiveStartLat === undefined
-              ? 'Kein Startpunkt. Standard-Standort in Einstellungen setzen.'
-              : !config.useCalendar && config.destLat === undefined
-              ? 'Kein Ziel konfiguriert. ⚙ drücken.'
+              ? 'Startort eingeben oder Standard-Standort in Einstellungen setzen.'
+              : !config.useCalendar && effectiveDestLat === undefined
+              ? 'Zielort oben eingeben.'
               : ''}
           </Typography>
         )}
