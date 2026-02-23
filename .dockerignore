@@ -1,0 +1,50 @@
+# Ignore node modules everywhere
+node_modules
+**/node_modules
+
+# Ignore data folder entirely except the directus-sync-data subdirectory which we copy explicitly in the Dockerfile
+data/*
+!data/directus-sync-data/**
+
+# VCS and editor/OS files
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Build/artifact folders
+dist
+build
+coverage
+tmp
+.cache
+
+# Logs and env
+*.log
+logs
+.env
+.env.*
+
+# Large asset/customer folders not needed for backend build
+customers
+assets
+screenshots
+
+# Yarn/NPM caches
+.pnpm-store
+.yarn/cache
+
+# Optional: ignore docker-related files in node modules
+**/Dockerfile
+
+# Keep root package files (these are required for dependency install)
+!package.json
+!yarn.lock
+!.yarnrc.yml
+!.yarn/**
+!apps/backend-sync/package.json
+!packages/common/package.json
+!packages/common-backend/package.json
+!tsconfig.json
+

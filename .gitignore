@@ -3,3 +3,65 @@ dist/
 .env
 .DS_Store
 *.local
+
+
+**/*.DS_Store
+.idea/**
+
+apps/backend/Backend/directusExtensions/directus-extension-rocket-meals-bundle/coverage/
+apps/backend/Backend/directusExtensions/.registry/
+
+**/node_modules/
+
+!secrets/.keep
+secrets/**
+apps/backend/database_backups/
+
+!data/.keep
+!data/database/.keep
+data/database/
+!data/database_backups/.keep
+data/database_backups/
+!data/database_file_uploads/.keep
+data/database_file_uploads/
+
+# Ignore all ios generated files
+apps/frontend/app/ios
+apps/frontend/app/eas.json
+
+# Ignore all android generated files
+apps/frontend/app/android
+
+apps/screenshotGenerator/dist/
+apps/screenshotGenerator/.yarn/
+apps/screenshotGenerator/.yarnrc.yml
+secrets/
+
+# Ignore built Directus extension
+apps/backend/Backend/directusExtensions/directus-extension-rocket-meals-bundle/dist/
+
+# Virtual environment folder
+**/venv/
+apps/backend/Backend/directusExtensions/directus-extension-rocket-meals-bundle/test-artifacts
+
+# Prettier cache
+.prettier-cache/
+
+.prettier-cache
+
+# Yarn Berry
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/patches
+!.yarnrc.yml
+
+# Cache & State
+.yarn/install-state.gz
+.pnp.*
+
+reports/sonarCloud/
+reports/data-clumps-doctor/
+
+tmp/

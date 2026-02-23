@@ -1,0 +1,24 @@
+{% layout "base-german" %}
+{% block html_content %}
+
+{% if mailContentFieldRenderedAsHtml %}
+    {{ mailContentFieldRenderedAsHtml }}
+    <hr style="margin: 40px 0 20px 0" width="100%" />
+{% endif %}
+
+{% if mailDownloadLinks %}
+    <h2>{{ 'Download Links'|trans }}</h2>
+
+    <div>
+        Die mit Ihnen geteilten Dateien können Sie über die folgenden Links herunterladen:
+        <ul>
+            {% for downloadLink in mailDownloadLinks %}
+                <li><a href="{{ downloadLink.url }}">{{ downloadLink.name }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+{% block content %}{{ html }}{% endblock %}
+
+{% endblock %}

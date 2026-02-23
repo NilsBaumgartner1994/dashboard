@@ -1,0 +1,55 @@
+services:
+  prepare-data:
+    image: debian:bookworm-slim
+    volumes:
+      - ./preparePermission.sh:/preparePermission.sh
+      - ./data:/data
+      - ./.env:/data/.env
+    working_dir: /
+    entrypoint: ["/bin/sh", "-c", "chmod +x ./preparePermission.sh && ./preparePermission.sh"]
+
+#  traefik:
+#    extends:
+#      service: traefik
+#      file: apps/proxy/docker-compose.yaml
+#    depends_on:
+#      prepare-data:
+#        condition: service_completed_successfully
+
+#  traefik-ping:
+#    extends:
+#      service: traefik-ping
+#      file: apps/proxy/docker-compose.yaml
+
+  my-dashboard-directus:
+    depends_on:
+      prepare-data:
+        condition: service_completed_successfully
+      my-dashboard-cache:
+        condition: service_started
+    extends:
+      service: my-dashboard-directus
+      file: apps/backend/docker-compose.yaml
+
+  my-dashboard-database-sync:
+    env_file:
+      - .env
+    depends_on:
+      prepare-data:
+        condition: service_completed_successfully
+    extends:
+      service: my-dashboard-database-sync
+      file: apps/backend/docker-compose.yaml
+
+  my-dashboard-cache:
+    extends:
+      service: my-dashboard-cache
+      file: apps/backend/docker-compose.yaml
+    networks:
+      - directus_network
+
+networks:
+  directus_network: {}
+  traefik:
+    driver: bridge
+    name: traefik

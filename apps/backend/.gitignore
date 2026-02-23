@@ -1,0 +1,15 @@
+database/
+Backend/uploads/*
+!Backend/uploads/.keep
+.DS_Store
+!Backend/schemes/*.yaml
+Backend/database/data.db
+Backend/backups/*.db
+.idea/
+
+Backend/uploads/
+Backend/node_modules/
+
+Submodules/Server-Toplevel-Proxy
+
+Backend/database/temp/

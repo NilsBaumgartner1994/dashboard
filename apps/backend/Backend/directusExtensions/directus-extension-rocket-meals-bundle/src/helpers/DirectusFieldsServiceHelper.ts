@@ -1,0 +1,92 @@
+import { FieldsService } from './MyServiceClassHelpers';
+import { MyDatabaseHelperInterface } from './MyDatabaseHelperInterface';
+import { CollectionNames } from 'repo-depkit-common';
+
+export class DirectusFieldsServiceHelper {
+  private myDatabaseHelper: MyDatabaseHelperInterface;
+
+  constructor(myDatabaseHelper: MyDatabaseHelperInterface) {
+    this.myDatabaseHelper = myDatabaseHelper;
+  }
+
+  public async getFieldsService(): Promise<FieldsService> {
+    const { FieldsService } = this.myDatabaseHelper.apiContext.services;
+    const schema = await this.myDatabaseHelper.apiContext.getSchema();
+    const database = this.myDatabaseHelper.apiContext.database;
+    // @ts-ignore - workaround for typescript error
+    return new FieldsService({
+      accountability: null, //this makes us admin
+      knex: database, //TODO: i think this is not neccessary
+      schema: schema,
+    });
+  }
+
+  public async getFieldsForCollection(collectionName: CollectionNames) {
+    const fieldsService = await this.getFieldsService();
+    return await fieldsService.readAll(collectionName);
+  }
+
+  /**
+   * {
+   *   "collection": "foods",
+   *   "field": "image",
+   *   "type": "uuid",
+   *   "meta": {
+   *     "collection": "foods",
+   *     "conditions": null,
+   *     "display": null,
+   *     "display_options": null,
+   *     "field": "image",
+   *     "group": null,
+   *     "hidden": false,
+   *     "interface": "file-image",
+   *     "note": null,
+   *     "options": {
+   *       "folder": "7ca24fe5-f805-432a-a52e-623682eef9dc"
+   *     },
+   *     "readonly": false,
+   *     "required": false,
+   *     "sort": 9,
+   *     "special": [
+   *       "file"
+   *     ],
+   *     "translations": [
+   *       {
+   *         "language": "de-DE",
+   *         "translation": "Bild"
+   *       }
+   *     ],
+   *     "validation": null,
+   *     "validation_message": null,
+   *     "width": "full"
+   *   },
+   *   "schema": {
+   *     "name": "image",
+   *     "table": "foods",
+   *     "data_type": "uuid",
+   *     "default_value": null,
+   *     "max_length": null,
+   *     "numeric_precision": null,
+   *     "numeric_scale": null,
+   *     "is_nullable": true,
+   *     "is_unique": false,
+   *     "is_indexed": false,
+   *     "is_primary_key": false,
+   *     "is_generated": false,
+   *     "generation_expression": null,
+   *     "has_auto_increment": false,
+   *     "foreign_key_table": "directus_files",
+   *     "foreign_key_column": "id"
+   *   }
+   * }
+   */
+  public async getFieldForCollectionByFieldName(collectionName: CollectionNames, fieldName: string) {
+    const fields = await this.getFieldsForCollection(collectionName);
+    return fields.find(field => field.field === fieldName);
+  }
+
+  public async getFolderIdForFileFieldInCollection(collectionName: CollectionNames, fieldName: string): Promise<string | null> {
+    const imageFieldMeta = await this.getFieldForCollectionByFieldName(collectionName, fieldName);
+    return imageFieldMeta?.meta?.options?.folder;
+  }
+}

@@ -1,6 +1,28 @@
 {
   "name": "dashboard-monorepo",
   "private": true,
-  "workspaces": ["apps/*"],
-  "packageManager": "yarn@1.22.22"
+  "scripts": {
+    "test": "yarn && yarn app-backend-test",
+    "app-backend-test": "yarn workspace directus-extension-rocket-meals-bundle test",
+    "app-backend-build": "yarn workspace directus-extension-rocket-meals-bundle build",
+    "app-backend-build-without-test": "yarn workspace directus-extension-rocket-meals-bundle buildWithoutTest",
+    "clean": "find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +",
+    "clean-install": "yarn clean && yarn"
+  },
+  "workspaces": [
+    "apps/frontend/app",
+    "apps/backend/Backend/directusExtensions/directus-extension-rocket-meals-bundle",
+    "apps/scripts",
+    "apps/*",
+    "packages/*"
+  ],
+  "packageManager": "yarn@4.9.4",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
+    "eslint": "^8.57.0",
+    "node-gyp": "^10.2.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
+  }
 }

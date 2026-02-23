@@ -1,0 +1,121 @@
+version: "3.8"
+
+services:
+  # The Directus backend
+  my-dashboard-directus:
+    build:
+      context: ./
+    #container_name: "my-dashboard-directus" # "replicas" is ignored if you name your container using container_name: myname
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1 # Single instance
+      endpoint_mode: vip # Virtual IP - https://docs.docker.com/compose/compose-file/deploy/#endpoint_mode
+    networks:
+      - traefik
+      - directus_network
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik
+      traefik.http.middlewares.https-redirect.redirectscheme.scheme: https
+
+      traefik.http.routers.my-dashboard-backend.entrypoints: web
+      traefik.http.routers.my-dashboard-backend.rule: (Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && PathPrefix(`/backend`)
+      traefik.http.routers.my-dashboard-backend.middlewares: https-redirect
+
+      traefik.http.routers.my-dashboard-directus-secure.entrypoints: websecure
+      traefik.http.routers.my-dashboard-directus-secure.rule: (Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && PathPrefix(`/my-dashboard/api`)
+      traefik.http.routers.my-dashboard-directus-secure.middlewares: my-dashboard-directus-stripprefix
+      traefik.http.routers.my-dashboard-directus-secure.tls: "true"
+      traefik.http.routers.my-dashboard-directus-secure.tls.certresolver: "${RESOLVER:-default}"
+      traefik.http.services.my-dashboard-directus-secure.loadbalancer.server.port: 8055
+      traefik.http.middlewares.my-dashboard-directus-stripprefix.stripprefix.prefixes: /my-dashboard/api
+
+      # network: traefik
+    volumes:
+      # By default, uploads are stored in /directus/uploads
+      # Always make sure your volumes matches the storage root when using
+      # local driver
+      # Currently in: rocket-meals/apps/backend/docker-compose.yaml
+      # We want the uploads to be persistent at rocket-meals/data/database_file_uploads
+      # the relative path is therefore ./..(apps)/..(rocket-meals)/data/database_file_uploads
+      - ./../../data/database_file_uploads:/directus/uploads
+      # Make sure to also mount the volume when using SQLite
+      - ./../../data/database:/directus/database
+      # If you want to load extensions from the host
+      - ./Backend/directusExtensions:/directus/extensions
+    environment:
+      # Traefik configuration
+      PUBLIC_URL: "https://${MYHOST:-127.0.0.1}/my-dashboard/api"
+      ROOT_REDIRECT: "/my-dashboard/api/admin"
+      # Directus default configuration
+      HOST: "0.0.0.0" # To bind to all interfaces for Docker
+      PORT: "8055"
+      TZ: "Europe/Berlin"
+      ACCESS_TOKEN_TTL: "15m" # Time to live for the access token
+      REFRESH_TOKEN_TTL: "180d" # Time to live for the refresh token
+      NODE_TLS_REJECT_UNAUTHORIZED: 0 # The HTTPS cert is not complete: "unable to verify the first certificate"
+      MAX_PAYLOAD_SIZE: "80mb"
+      CORS_ENABLED: "true" # Enable CORS - which means that the frontend does not have to be on the same domain
+      CORS_ORIGIN: "true" # Allow all origins - which means that the frontend does not have to be on the same domain
+      REFRESH_TOKEN_COOKIE_SAME_SITE: "lax" # "lax" means that the cookie is sent with same-site requests, and with cross-site top-level navigations
+      # Directus cache configuration
+      CACHE_ENABLED: "true"
+      CACHE_AUTO_PURGE: "true" # Purge when change in tables detected - https://docs.directus.io/self-hosted/config-options.html#cache
+      CACHE_TTL: "5m" # Cache time to live - aka. how long the cache is valid
+      CACHE_STORE: "redis"
+      REDIS: "redis://my-dashboard-cache:6379" # For Cache and Synchronization of Replicas # Required for Replicas to work - Directus communicates which replica is the master
+      # Directus synchronization configuration
+      SYNCHRONIZATION_STORE: "redis" # Multiple instances of Directus need to communicate with each other to not trigger the same event multiple times - https://docs.directus.io/self-hosted/config-options.html#synchronization
+      MARKETPLACE_TRUST: "all" # Trust all marketplace extensions - Directus Marketplace does not support extensions that require a database connection out of the box
+
+      EMAIL_TEMPLATES_PATH: "/directus/extensions/templates" # https://docs.directus.io/self-hosted/email-templates.html
+
+      # Directus Database configuration
+      KEY: "directus-key"
+      SECRET: "directus-secret"
+
+      # Database
+      # Database (SQLite file)
+      DB_CLIENT: "sqlite3"
+      DB_FILENAME: "/directus/database/data.db"
+
+      # Directus Admin user
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@example.com}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin123}"
+
+  my-dashboard-database-sync:
+    build:
+      context: ./../../ # Build from project root for monorepo access
+      dockerfile: apps/backend-sync/Dockerfile
+    develop:
+      watch:
+        - path: ./../../data/directus-sync-data
+          action: rebuild
+    environment:
+      # Directus Admin user
+      ADMIN_EMAIL: "admin@example.com"
+      ADMIN_PASSWORD: "admin123"
+      DIRECTUS_PORT: "8055"
+    networks:
+      - directus_network
+    volumes:
+      # Docker Socket für Container-Management
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Generate Apple SSO client secret
+      - ./genSSO_Apple.sh:/directus/sso/genSSO_Apple.sh
+      # Env File
+      - ./../../data/host.env:/directus/host.env # Placeholder path if needed for sync tooling
+
+  # The cache service for Directus
+  my-dashboard-cache:
+    restart: always
+    image: redis:6.2.6
+    networks:
+      - directus_network
+
+networks:
+  directus_network: {}
+  traefik:
+    driver: bridge
+    name: traefik

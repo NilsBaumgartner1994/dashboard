@@ -1,0 +1,68 @@
+Um einen FTP-Zugang für Ihren Kunden auf Ihrem Debian 5.10 Server einzurichten, können Sie den FTP-Server "vsftpd" verwenden. Hier sind die Schritte, die Sie befolgen müssen:
+
+Installation von vsftpd:
+Öffnen Sie ein Terminal und führen Sie den folgenden Befehl aus, um vsftpd zu installieren:
+
+sql
+Copy code
+sudo apt update
+sudo apt install vsftpd
+Konfiguration von vsftpd:
+Bearbeiten Sie die Konfigurationsdatei von vsftpd mit einem Texteditor Ihrer Wahl (z.B. nano):
+
+bash
+Copy code
+sudo nano /etc/vsftpd.conf
+Ändern oder fügen Sie die folgenden Zeilen in der Datei hinzu:
+
+makefile
+Copy code
+anonymous_enable=NO
+local_enable=YES
+write_enable=YES
+chroot_local_user=YES
+allow_writeable_chroot=YES
+pasv_enable=YES
+pasv_min_port=40000
+pasv_max_port=45000
+Neustart von vsftpd:
+Starten Sie den vsftpd-Dienst neu, um die Änderungen zu übernehmen:
+
+Copy code
+sudo systemctl restart vsftpd
+Erstellen eines FTP-Benutzers:
+Erstellen Sie einen neuen Benutzer für Ihren Kunden, der für den FTP-Zugriff verwendet wird:
+
+Copy code
+sudo adduser ftpuser
+Geben Sie ein sicheres Passwort ein und füllen Sie die Benutzerinformationen aus.
+
+Erstellen eines FTP-Verzeichnisses:
+Erstellen Sie ein Verzeichnis für den FTP-Benutzer, in dem er Dateien hoch- und herunterladen kann:
+
+bash
+Copy code
+sudo mkdir /home/ftpuser/ftp
+sudo chown ftpuser:ftpuser /home/ftpuser/ftp
+
+
+Firewall-Einstellungen:
+Wenn Sie eine Firewall verwenden, stellen Sie sicher, dass die notwendigen Ports geöffnet sind:
+
+sudo apt install ufw
+sudo ufw enable
+
+bash
+Copy code
+sudo ufw allow 20/tcp
+sudo ufw allow 21/tcp
+sudo ufw allow 22/tcp
+sudo ufw allow 40000:45000/tcp
+
+
+Server: sftp://<SERVER>.rocket-meals.de
+Nutzername: ftpuser
+Passwort: <YOUR PASSWORD>
+Port: 22
+Exporte bitte in das verzeichnis ./ftp Ablegen
+Absoluter Pfad: /home/ftpuser/ftp

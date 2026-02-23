@@ -1,0 +1,64 @@
+services:
+  traefik:
+    image: "traefik:v3.0"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.traefik.address=:8080"
+      - "--certificatesresolvers.${RESOLVER:-default}.acme.email=admin@example.com"
+      - "--certificatesresolvers.${RESOLVER:-default}.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.${RESOLVER:-default}.acme.tlschallenge=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.rule=(Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+      - "traefik.http.routers.traefik.middlewares=https-redirect"
+
+      - "traefik.http.routers.traefik-secure.entrypoints=websecure"
+      - "traefik.http.routers.traefik-secure.rule=(Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+      - "traefik.http.routers.traefik-secure.service=api@internal"
+      - "traefik.http.routers.traefik-secure.tls=true"
+      - "traefik.http.routers.traefik-secure.tls.certresolver=${RESOLVER:-default}"
+
+      #- "traefik.http.services.traefik.loadbalancer.server.port=8080"
+
+  traefik-ping:
+    image: "traefik/whoami:v1.10"
+    container_name: "traefik-ping"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+
+      - "traefik.http.routers.traefik-ping.entrypoints=web"
+      - "traefik.http.routers.traefik-ping.rule=(Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && PathPrefix(`/ping`)"
+      - "traefik.http.routers.traefik-ping.middlewares=https-redirect"
+
+      - "traefik.http.routers.traefik-ping-secure.entrypoints=websecure"
+      - "traefik.http.routers.traefik-ping-secure.rule=(Host(`127.0.0.1`) || Host(`${MYHOST:-127.0.0.1}`)) && PathPrefix(`/ping`)"
+      - "traefik.http.routers.traefik-ping-secure.tls=true"
+      - "traefik.http.routers.traefik-ping-secure.tls.certresolver=${RESOLVER:-default}"
+
+networks:
+  traefik:
+    external: true
+    name: traefik
