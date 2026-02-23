@@ -35,8 +35,11 @@ export default function SettingsScreen() {
   const setTiles = useStore((s) => s.setTiles)
   const debugMode = useStore((s) => s.debugMode)
   const setDebugMode = useStore((s) => s.setDebugMode)
+  const backendUrl = useStore((s) => s.backendUrl)
+  const setBackendUrl = useStore((s) => s.setBackendUrl)
   const { clientId, setClientId, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
+  const [backendUrlInput, setBackendUrlInput] = useState(backendUrl)
   const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
   const [locationInput, setLocationInput] = useState(defaultLocationName ?? '')
   const [geocodeLoading, setGeocodeLoading] = useState(false)
@@ -196,6 +199,31 @@ export default function SettingsScreen() {
           control={<Switch checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />}
           label="Debug-Modus aktivieren"
         />
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Backend-Server
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          URL des Backend-Servers, der als CORS-Proxy für RSS-Feeds genutzt wird. Standard:
+          <br />
+          <code>https://test.rocket-meals.de/my-dashboard/api</code>
+        </Typography>
+        <TextField
+          fullWidth
+          label="Backend-Server URL"
+          placeholder="https://test.rocket-meals.de/my-dashboard/api"
+          value={backendUrlInput}
+          onChange={(e) => setBackendUrlInput(e.target.value)}
+          sx={{ mb: 2 }}
+        />
+        <Button
+          variant="contained"
+          onClick={() => setBackendUrl(backendUrlInput.trim() || 'https://test.rocket-meals.de/my-dashboard/api')}
+        >
+          Speichern
+        </Button>
       </Paper>
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>

@@ -37,7 +37,7 @@ export default function DrawerMenu() {
       </IconButton>
       <Drawer anchor="left" open={open} onClose={() => setOpen(false)}>
         <Box sx={{ width: 220 }} role="presentation">
-          <List>
+          <List sx={{ pt: 7 }}>
             {navItems.map((item) => (
               <ListItem key={item.path} disablePadding>
                 <ListItemButton

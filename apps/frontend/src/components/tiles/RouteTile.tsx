@@ -9,10 +9,15 @@ import {
   Switch,
   FormControlLabel,
   List,
+  IconButton,
+  Tooltip,
 } from '@mui/material'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
 import SearchIcon from '@mui/icons-material/Search'
 import EventIcon from '@mui/icons-material/Event'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckIcon from '@mui/icons-material/Check'
+import MapIcon from '@mui/icons-material/Map'
 import BaseTile from './BaseTile'
 import CalendarEventItem from './CalendarEventItem'
 import type { CalendarEventData } from './CalendarEventItem'
@@ -123,6 +128,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
   // Countdown timer
   const [countdown, setCountdown] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [addressCopied, setAddressCopied] = useState(false)
 
   // Settings form state
   const [startInput, setStartInput] = useState(config.startName ?? '')
@@ -553,14 +559,64 @@ export default function RouteTile({ tile }: RouteTileProps) {
           )}
           {config.useCalendar && nextEvent && (
             <List dense disablePadding sx={{ mt: 0.25 }}>
+              {/* Show date of the appointment */}
+              {(nextEvent.start.dateTime || nextEvent.start.date) && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pl: 0.5 }}>
+                  {new Date(nextEvent.start.dateTime ?? (nextEvent.start.date! + 'T00:00:00')).toLocaleDateString('de-DE', {
+                    weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
+                  })}
+                </Typography>
+              )}
               <CalendarEventItem ev={nextEvent} />
               {nextEvent.location && (
-                <Typography variant="caption" color="text.secondary" noWrap sx={{ pl: 0.5 }}>
-                  {nextEvent.location}
-                  {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
-                    <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
-                  )}
-                </Typography>
+                <Box sx={{ pl: 0.5, mt: 0.25 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+                      {nextEvent.location}
+                      {config.showCoordinates && displayDestLat !== undefined && displayDestLon !== undefined && (
+                        <span> ({displayDestLat.toFixed(3)}, {displayDestLon.toFixed(3)})</span>
+                      )}
+                    </Typography>
+                    <Tooltip title={addressCopied ? 'Kopiert!' : 'Adresse kopieren'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(nextEvent.location ?? '').then(() => {
+                            setAddressCopied(true)
+                            setTimeout(() => setAddressCopied(false), 2000)
+                          }).catch(() => { /* ignore */ })
+                        }}
+                      >
+                        {addressCopied ? <CheckIcon fontSize="inherit" color="success" /> : <ContentCopyIcon fontSize="inherit" />}
+                      </IconButton>
+                    </Tooltip>
+                    {(displayDestLat !== undefined && displayDestLon !== undefined) ? (
+                      <Tooltip title="In Google Maps öffnen">
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={`https://www.google.com/maps?q=${displayDestLat},${displayDestLon}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <MapIcon fontSize="inherit" />
+                        </IconButton>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title="In Google Maps öffnen">
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(nextEvent.location)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <MapIcon fontSize="inherit" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                </Box>
               )}
             </List>
           )}
