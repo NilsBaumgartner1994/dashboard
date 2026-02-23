@@ -13,6 +13,8 @@ import {
   TextField,
   Tooltip,
   IconButton,
+  Switch,
+  Paper,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import EventIcon from '@mui/icons-material/Event'
@@ -20,6 +22,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import BugReportIcon from '@mui/icons-material/BugReport'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import CalendarEventItem, { isCalendarWeekMarker } from './CalendarEventItem'
@@ -44,6 +47,8 @@ interface GoogleCalendarConfig {
   backgroundImage?: string
   selectedCalendarIds?: string[]
   daysAhead?: number
+  clientSecret?: string
+  debugMode?: boolean
 }
 
 // ─── Tile shown when no Google Client-ID is configured ────────────────────────
@@ -88,13 +93,49 @@ function ErrorMessage({ message, copied, onCopy }: { message: string; copied: bo
 // ─── Inner component (needs GoogleOAuthProvider in tree) ──────────────────────
 
 function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
-  const { accessToken, tokenExpiry, setToken, clearToken } = useGoogleAuthStore()
+  const { accessToken, tokenExpiry, refreshToken, setToken, setRefreshToken, clearToken } = useGoogleAuthStore()
+  const clientId = useGoogleAuthStore((s) => s.clientId)
   const config = (tile.config ?? {}) as GoogleCalendarConfig
   const selectedCalendarIds: string[] = config.selectedCalendarIds ?? []
   const daysAhead = config.daysAhead ?? 7
+  const clientSecret = config.clientSecret ?? ''
+  const debugMode = config.debugMode ?? false
 
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
   const setCalendarEvents = useCalendarEventsStore((s) => s.setEvents)
+
+  // ── Debug log state ───────────────────────────────────────────────────────
+  const [debugLogs, setDebugLogs] = useState<string[]>([])
+  const addLog = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    setDebugLogs((prev) => [`[${ts}] ${msg}`, ...prev].slice(0, 100))
+  }, [])
+
+  // Log initial token state on mount / reload
+  useEffect(() => {
+    const now = Date.now()
+    if (accessToken && tokenExpiry) {
+      const expiresInSec = Math.round((tokenExpiry - now) / 1000)
+      if (expiresInSec > 0) {
+        addLog(`Gespeicherter Access-Token gefunden (läuft ab in ${expiresInSec}s, Ende: ${new Date(tokenExpiry).toLocaleTimeString('de-DE')})`)
+      } else {
+        addLog(`Gespeicherter Access-Token abgelaufen (vor ${Math.round(-expiresInSec)}s)`)
+      }
+    } else {
+      addLog('Kein Access-Token im Speicher gefunden')
+    }
+    if (refreshToken) {
+      addLog(`Gespeicherter Refresh-Token gefunden: ...${refreshToken.slice(-8)}`)
+    } else {
+      addLog('Kein Refresh-Token im Speicher gefunden')
+    }
+    if (clientSecret) {
+      addLog('Client-Secret konfiguriert → Auth-Code-Flow mit Refresh-Token aktiv')
+    } else {
+      addLog('Kein Client-Secret → Implicit-Flow (kein Refresh-Token)')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Events & calendars state
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -126,47 +167,168 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   // Settings form state (calendar selection inside settings modal)
   const [settingsCalendars, setSettingsCalendars] = useState<(CalendarInfo & { selected: boolean })[]>([])
   const [settingsDaysAhead, setSettingsDaysAhead] = useState(String(daysAhead))
+  const [settingsClientSecret, setSettingsClientSecret] = useState(clientSecret)
+  const [settingsDebugMode, setSettingsDebugMode] = useState(debugMode)
 
-  // ── Google login (implicit flow) ─────────────────────────────────────────
+  // ── Token exchange helpers ────────────────────────────────────────────────
+
+  const exchangeCodeForTokens = useCallback(async (code: string): Promise<{
+    access_token: string
+    expires_in: number
+    refresh_token?: string
+    token_type: string
+  }> => {
+    const params = new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: 'postmessage',
+      grant_type: 'authorization_code',
+    })
+    addLog(`Token-Austausch gestartet (code: ...${code.slice(-8)})`)
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    })
+    const body = await res.text()
+    addLog(`Token-Austausch Antwort: HTTP ${res.status}`)
+    if (!res.ok) {
+      throw new Error(`Token-Austausch fehlgeschlagen: HTTP ${res.status}\n${body}`)
+    }
+    return JSON.parse(body)
+  }, [clientId, clientSecret, addLog])
+
+  const refreshAccessToken = useCallback(async (): Promise<{
+    access_token: string
+    expires_in: number
+    token_type: string
+  }> => {
+    if (!refreshToken || !clientSecret) throw new Error('Kein Refresh-Token oder Client-Secret vorhanden')
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    })
+    addLog('Verwende Refresh-Token zum Erneuern des Access-Tokens...')
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    })
+    const body = await res.text()
+    addLog(`Refresh-Token Antwort: HTTP ${res.status}`)
+    if (!res.ok) {
+      throw new Error(`Access-Token Erneuerung fehlgeschlagen: HTTP ${res.status}\n${body}`)
+    }
+    return JSON.parse(body)
+  }, [clientId, clientSecret, refreshToken, addLog])
+
+  // ── Google login – implicit flow ──────────────────────────────────────────
   const isSilentRefresh = useRef(false)
 
-  const login = useGoogleLogin({
+  const loginImplicit = useGoogleLogin({
     flow: 'implicit',
     scope: 'https://www.googleapis.com/auth/calendar.readonly',
     onSuccess: (tokenResponse) => {
       isSilentRefresh.current = false
+      addLog(`Access-Token empfangen (läuft ab in ${tokenResponse.expires_in ?? 3600}s), gespeichert`)
       setToken(tokenResponse.access_token, tokenResponse.expires_in ?? 3600)
       setError(null)
     },
     onError: () => {
       if (!isSilentRefresh.current) {
+        addLog('Anmeldung fehlgeschlagen (implicit flow)')
         setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.')
+      } else {
+        addLog('Stille Erneuerung fehlgeschlagen (prompt: none) – Anmeldung erforderlich')
       }
       isSilentRefresh.current = false
     },
   })
 
+  // ── Google login – auth-code flow (used when clientSecret is set) ─────────
+  const loginAuthCode = useGoogleLogin({
+    flow: 'auth-code',
+    scope: 'https://www.googleapis.com/auth/calendar.readonly',
+    onSuccess: async (codeResponse) => {
+      addLog(`Autorisierungscode empfangen, tausche gegen Tokens aus...`)
+      try {
+        const tokens = await exchangeCodeForTokens(codeResponse.code)
+        const hasRefresh = !!tokens.refresh_token
+        addLog(
+          `Tokens erhalten: access_token (läuft ab in ${tokens.expires_in}s)` +
+          (hasRefresh ? ', refresh_token gespeichert' : ' (kein refresh_token in Antwort)')
+        )
+        setToken(tokens.access_token, tokens.expires_in)
+        if (tokens.refresh_token) {
+          setRefreshToken(tokens.refresh_token)
+        }
+        setError(null)
+      } catch (err: unknown) {
+        addLog(`Token-Austausch Fehler: ${(err as Error).message}`)
+        setError((err as Error).message)
+      }
+    },
+    onError: (err) => {
+      addLog(`Anmeldung fehlgeschlagen (auth-code flow): ${err.error ?? 'unbekannt'}`)
+      setError('Anmeldung fehlgeschlagen. Bitte erneut versuchen.')
+    },
+  })
+
+  // Use auth-code flow when clientSecret is configured, otherwise implicit
+  const login = clientSecret ? loginAuthCode : loginImplicit
+
   const loginRef = useRef(login)
   useEffect(() => { loginRef.current = login }, [login])
 
-  // ── Automatic silent token refresh before expiry ─────────────────────────
+  // ── Automatic token refresh ───────────────────────────────────────────────
+  // If a refresh token is available (auth-code flow), use it to silently refresh.
+  // Otherwise fall back to implicit silent refresh (prompt: none).
   useEffect(() => {
     if (!tokenExpiry || !accessToken) return
     const msUntilExpiry = tokenExpiry - Date.now()
     const refreshDelay = Math.max(0, msUntilExpiry - 5 * 60 * 1000)
-    const timer = setTimeout(() => {
-      isSilentRefresh.current = true
-      loginRef.current({ prompt: 'none' })
-    }, refreshDelay)
-    return () => clearTimeout(timer)
-  }, [tokenExpiry, accessToken])
+
+    if (refreshToken && clientSecret) {
+      // Refresh token path: call Google token endpoint directly
+      const timer = setTimeout(async () => {
+        addLog(`Access-Token läuft in 5 min ab, erneuere über Refresh-Token...`)
+        try {
+          const tokens = await refreshAccessToken()
+          addLog(`Access-Token erneuert (läuft ab in ${tokens.expires_in}s)`)
+          setToken(tokens.access_token, tokens.expires_in)
+          setError(null)
+        } catch (err: unknown) {
+          const msg = (err as Error).message
+          addLog(`Refresh-Token Fehler: ${msg}`)
+          if (msg.includes('400') || msg.includes('401')) {
+            clearToken()
+            setError('Refresh-Token ungültig oder abgelaufen. Bitte erneut anmelden.')
+          }
+        }
+      }, refreshDelay)
+      return () => clearTimeout(timer)
+    } else {
+      // Implicit silent refresh fallback
+      const timer = setTimeout(() => {
+        addLog('Stille Erneuerung via Google-Popup (prompt: none)...')
+        isSilentRefresh.current = true
+        loginRef.current({ prompt: 'none' })
+      }, refreshDelay)
+      return () => clearTimeout(timer)
+    }
+  }, [tokenExpiry, accessToken, refreshToken, clientSecret, refreshAccessToken, setToken, clearToken, addLog])
 
   // ── Fetch calendars ───────────────────────────────────────────────────────
   const fetchCalendars = useCallback(async (token: string): Promise<CalendarInfo[]> => {
+    addLog('Lade Kalenderliste...')
     const res = await fetch(
       'https://www.googleapis.com/calendar/v3/users/me/calendarList',
       { headers: { Authorization: `Bearer ${token}` } },
     )
+    addLog(`Kalenderliste Antwort: HTTP ${res.status}`)
     if (res.status === 401) {
       clearToken()
       throw new Error('TOKEN_EXPIRED')
@@ -177,12 +339,14 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       throw new Error(`HTTP ${res.status} – ${res.statusText}\n\n${body}`)
     }
     const data = await res.json()
-    return (data.items ?? []).map((c: CalendarInfo & { backgroundColor?: string }) => ({
+    const cals = (data.items ?? []).map((c: CalendarInfo & { backgroundColor?: string }) => ({
       id: c.id,
       summary: c.summary,
       backgroundColor: c.backgroundColor,
     }))
-  }, [clearToken])
+    addLog(`Kalenderliste geladen: ${cals.length} Kalender`)
+    return cals
+  }, [clearToken, addLog])
 
   // ── Fetch events for N days ahead ────────────────────────────────────────
   const fetchEvents = useCallback(
@@ -192,6 +356,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       const timeMax = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days).toISOString()
 
       const targetCals = calIds.length > 0 ? calIds : ['primary']
+      addLog(`Lade Events (${days} Tage, ${targetCals.length} Kalender)...`)
       const results = await Promise.all(
         targetCals.map(async (calId) => {
           const url = new URL(
@@ -205,31 +370,36 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             headers: { Authorization: `Bearer ${token}` },
           })
           if (res.status === 401) {
+            addLog(`Events Antwort: HTTP 401 für Kalender ${calId} – Token abgelaufen`)
             clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
           if (!res.ok) {
             let body = ''
             try { body = await res.text() } catch { /* ignore */ }
+            addLog(`Events Antwort: HTTP ${res.status} für Kalender ${calId}`)
             throw new Error(`HTTP ${res.status} – ${res.statusText} (${calId})\n\n${body}`)
           }
           const data = await res.json()
           return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
         }),
       )
-      return results.flat().sort((a, b) => {
+      const flat = results.flat().sort((a, b) => {
         const ta = a.start.dateTime ?? a.start.date ?? ''
         const tb = b.start.dateTime ?? b.start.date ?? ''
         return ta.localeCompare(tb)
       })
+      addLog(`Events geladen: ${flat.length} Ereignisse`)
+      return flat
     },
-    [clearToken],
+    [clearToken, addLog],
   )
 
   // ── Fetch events for a custom time range ────────────────────────────────
   const fetchEventsForRange = useCallback(
     async (token: string, calIds: string[], timeMin: string, timeMax: string): Promise<CalendarEvent[]> => {
       const targetCals = calIds.length > 0 ? calIds : ['primary']
+      addLog(`Lade Events (Bereich: ${timeMin.slice(0, 10)} – ${timeMax.slice(0, 10)}, ${targetCals.length} Kalender)...`)
       const results = await Promise.all(
         targetCals.map(async (calId) => {
           const url = new URL(
@@ -243,25 +413,29 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             headers: { Authorization: `Bearer ${token}` },
           })
           if (res.status === 401) {
+            addLog(`Events Antwort: HTTP 401 für Kalender ${calId} – Token abgelaufen`)
             clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
           if (!res.ok) {
             let body = ''
             try { body = await res.text() } catch { /* ignore */ }
+            addLog(`Events Antwort: HTTP ${res.status} für Kalender ${calId}`)
             throw new Error(`HTTP ${res.status} – ${res.statusText} (${calId})\n\n${body}`)
           }
           const data = await res.json()
           return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
         }),
       )
-      return results.flat().sort((a, b) => {
+      const flat = results.flat().sort((a, b) => {
         const ta = a.start.dateTime ?? a.start.date ?? ''
         const tb = b.start.dateTime ?? b.start.date ?? ''
         return ta.localeCompare(tb)
       })
+      addLog(`Events geladen: ${flat.length} Ereignisse`)
+      return flat
     },
-    [clearToken],
+    [clearToken, addLog],
   )
 
   // ── Fetch modal events for a given week offset ───────────────────────────
@@ -378,12 +552,19 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       })),
     )
     setSettingsDaysAhead(String(daysAhead))
+    setSettingsClientSecret(clientSecret)
+    setSettingsDebugMode(debugMode)
   }
 
   const getExtraConfig = () => {
     const ids = settingsCalendars.filter((c) => c.selected).map((c) => c.id)
     const parsed = parseInt(settingsDaysAhead, 10)
-    return { selectedCalendarIds: ids, daysAhead: !isNaN(parsed) && parsed >= 1 ? parsed : 7 }
+    return {
+      selectedCalendarIds: ids,
+      daysAhead: !isNaN(parsed) && parsed >= 1 ? parsed : 7,
+      clientSecret: settingsClientSecret.trim(),
+      debugMode: settingsDebugMode,
+    }
   }
 
   const toggleCalendar = (id: string) => {
@@ -461,6 +642,31 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           </Button>
         </>
       )}
+
+      <Divider sx={{ my: 2 }}>Erweiterte Einstellungen</Divider>
+      <TextField
+        fullWidth
+        label="Client Secret (optional, für Refresh-Token)"
+        type="password"
+        value={settingsClientSecret}
+        onChange={(e) => setSettingsClientSecret(e.target.value)}
+        size="small"
+        sx={{ mb: 0.5 }}
+        helperText="Wenn angegeben, wird der Auth-Code-Flow verwendet und ein Refresh-Token gespeichert."
+      />
+      <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1, fontSize: '0.65rem' }}>
+        ⚠️ Nur für selbst gehostete Instanzen geeignet. Das Client-Secret wird im Browser (localStorage) gespeichert und ist für Browser-Devtools sichtbar.
+      </Typography>
+      <FormControlLabel
+        control={
+          <Switch
+            checked={settingsDebugMode}
+            onChange={(e) => setSettingsDebugMode(e.target.checked)}
+            size="small"
+          />
+        }
+        label="Debug-Modus anzeigen"
+      />
     </>
   )
 
@@ -606,6 +812,64 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             Keine Termine
           </Typography>
         </Box>
+      )}
+
+      {/* ── Debug panel ─────────────────────────────────────────────────── */}
+      {debugMode && (
+        <Paper
+          variant="outlined"
+          sx={{ mt: 1, p: 0.75, bgcolor: 'action.hover', borderRadius: 1 }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+            <BugReportIcon sx={{ fontSize: '0.85rem', color: 'warning.main' }} />
+            <Typography variant="caption" fontWeight="bold" color="warning.main" sx={{ fontSize: '0.65rem' }}>
+              DEBUG
+            </Typography>
+          </Box>
+          {/* Token status */}
+          <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontSize: '0.6rem', color: 'text.secondary' }}>
+            Flow: {clientSecret ? 'auth-code + refresh' : 'implicit (kein refresh)'}
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontSize: '0.6rem', color: tokenOk ? 'success.main' : 'error.main' }}>
+            {(() => {
+              if (!accessToken) return 'Access-Token: fehlt'
+              const expiryStr = tokenExpiry && tokenExpiry > Date.now()
+                ? `läuft ab ${new Date(tokenExpiry).toLocaleTimeString('de-DE')}`
+                : 'ABGELAUFEN'
+              return `Access-Token: ...${accessToken.slice(-8)} (${expiryStr})`
+            })()}
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontSize: '0.6rem', color: refreshToken ? 'success.main' : 'text.disabled' }}>
+            Refresh-Token: {refreshToken ? `gespeichert (...${refreshToken.slice(-8)})` : 'fehlt'}
+          </Typography>
+          {/* Log entries */}
+          <Box
+            sx={{
+              mt: 0.5,
+              maxHeight: 90,
+              overflow: 'auto',
+              borderTop: 1,
+              borderColor: 'divider',
+              pt: 0.5,
+            }}
+          >
+            {debugLogs.length === 0 ? (
+              <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.6rem', color: 'text.disabled' }}>
+                Noch keine Logs
+              </Typography>
+            ) : (
+              debugLogs.map((log, i) => (
+                <Typography
+                  key={i}
+                  variant="caption"
+                  sx={{ display: 'block', fontFamily: 'monospace', fontSize: '0.6rem', color: 'text.secondary', lineHeight: 1.3 }}
+                >
+                  {log}
+                </Typography>
+              ))
+            )}
+          </Box>
+        </Paper>
       )}
     </BaseTile>
 
