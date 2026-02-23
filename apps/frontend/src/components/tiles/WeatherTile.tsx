@@ -8,6 +8,9 @@ import {
   Button,
   IconButton,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
 } from '@mui/material'
 import WbSunnyIcon from '@mui/icons-material/WbSunny'
 import WbCloudyIcon from '@mui/icons-material/WbCloudy'
@@ -18,6 +21,7 @@ import ThunderstormIcon from '@mui/icons-material/Thunderstorm'
 import WaterDropIcon from '@mui/icons-material/WaterDrop'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SearchIcon from '@mui/icons-material/Search'
+import CloseIcon from '@mui/icons-material/Close'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -61,7 +65,17 @@ function getWeatherInfo(code: number): { label: string; Icon: React.ElementType;
   return { label: 'Unbekannt', Icon: WbSunnyIcon, color: '#90A4AE' }
 }
 
+function getTempBarColor(temp: number): string {
+  if (temp <= 0) return '#90CAF9'
+  if (temp <= 10) return '#64B5F6'
+  if (temp <= 20) return '#FFB74D'
+  if (temp <= 30) return '#FF7043'
+  return '#F44336'
+}
+
 const DAY_NAMES = ['So.', 'Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.']
+const DAY_NAMES_FULL = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
+const MONTH_NAMES = ['Jan.', 'Feb.', 'Mär.', 'Apr.', 'Mai', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Okt.', 'Nov.', 'Dez.']
 
 interface WeatherConfig {
   location?: string
@@ -74,6 +88,20 @@ interface WeatherConfig {
 interface WeatherData {
   current: { temp: number; code: number }
   daily: Array<{ date: string; code: number; maxTemp: number }>
+}
+
+interface HourData {
+  time: string
+  temp: number
+  code: number
+}
+
+interface DayDetailData {
+  date: string
+  code: number
+  maxTemp: number
+  minTemp: number
+  hours: HourData[]
 }
 
 interface WeatherTileProps {
@@ -106,6 +134,14 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   const [geocodedName, setGeocodedName] = useState<string>(config.location ?? '')
   const [geocodeLoading, setGeocodeLoading] = useState(false)
   const [geocodeError, setGeocodeError] = useState<string | null>(null)
+
+  // Detail modal state
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0)
+  const [detailDays, setDetailDays] = useState<DayDetailData[] | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const detailTsRef = useRef<number>(0)
 
   const fetchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -148,6 +184,46 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
       setLoading(false)
     }
   }, [tile.id])
+
+  const fetchDetailWeather = useCallback(async (lat: number, lon: number) => {
+    setDetailLoading(true)
+    setDetailError(null)
+    try {
+      const url =
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+        `&hourly=temperature_2m,weathercode` +
+        `&daily=weathercode,temperature_2m_max,temperature_2m_min` +
+        `&forecast_days=7&timezone=auto`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const days: DayDetailData[] = (data.daily.time as string[]).map((date, i) => {
+        const hours: HourData[] = []
+        ;(data.hourly.time as string[]).forEach((t, hi) => {
+          if (t.startsWith(date)) {
+            hours.push({
+              time: t.substring(11, 16),
+              temp: Math.round(data.hourly.temperature_2m[hi]),
+              code: data.hourly.weathercode[hi],
+            })
+          }
+        })
+        return {
+          date,
+          code: data.daily.weathercode[i],
+          maxTemp: Math.round(data.daily.temperature_2m_max[i]),
+          minTemp: Math.round(data.daily.temperature_2m_min[i]),
+          hours,
+        }
+      })
+      setDetailDays(days)
+      detailTsRef.current = Date.now()
+    } catch {
+      setDetailError('Detaildaten konnten nicht geladen werden')
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (effectiveLat !== undefined && effectiveLon !== undefined) {
@@ -201,6 +277,18 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
     lon: geocodedLon,
   })
 
+  const hasLocation = effectiveLat !== undefined && effectiveLon !== undefined
+  const currentInfo = weather ? getWeatherInfo(weather.current.code) : null
+
+  const handleTileClick = () => {
+    if (!hasLocation) return
+    setDetailOpen(true)
+    setSelectedDayIndex(0)
+    if (!detailDays || Date.now() - detailTsRef.current > WEATHER_CACHE_TTL_MS) {
+      fetchDetailWeather(effectiveLat!, effectiveLon!)
+    }
+  }
+
   // ── Settings content ──────────────────────────────────────────────────────
   const settingsContent = (
     <>
@@ -239,107 +327,283 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
   )
 
   // ── Render helpers ────────────────────────────────────────────────────────
-  const hasLocation = effectiveLat !== undefined && effectiveLon !== undefined
-  const currentInfo = weather ? getWeatherInfo(weather.current.code) : null
+  const selectedDay = detailDays?.[selectedDayIndex]
+  const MAX_BAR_HEIGHT = 80
+  const MIN_BAR_HEIGHT = 4
+  const hourBarMinTemp = selectedDay && selectedDay.hours.length ? Math.min(...selectedDay.hours.map((h) => h.temp)) : 0
+  const hourBarMaxTemp = selectedDay && selectedDay.hours.length ? Math.max(...selectedDay.hours.map((h) => h.temp)) : 1
+  const hourRange = hourBarMaxTemp - hourBarMinTemp || 1
 
   return (
-    <BaseTile
-      tile={tile}
-      settingsChildren={settingsContent}
-      getExtraConfig={getExtraConfig}
-      onSettingsOpen={handleSettingsOpen}
-    >
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-        {/* No location configured */}
-        {!hasLocation && (
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Typography variant="body2" color="text.secondary" textAlign="center">
-              Kein Ort konfiguriert.{'\n'}⚙ drücken und Ort suchen.
-            </Typography>
-          </Box>
-        )}
+    <>
+      <BaseTile
+        tile={tile}
+        settingsChildren={settingsContent}
+        getExtraConfig={getExtraConfig}
+        onSettingsOpen={handleSettingsOpen}
+        onTileClick={handleTileClick}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+          {/* No location configured */}
+          {!hasLocation && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                Kein Ort konfiguriert.{'\n'}⚙ drücken und Ort suchen.
+              </Typography>
+            </Box>
+          )}
 
-        {/* Loading */}
-        {hasLocation && loading && !weather && (
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <CircularProgress size={32} />
-          </Box>
-        )}
+          {/* Loading */}
+          {hasLocation && loading && !weather && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+              <CircularProgress size={32} />
+            </Box>
+          )}
 
-        {/* Error */}
-        {hasLocation && error && !weather && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1 }}>
-            <Typography variant="body2" color="error">{error}</Typography>
-            <Tooltip title="Neu laden">
-              <IconButton size="small" onClick={() => fetchWeather(effectiveLat!, effectiveLon!, true)}>
-                <RefreshIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
+          {/* Error */}
+          {hasLocation && error && !weather && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1 }}>
+              <Typography variant="body2" color="error">{error}</Typography>
+              <Tooltip title="Neu laden">
+                <IconButton size="small" onClick={() => fetchWeather(effectiveLat!, effectiveLon!, true)}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
 
-        {/* Weather data */}
-        {weather && currentInfo && (
-          <>
-            {/* Upper 2/3 – today */}
-            <Box
-              sx={{
-                flex: '0 0 66%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 0.5,
-                pb: 1,
-              }}
-            >
-              {effectiveName && (
-                <Typography variant="caption" color="text.secondary" noWrap>
-                  {effectiveName}
+          {/* Weather data */}
+          {weather && currentInfo && (
+            <>
+              {/* Upper 2/3 – today */}
+              <Box
+                sx={{
+                  flex: '0 0 66%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 0.5,
+                  pb: 1,
+                }}
+              >
+                {effectiveName && (
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {effectiveName}
+                  </Typography>
+                )}
+                <currentInfo.Icon sx={{ fontSize: 56, color: currentInfo.color }} />
+                <Typography variant="h5" fontWeight="bold" lineHeight={1}>
+                  {weather.current.temp}°C
                 </Typography>
-              )}
-              <currentInfo.Icon sx={{ fontSize: 56, color: currentInfo.color }} />
-              <Typography variant="h5" fontWeight="bold" lineHeight={1}>
-                {weather.current.temp}°C
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {currentInfo.label}
-              </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {currentInfo.label}
+                </Typography>
+              </Box>
+
+              {/* Divider */}
+              <Divider />
+
+              {/* Lower 1/3 – next 3 days */}
+              <Box
+                sx={{
+                  flex: '0 0 34%',
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-around',
+                  pt: 0.5,
+                }}
+              >
+                {weather.daily.map((day) => {
+                  const dayInfo = getWeatherInfo(day.code)
+                  const date = new Date(day.date)
+                  const dayName = DAY_NAMES[date.getDay()]
+                  return (
+                    <Box
+                      key={day.date}
+                      sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}
+                    >
+                      <Typography variant="caption" fontWeight="bold">{dayName}</Typography>
+                      <dayInfo.Icon sx={{ fontSize: 20, color: dayInfo.color }} />
+                      <Typography variant="caption">{day.maxTemp}°C</Typography>
+                    </Box>
+                  )
+                })}
+              </Box>
+            </>
+          )}
+        </Box>
+      </BaseTile>
+
+      {/* ── Weather detail modal ─────────────────────────────────────────── */}
+      <Dialog
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        fullWidth
+        maxWidth={false}
+        PaperProps={{
+          sx: {
+            width: '100%',
+            maxWidth: '100%',
+            height: '80vh',
+            m: 0,
+            borderRadius: '16px 16px 0 0',
+          },
+        }}
+        sx={{ '& .MuiDialog-container': { alignItems: 'flex-end' } }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
+          <Box sx={{ flex: 1 }}>
+            {effectiveName ? `Wetter – ${effectiveName}` : 'Wetter'}
+          </Box>
+          <Tooltip title="Schließen">
+            <IconButton size="small" onClick={() => setDetailOpen(false)}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', p: 0, overflow: 'hidden' }}>
+          {/* Loading */}
+          {detailLoading && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+              <CircularProgress />
             </Box>
+          )}
 
-            {/* Divider */}
-            <Divider />
+          {/* Error */}
+          {detailError && !detailLoading && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 1 }}>
+              <Typography color="error">{detailError}</Typography>
+              <Button onClick={() => fetchDetailWeather(effectiveLat!, effectiveLon!)}>Erneut versuchen</Button>
+            </Box>
+          )}
 
-            {/* Lower 1/3 – next 3 days */}
-            <Box
-              sx={{
-                flex: '0 0 34%',
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-around',
-                pt: 0.5,
-              }}
-            >
-              {weather.daily.map((day) => {
-                const dayInfo = getWeatherInfo(day.code)
-                const date = new Date(day.date)
-                const dayName = DAY_NAMES[date.getDay()]
-                return (
-                  <Box
-                    key={day.date}
-                    sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}
-                  >
-                    <Typography variant="caption" fontWeight="bold">{dayName}</Typography>
-                    <dayInfo.Icon sx={{ fontSize: 20, color: dayInfo.color }} />
-                    <Typography variant="caption">{day.maxTemp}°C</Typography>
+          {/* Detail content */}
+          {detailDays && !detailLoading && (
+            <>
+              {/* Day selector */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 1,
+                  p: 1.5,
+                  overflowX: 'auto',
+                  flexShrink: 0,
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  '&::-webkit-scrollbar': { height: 4 },
+                }}
+              >
+                {detailDays.map((day, idx) => {
+                  const date = new Date(day.date)
+                  const isToday = idx === 0
+                  const dayShort = isToday ? 'Heute' : DAY_NAMES[date.getDay()]
+                  const dayInfo = getWeatherInfo(day.code)
+                  return (
+                    <Button
+                      key={day.date}
+                      variant={idx === selectedDayIndex ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => setSelectedDayIndex(idx)}
+                      sx={{ flexShrink: 0, flexDirection: 'column', gap: 0.25, py: 0.5, minWidth: 72 }}
+                    >
+                      <Typography variant="caption" fontWeight="bold" lineHeight={1}>{dayShort}</Typography>
+                      <dayInfo.Icon sx={{ fontSize: 18, color: idx === selectedDayIndex ? 'inherit' : dayInfo.color }} />
+                      <Typography variant="caption" lineHeight={1}>{day.maxTemp}°/{day.minTemp}°</Typography>
+                    </Button>
+                  )
+                })}
+              </Box>
+
+              {/* Selected day info + hourly chart */}
+              {selectedDay && (
+                <>
+                  <Box sx={{ px: 2, py: 1.5, flexShrink: 0 }}>
+                    {(() => {
+                      const date = new Date(selectedDay.date)
+                      const dayFull = DAY_NAMES_FULL[date.getDay()]
+                      const dayOfMonth = date.getDate()
+                      const month = MONTH_NAMES[date.getMonth()]
+                      const dayInfo = getWeatherInfo(selectedDay.code)
+                      return (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                          <dayInfo.Icon sx={{ fontSize: 36, color: dayInfo.color }} />
+                          <Box>
+                            <Typography variant="subtitle1" fontWeight="bold">
+                              {selectedDayIndex === 0 ? 'Heute' : `${dayFull}, ${dayOfMonth}. ${month}`}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {dayInfo.label} · {selectedDay.maxTemp}°C / {selectedDay.minTemp}°C
+                            </Typography>
+                          </Box>
+                        </Box>
+                      )
+                    })()}
                   </Box>
-                )
-              })}
-            </Box>
-          </>
-        )}
-      </Box>
-    </BaseTile>
+
+                  <Divider />
+
+                  {/* Hourly temperature bars */}
+                  <Box sx={{ flex: 1, overflowX: 'auto', overflowY: 'hidden' }}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        gap: 0.5,
+                        px: 1.5,
+                        pb: 1,
+                        pt: 2,
+                        minWidth: 'max-content',
+                        height: '100%',
+                      }}
+                    >
+                      {selectedDay.hours.map((hour) => {
+                        const barHeight = Math.max(
+                          MIN_BAR_HEIGHT,
+                          Math.round(((hour.temp - hourBarMinTemp) / hourRange) * MAX_BAR_HEIGHT),
+                        )
+                        const barColor = getTempBarColor(hour.temp)
+                        return (
+                          <Box
+                            key={hour.time}
+                            sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              width: 40,
+                              gap: 0.25,
+                            }}
+                          >
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem', lineHeight: 1.2 }}>
+                              {hour.temp}°
+                            </Typography>
+                            <Box sx={{ height: MAX_BAR_HEIGHT, display: 'flex', alignItems: 'flex-end' }}>
+                              <Box
+                                sx={{
+                                  width: 28,
+                                  height: barHeight,
+                                  backgroundColor: barColor,
+                                  borderRadius: '4px 4px 0 0',
+                                  transition: 'height 0.3s ease',
+                                }}
+                              />
+                            </Box>
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem', lineHeight: 1.2 }}>
+                              {hour.time}
+                            </Typography>
+                          </Box>
+                        )
+                      })}
+                    </Box>
+                  </Box>
+                </>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

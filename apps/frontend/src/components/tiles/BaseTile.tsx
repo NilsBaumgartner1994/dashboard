@@ -38,6 +38,8 @@ interface BaseTileProps {
   onSettingsOpen?: () => void
   /** Override background image (e.g. auto-resolved from API) when config backgroundImage is empty */
   overrideBackgroundImage?: string
+  /** Called when the tile content area is clicked in non-edit mode */
+  onTileClick?: () => void
   style?: React.CSSProperties
 }
 
@@ -48,6 +50,7 @@ export default function BaseTile({
   getExtraConfig,
   onSettingsOpen,
   overrideBackgroundImage,
+  onTileClick,
   style,
 }: BaseTileProps) {
   const { updateTile, duplicateTile, removeTile, editMode, gridColumns } = useStore()
@@ -142,7 +145,10 @@ export default function BaseTile({
       )}
 
       {/* Tile content */}
-      <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', p: 1 }}>{children}</Box>
+      <Box
+        sx={{ flex: 1, overflow: 'auto', position: 'relative', p: 1, cursor: onTileClick && !editMode ? 'pointer' : undefined }}
+        onClick={onTileClick && !editMode ? onTileClick : undefined}
+      >{children}</Box>
 
       {/* Settings bottom sheet */}
       <Dialog
