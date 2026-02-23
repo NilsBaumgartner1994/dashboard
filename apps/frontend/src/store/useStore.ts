@@ -20,11 +20,13 @@ interface AppState {
   defaultLat?: number
   defaultLon?: number
   defaultLocationName?: string
+  debugMode: boolean
   setTheme: (t: 'light' | 'dark' | 'auto') => void
   setTiles: (tiles: TileInstance[]) => void
   toggleEditMode: () => void
   setGridColumns: (n: number) => void
   setDefaultLocation: (lat: number, lon: number, name: string) => void
+  setDebugMode: (v: boolean) => void
   addTile: (type: string) => void
   removeTile: (id: string) => void
   updateTile: (id: string, patch: Partial<TileInstance>) => void
@@ -44,12 +46,14 @@ export const useStore = create<AppState>()(
       defaultLat: undefined,
       defaultLon: undefined,
       defaultLocationName: undefined,
+      debugMode: false,
       setTheme: (theme) => set({ theme }),
       setTiles: (tiles) => set({ tiles }),
       toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),
       setGridColumns: (gridColumns) => set({ gridColumns }),
       setDefaultLocation: (defaultLat, defaultLon, defaultLocationName) =>
         set({ defaultLat, defaultLon, defaultLocationName }),
+      setDebugMode: (debugMode) => set({ debugMode }),
       addTile: (type) =>
         set((s) => {
           const newH = ['server', 'rocketmeals', 'weather', 'news', 'route'].includes(type) ? 4 : 2

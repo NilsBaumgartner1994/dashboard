@@ -15,6 +15,7 @@ import PlaceIcon from '@mui/icons-material/Place'
 import NotesIcon from '@mui/icons-material/Notes'
 import type { CalendarEventData } from './CalendarEventItem'
 import { shouldUseWhiteText } from './CalendarEventItem'
+import { useStore } from '../../store/useStore'
 
 interface CalendarEventDetailModalProps {
   open: boolean
@@ -54,6 +55,7 @@ export default function CalendarEventDetailModal({
   event,
   color,
 }: CalendarEventDetailModalProps) {
+  const debugMode = useStore((s) => s.debugMode)
   if (!event) return null
 
   const isAllDay = !event.start.dateTime
@@ -146,6 +148,32 @@ export default function CalendarEventDetailModal({
               >
                 {event.description}
               </Typography>
+            </Box>
+          </>
+        )}
+
+        {/* Debug: event JSON */}
+        {debugMode && (
+          <>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="caption" color="text.secondary" fontWeight="bold">
+              Debug – Event JSON:
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                fontSize: '0.65rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                bgcolor: 'action.hover',
+                p: 1,
+                borderRadius: 1,
+                mt: 0.5,
+                maxHeight: 300,
+                overflow: 'auto',
+              }}
+            >
+              {JSON.stringify(event, null, 2)}
             </Box>
           </>
         )}
