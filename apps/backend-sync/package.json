@@ -5,6 +5,7 @@
   "scripts": {
     "start:docker-manage": "tsx src/index.ts",
     "sync:pull-from-test-system": "yarn sync --pull-from-test-system",
+    "sync:pull-from-local-system": "yarn sync --pull-from-local-system",
     "sync:push-to-test-system": "yarn sync --push-to-test-system",
     "sync:push": "yarn sync --push",
     "sync:pull": "yarn sync --pull",

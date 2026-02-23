@@ -1,0 +1,56 @@
+[
+    {
+        "code": "ar-SA",
+        "direction": "rtl",
+        "name": "Arabic",
+        "status": "published"
+    },
+    {
+        "code": "de-DE",
+        "direction": "ltr",
+        "name": "German",
+        "status": "published"
+    },
+    {
+        "code": "en-US",
+        "direction": "ltr",
+        "name": "English",
+        "status": "published"
+    },
+    {
+        "code": "es-ES",
+        "direction": "ltr",
+        "name": "Spanish",
+        "status": "published"
+    },
+    {
+        "code": "fr-FR",
+        "direction": "ltr",
+        "name": "French",
+        "status": "published"
+    },
+    {
+        "code": "pl-PL",
+        "direction": "ltr",
+        "name": "Polish",
+        "status": "published"
+    },
+    {
+        "code": "ru-RU",
+        "direction": "ltr",
+        "name": "Russian",
+        "status": "published"
+    },
+    {
+        "code": "tr-TR",
+        "direction": "ltr",
+        "name": "Turkish",
+        "status": "published"
+    },
+    {
+        "code": "zh-CN",
+        "direction": "ltr",
+        "name": "Chinese",
+        "status": "published"
+    }
+]

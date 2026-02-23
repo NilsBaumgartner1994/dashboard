@@ -9,7 +9,7 @@ export class DockerDirectusHelper {
   }
 
   public static getDataPathToDirectusSyncData(): string {
-    return '/rocket-meals/' + DockerDirectusHelper.getRelativePathToDirectusSyncFromProjectRoot();
+    return '/my-dashboard/' + DockerDirectusHelper.getRelativePathToDirectusSyncFromProjectRoot();
   }
 
   public static getRelativePathToDirectusSyncFromProjectRoot(): string {

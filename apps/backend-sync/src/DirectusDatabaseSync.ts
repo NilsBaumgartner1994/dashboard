@@ -126,8 +126,8 @@ export class DirectusDatabaseSync {
     const headers = new Headers();
     const origin = new URL(this.config.directusInstanceUrl).origin;
 
-    //console.log("admin_email: "+admin_email);
-    //console.log("admin_password: "+admin_password)
+    console.log("admin_email: "+this.config.adminEmail);
+    console.log("admin_password: "+this.config.adminPassword)
 
     const response = await FetchIgnoreSelfSignedCertHelper.fetch(`${this.config.directusInstanceUrl}/auth/login`, {
       method: 'POST',
@@ -140,6 +140,7 @@ export class DirectusDatabaseSync {
     });
 
     if (!response.ok) {
+      console.log(` -  HTTP error during login! status: ${response.status} message: ${response.statusText}`);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 

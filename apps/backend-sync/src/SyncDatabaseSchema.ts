@@ -22,6 +22,7 @@ export type SyncDatabaseOptions = {
     pull?: boolean;
     dockerPush?: boolean;
     pullFromTestSystem?: boolean;
+    pullFromLocalSystem?: boolean;
     pushToTestSystem?: boolean;
 }
 
@@ -49,7 +50,7 @@ export async function syncDatabase(options: SyncDatabaseOptions): Promise<boolea
     dockerDirectusRestart = true;
   }
 
-  if (options.pull || options.pullFromTestSystem) {
+  if (options.pull || options.pullFromTestSystem || options.pullFromLocalSystem) {
     syncOperation = SyncOperation.PULL;
   }
 
@@ -60,6 +61,22 @@ export async function syncDatabase(options: SyncDatabaseOptions): Promise<boolea
 
   if (options.pullFromTestSystem || options.pushToTestSystem) {
     directusInstanceUrl = ServerHelper.TEST_SERVER_CONFIG.server_url;
+    let envFilePath = await findEnvFile();
+    if (envFilePath) {
+      console.log(`🔍 Gefundene .env Datei für Pull vom Testsystem: ${envFilePath}`);
+      dotenv.config({ path: envFilePath });
+      adminEmail = process.env.ADMIN_EMAIL;
+      adminPassword = process.env.ADMIN_PASSWORD;
+
+      if (!pathToDataDirectusSync) {
+        let folderOfEnvFile = path.dirname(envFilePath || '');
+        pathToDataDirectusSync = path.join(folderOfEnvFile, DockerDirectusHelper.getRelativePathToDirectusSyncFromProjectRoot());
+      }
+    }
+  }
+
+  if(options.pullFromLocalSystem){
+    directusInstanceUrl = ServerHelper.LOCAL_SERVER_CONFIG.server_url;
     let envFilePath = await findEnvFile();
     if (envFilePath) {
       console.log(`🔍 Gefundene .env Datei für Pull vom Testsystem: ${envFilePath}`);

@@ -1,0 +1,115 @@
+[
+  {
+    "dashboard": "09490023-8a1b-4b5e-8266-e7f2f56e5122",
+    "name": null,
+    "icon": null,
+    "color": null,
+    "show_header": false,
+    "note": null,
+    "type": "time-series",
+    "position_x": 1,
+    "position_y": 1,
+    "width": 45,
+    "height": 18,
+    "options": {
+      "collection": "sensor_measurements",
+      "function": "avg",
+      "precision": "day",
+      "dateField": "date_created",
+      "valueField": "moisture_percentage",
+      "min": 0,
+      "max": 100,
+      "missingData": "0"
+    },
+    "_syncId": "15e360cc-72bb-476b-a5a4-0c3d04795921"
+  },
+  {
+    "dashboard": "107ae978-0259-41e8-9bf0-3b4f0830112b",
+    "name": "Laufzeit in Sekunden: Gesamt",
+    "icon": null,
+    "color": null,
+    "show_header": true,
+    "note": null,
+    "type": "metric",
+    "position_x": 1,
+    "position_y": 1,
+    "width": 25,
+    "height": 6,
+    "options": {
+      "collection": "workflows_runs",
+      "field": "runtime_in_seconds",
+      "function": "sum"
+    },
+    "_syncId": "4d01c30d-e26e-4287-b27d-99f6ac4c008f"
+  },
+  {
+    "dashboard": "107ae978-0259-41e8-9bf0-3b4f0830112b",
+    "name": null,
+    "icon": null,
+    "color": null,
+    "show_header": false,
+    "note": null,
+    "type": "pie-chart",
+    "position_x": 37,
+    "position_y": 15,
+    "width": 16,
+    "height": 13,
+    "options": {
+      "collection": "workflows_runs",
+      "column": "state",
+      "showLabels": true,
+      "legend": "right",
+      "donut": true
+    },
+    "_syncId": "c2df8b69-f5b8-4ac2-8779-890b15483d44"
+  },
+  {
+    "dashboard": "107ae978-0259-41e8-9bf0-3b4f0830112b",
+    "name": "Workflow Durchschnitt Zeit",
+    "icon": null,
+    "color": null,
+    "show_header": true,
+    "note": null,
+    "type": "metric-list",
+    "position_x": 1,
+    "position_y": 9,
+    "width": 34,
+    "height": 14,
+    "options": {
+      "collection": "workflows_runs",
+      "aggregateField": "runtime_in_seconds",
+      "groupByField": "workflow",
+      "aggregateFunction": "avg",
+      "filter": {
+        "_and": [
+          {
+            "state": {
+              "_eq": "success"
+            }
+          }
+        ]
+      }
+    },
+    "_syncId": "ebe5c947-5c35-4bd9-8f24-793318e8a896"
+  },
+  {
+    "dashboard": "107ae978-0259-41e8-9bf0-3b4f0830112b",
+    "name": "Workflow Summe Zeit",
+    "icon": null,
+    "color": null,
+    "show_header": true,
+    "note": null,
+    "type": "metric-list",
+    "position_x": 27,
+    "position_y": 1,
+    "width": 32,
+    "height": 13,
+    "options": {
+      "collection": "workflows_runs",
+      "aggregateField": "runtime_in_seconds",
+      "groupByField": "workflow",
+      "aggregateFunction": "sum"
+    },
+    "_syncId": "f1587229-e0a1-4c96-864d-a483c5de1b42"
+  }
+]

@@ -16,7 +16,7 @@ RUN apt-get install -y openssl xxd
 RUN corepack enable && corepack prepare yarn@stable --activate
 
 # Set working directory
-WORKDIR /rocket-meals
+WORKDIR /my-dashboard
 
 # Copy Yarn configuration and releases first
 COPY .yarnrc.yml ./
@@ -47,7 +47,7 @@ COPY data/directus-sync-data ./data/directus-sync-data
 # (Currently just copying TypeScript files, but could add build step here)
 
 # Set the working directory to backend-sync
-WORKDIR /rocket-meals/apps/backend-sync
+WORKDIR /my-dashboard/apps/backend-sync
 
 # Start the application directly with tsx
 CMD ["yarn", "start:docker-manage"]

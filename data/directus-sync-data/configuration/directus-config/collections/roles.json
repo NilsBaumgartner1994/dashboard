@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Administrator",
+    "icon": "verified",
+    "description": "$t:admin_description",
+    "parent": null,
+    "_syncId": "_sync_default_admin_role"
+  },
+  {
+    "name": "User",
+    "icon": "supervised_user_circle",
+    "description": null,
+    "parent": null,
+    "_syncId": "abe3a726-f85c-4d70-a86c-15e7092e5da2"
+  }
+]

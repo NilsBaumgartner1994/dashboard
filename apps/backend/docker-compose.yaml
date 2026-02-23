@@ -94,8 +94,8 @@ services:
           action: rebuild
     environment:
       # Directus Admin user
-      ADMIN_EMAIL: "admin@example.com"
-      ADMIN_PASSWORD: "admin123"
+      ADMIN_EMAIL: "${ADMIN_EMAIL}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
       DIRECTUS_PORT: "8055"
     networks:
       - directus_network

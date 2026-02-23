@@ -1,0 +1,29 @@
+{
+  "collection": "workflows",
+  "field": "workflows_runs",
+  "type": "alias",
+  "meta": {
+    "collection": "workflows",
+    "conditions": null,
+    "display": null,
+    "display_options": null,
+    "field": "workflows_runs",
+    "group": null,
+    "hidden": false,
+    "interface": "list-o2m",
+    "note": null,
+    "options": {
+      "layout": "table"
+    },
+    "readonly": false,
+    "required": false,
+    "sort": 11,
+    "special": [
+      "o2m"
+    ],
+    "translations": null,
+    "validation": null,
+    "validation_message": null,
+    "width": "full"
+  }
+}

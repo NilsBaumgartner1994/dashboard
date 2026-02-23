@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Messwerte",
+    "icon": "space_dashboard",
+    "note": null,
+    "color": null,
+    "_syncId": "09490023-8a1b-4b5e-8266-e7f2f56e5122"
+  },
+  {
+    "name": "Workflows",
+    "icon": "space_dashboard",
+    "note": null,
+    "color": null,
+    "_syncId": "107ae978-0259-41e8-9bf0-3b4f0830112b"
+  }
+]
