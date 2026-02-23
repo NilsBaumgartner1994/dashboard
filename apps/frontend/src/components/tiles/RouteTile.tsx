@@ -76,6 +76,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const defaultLat = useStore((s) => s.defaultLat)
   const defaultLon = useStore((s) => s.defaultLon)
   const defaultLocationName = useStore((s) => s.defaultLocationName)
+  const debugMode = useStore((s) => s.debugMode)
   const { accessToken, tokenExpiry } = useGoogleAuthStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
@@ -86,6 +87,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
 
   // Calendar mode
   const [nextEvent, setNextEvent] = useState<CalendarEvent | null>(null)
+  const [nextEventAny, setNextEventAny] = useState<CalendarEvent | null>(null)
   const [eventLat, setEventLat] = useState<number | null>(null)
   const [eventLon, setEventLon] = useState<number | null>(null)
   const [calLoading, setCalLoading] = useState(false)
@@ -179,6 +181,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
       const data = await res.json()
       const events: CalendarEvent[] = data.items ?? []
       const withLocation = events.find((e) => e.location?.trim())
+      setNextEventAny(events[0] ?? null)
       setNextEvent(withLocation ?? null)
     } catch { /* ignore */ }
     finally { setCalLoading(false) }
@@ -554,6 +557,31 @@ export default function RouteTile({ tile }: RouteTileProps) {
               ? 'Zielort oben eingeben.'
               : ''}
           </Typography>
+        )}
+
+        {/* Debug: next calendar event as JSON */}
+        {debugMode && config.useCalendar && (
+          <Box sx={{ mt: 1 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight="bold">
+              Debug – Nächster Termin:
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                fontSize: '0.65rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                bgcolor: 'action.hover',
+                p: 0.5,
+                borderRadius: 1,
+                mt: 0.25,
+                maxHeight: 200,
+                overflow: 'auto',
+              }}
+            >
+              {JSON.stringify(nextEventAny, null, 2)}
+            </Box>
+          </Box>
         )}
       </Box>
     </BaseTile>

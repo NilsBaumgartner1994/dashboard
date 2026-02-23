@@ -9,6 +9,8 @@ import {
   Button,
   CircularProgress,
   Alert,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -31,6 +33,8 @@ export default function SettingsScreen() {
   const defaultLocationName = useStore((s) => s.defaultLocationName)
   const setDefaultLocation = useStore((s) => s.setDefaultLocation)
   const setTiles = useStore((s) => s.setTiles)
+  const debugMode = useStore((s) => s.debugMode)
+  const setDebugMode = useStore((s) => s.setDebugMode)
   const { clientId, setClientId, clearToken } = useGoogleAuthStore()
   const [clientIdInput, setClientIdInput] = useState(clientId)
   const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
@@ -178,6 +182,20 @@ export default function SettingsScreen() {
             <BrightnessAutoIcon sx={{ mr: 1 }} /> Auto
           </ToggleButton>
         </ToggleButtonGroup>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Debug-Modus
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Zeigt zusätzliche Debug-Informationen in Kacheln an (z.&nbsp;B. nächster Kalendertermin als
+          JSON in der Routenkachel, Event-JSON im Kalenderdetail).
+        </Typography>
+        <FormControlLabel
+          control={<Switch checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />}
+          label="Debug-Modus aktivieren"
+        />
       </Paper>
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
