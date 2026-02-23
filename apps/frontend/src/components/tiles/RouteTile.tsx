@@ -83,10 +83,14 @@ async function geocodeName(name: string): Promise<{ lat: number; lon: number; na
 }
 
 function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 0) return `${h} Std. ${m} Min.`
-  return `${m} Min.`
+  const totalMinutes = Math.floor(seconds / 60)
+  if (totalMinutes < 10) return ''
+  if (totalMinutes > 60) {
+    const h = Math.floor(totalMinutes / 60)
+    const m = totalMinutes % 60
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  }
+  return `${totalMinutes} Min.`
 }
 
 function formatCountdown(ms: number): string {
@@ -391,6 +395,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const displayDestName = config.useCalendar ? nextEvent?.location : effectiveDestName
   const displayDestLat = config.useCalendar ? eventLat ?? undefined : effectiveDestLat
   const displayDestLon = config.useCalendar ? eventLon ?? undefined : effectiveDestLon
+  const travelDuration = travelSeconds !== null ? formatDuration(travelSeconds) : null
 
   const departureTime =
     config.useCalendar && nextEvent?.start?.dateTime && travelSeconds !== null
@@ -675,9 +680,11 @@ export default function RouteTile({ tile }: RouteTileProps) {
         )}
         {!routeLoading && !eventGeoLoading && travelSeconds !== null && (
           <Box>
-            <Typography variant="body2">
-              🚗 {formatDuration(travelSeconds)}
-            </Typography>
+            {travelDuration !== '' && (
+              <Typography variant="body2">
+                🚗 {travelDuration}
+              </Typography>
+            )}
             {departureTime && (
               <Typography variant="body2" color="primary">
                 Abfahrt: {departureTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
