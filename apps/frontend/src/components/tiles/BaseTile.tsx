@@ -43,6 +43,8 @@ interface BaseTileProps {
   style?: React.CSSProperties
   /** If provided, will be set to the openSettings function so the parent can trigger it */
   settingsOpenerRef?: React.MutableRefObject<(() => void) | null>
+  /** Optional element rendered at the very bottom of the tile, outside the scrollable content area (e.g. a ReloadIntervalBar) */
+  bottomBar?: ReactNode
 }
 
 export default function BaseTile({
@@ -55,6 +57,7 @@ export default function BaseTile({
   onTileClick,
   style,
   settingsOpenerRef,
+  bottomBar,
 }: BaseTileProps) {
   const { updateTile, duplicateTile, removeTile, editMode, gridColumns } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -156,6 +159,9 @@ export default function BaseTile({
         sx={{ flex: 1, overflow: 'auto', position: 'relative', p: 1, cursor: onTileClick && !editMode ? 'pointer' : undefined }}
         onClick={onTileClick && !editMode ? onTileClick : undefined}
       >{children}</Box>
+
+      {/* Bottom bar – rendered outside the scrollable content area */}
+      {bottomBar}
 
       {/* Settings bottom sheet */}
       <Dialog

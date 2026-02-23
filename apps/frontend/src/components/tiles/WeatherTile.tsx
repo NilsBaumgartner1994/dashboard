@@ -380,6 +380,16 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
         getExtraConfig={getExtraConfig}
         onSettingsOpen={handleSettingsOpen}
         onTileClick={handleTileClick}
+        bottomBar={
+          <ReloadIntervalBar
+            show={showReloadBar}
+            lastUpdate={lastWeatherUpdate}
+            intervalMs={reloadIntervalMs}
+            showLastUpdate={showLastUpdate}
+            label="Wetter"
+            onReload={handleWeatherReload}
+          />
+        }
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
           {/* No location configured */}
@@ -472,14 +482,6 @@ export default function WeatherTile({ tile }: WeatherTileProps) {
             </>
           )}
         </Box>
-        <ReloadIntervalBar
-          show={showReloadBar}
-          lastUpdate={lastWeatherUpdate}
-          intervalMs={reloadIntervalMs}
-          showLastUpdate={showLastUpdate}
-          label="Wetter"
-          onReload={handleWeatherReload}
-        />
       </BaseTile>
 
       {/* ── Weather detail modal ─────────────────────────────────────────── */}
