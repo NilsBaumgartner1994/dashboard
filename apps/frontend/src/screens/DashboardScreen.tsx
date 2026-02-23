@@ -34,6 +34,8 @@ import SampleTile from '../components/tiles/SampleTile'
 import ServerTile from '../components/tiles/ServerTile'
 import RocketMealsTile from '../components/tiles/RocketMealsTile'
 import GoogleCalendarTile from '../components/tiles/GoogleCalendarTile'
+import WeatherTile from '../components/tiles/WeatherTile'
+import NewsTile from '../components/tiles/NewsTile'
 
 const GRID_COLS = 32
 const GRID_ROWS = 18
@@ -57,6 +59,8 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   server: { label: 'Server Status', component: ServerTile },
   rocketmeals: { label: 'Rocket Meals Server', component: RocketMealsTile },
   googlecalendar: { label: 'Google Kalender', component: GoogleCalendarTile },
+  weather: { label: 'Wetter', component: WeatherTile },
+  news: { label: 'News (RSS)', component: NewsTile },
 }
 
 function DraggableTile({
