@@ -16,6 +16,7 @@ import {
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
+  Alert,
 } from '@mui/material'
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
@@ -61,10 +62,33 @@ interface NewsTileProps {
   tile: TileInstance
 }
 
+function getRssItemLink(item: Element): string {
+  // Standard textContent approach
+  const linkEl = item.querySelector('link')
+  const fromTextContent = linkEl?.textContent?.trim() ?? ''
+  if (fromTextContent) return fromTextContent
+
+  // Some browsers treat <link> as a void element in XML; in that case the URL
+  // ends up as a text node *after* the element rather than inside it.
+  const linkNode = Array.from(item.childNodes).find((n) => n.nodeName === 'link')
+  if (linkNode?.nextSibling?.nodeType === Node.TEXT_NODE) {
+    const fromSibling = linkNode.nextSibling.textContent?.trim() ?? ''
+    if (fromSibling) return fromSibling
+  }
+
+  // Final fallback: use <guid> value (Google News RSS guid contains the full URL)
+  const guid = item.querySelector('guid')?.textContent?.trim() ?? ''
+  if (guid.startsWith('http')) return guid
+
+  return ''
+}
+
 function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
   try {
     const parser = new DOMParser()
     const doc = parser.parseFromString(xml, 'text/xml')
+    // Detect XML parse errors (DOMParser returns a <parseerror> document on failure)
+    if (doc.querySelector('parsererror')) return []
     const items = Array.from(doc.querySelectorAll('item'))
     return items.slice(0, 20).map((item) => ({
       title: item.querySelector('title')?.textContent?.trim() ?? '',
@@ -76,7 +100,7 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
           return raw.trim()
         }
       })(),
-      link: item.querySelector('link')?.textContent?.trim() ?? '',
+      link: getRssItemLink(item),
       pubDate: item.querySelector('pubDate')?.textContent?.trim() ?? '',
       source: item.querySelector('source')?.textContent?.trim() || sourceLabel,
     }))
@@ -85,7 +109,7 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
   }
 }
 
-async function fetchFeed(url: string): Promise<NewsItem[]> {
+async function fetchFeed(url: string): Promise<{ items: NewsItem[]; error: string | null }> {
   // Try direct fetch first, then via CORS proxy
   const tryFetch = async (fetchUrl: string): Promise<string | null> => {
     try {
@@ -104,9 +128,12 @@ async function fetchFeed(url: string): Promise<NewsItem[]> {
 
   // Try via CORS proxy
   const text = await tryFetch(`${CORS_PROXY}${encodeURIComponent(url)}`)
-  if (text) return parseRssXml(text, sourceLabel)
+  if (text) {
+    const items = parseRssXml(text, sourceLabel)
+    return { items, error: null }
+  }
 
-  return []
+  return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
 }
 
 export default function NewsTile({ tile }: NewsTileProps) {
@@ -118,6 +145,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [controlsVisible, setControlsVisible] = useState(false)
+  const [fetchErrors, setFetchErrors] = useState<string[]>([])
 
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
@@ -133,10 +161,13 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const fetchAllFeeds = useCallback(async (feedUrls: string[]) => {
     if (!feedUrls.length) return
     setLoading(true)
+    setFetchErrors([])
     try {
       const results = await Promise.all(feedUrls.map((url) => fetchFeed(url)))
-      const allItems = results.flat().filter((item) => item.title)
+      const allItems = results.flatMap((r) => r.items).filter((item) => item.title)
+      const errors = results.map((r) => r.error).filter((e): e is string => e !== null)
       setItems(allItems)
+      setFetchErrors(errors)
       setCurrentIndex(0)
     } finally {
       setLoading(false)
@@ -376,11 +407,22 @@ export default function NewsTile({ tile }: NewsTileProps) {
         )}
 
         {/* News content */}
-        {!loading && feeds.length > 0 && items.length === 0 && (
+        {!loading && feeds.length > 0 && items.length === 0 && fetchErrors.length === 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
             <Typography variant="body2" color="text.secondary">
               Keine Nachrichten gefunden.
             </Typography>
+          </Box>
+        )}
+
+        {/* Feed errors */}
+        {!loading && fetchErrors.length > 0 && items.length === 0 && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, p: 1, height: '100%', overflowY: 'auto' }}>
+            {fetchErrors.map((err, idx) => (
+              <Alert key={idx} severity="error" sx={{ fontSize: '0.7rem', py: 0 }}>
+                {err}
+              </Alert>
+            ))}
           </Box>
         )}
 
