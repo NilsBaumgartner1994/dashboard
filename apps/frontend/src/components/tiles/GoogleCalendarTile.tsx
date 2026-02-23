@@ -10,6 +10,7 @@ import {
   FormGroup,
   Divider,
   List,
+  ListItem,
   TextField,
   Tooltip,
   IconButton,
@@ -25,12 +26,15 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
-import CalendarEventItem, { isCalendarWeekMarker } from './CalendarEventItem'
+import CalendarEventItem, { isCalendarWeekMarker, formatEventTime, shouldUseWhiteText } from './CalendarEventItem'
 import CalendarEventDetailModal from './CalendarEventDetailModal'
 import ReloadIntervalBar from './ReloadIntervalBar'
 import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { CalendarEventData } from './CalendarEventItem'
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 import { useCalendarEventsStore } from '../../store/useCalendarEventsStore'
 
@@ -54,6 +58,69 @@ interface GoogleCalendarConfig {
   eventsReloadIntervalMinutes?: 1 | 5 | 60
   showReloadBars?: boolean
   showLastUpdate?: boolean
+  calculateTravelTime?: boolean
+}
+
+// ─── Geocoding + routing helpers (shared with RouteTile) ──────────────────────
+
+const NOMINATIM_USER_AGENT = 'NilsBaumgartner1994-dashboard/1.0 (https://github.com/NilsBaumgartner1994/dashboard)'
+
+/** In-memory geocoding cache to avoid redundant Nominatim requests. */
+const geocodeCache = new Map<string, { lat: number; lon: number } | null>()
+
+/**
+ * Geocode a location name. Returns coords and whether the result was served
+ * from the in-memory cache (callers can use this to skip rate-limit delays).
+ */
+async function geocodeLocation(name: string): Promise<{ lat: number; lon: number; cached: boolean } | null> {
+  const cacheKey = name.trim().toLowerCase()
+  if (geocodeCache.has(cacheKey)) {
+    const cached = geocodeCache.get(cacheKey)!
+    return cached ? { ...cached, cached: true } : null
+  }
+  let query = name.trim()
+  while (query) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`,
+        { headers: { 'User-Agent': NOMINATIM_USER_AGENT } },
+      )
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0) {
+          const result = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) }
+          geocodeCache.set(cacheKey, result)
+          return { ...result, cached: false }
+        }
+      }
+    } catch { /* ignore */ }
+    const commaIdx = query.indexOf(',')
+    if (commaIdx === -1) break
+    query = query.slice(commaIdx + 1).trim()
+  }
+  geocodeCache.set(cacheKey, null)
+  return null
+}
+
+async function fetchOsrmDurationSeconds(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number,
+): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`,
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    if (data.routes?.length) return data.routes[0].duration as number
+  } catch { /* ignore */ }
+  return null
+}
+
+/** Round up seconds to the nearest 5 minutes and return total minutes. */
+function roundUpToFiveMinutes(seconds: number): number {
+  const minutes = seconds / 60
+  return Math.ceil(minutes / 5) * 5
 }
 
 // ─── Tile shown when no Google Client-ID is configured ────────────────────────
@@ -108,6 +175,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const eventsReloadIntervalMinutes: 1 | 5 | 60 = config.eventsReloadIntervalMinutes ?? 5
   const showReloadBars = config.showReloadBars ?? false
   const showLastUpdate = config.showLastUpdate ?? false
+  const calculateTravelTime = config.calculateTravelTime ?? false
+
+  // Global default location (for travel time calculation)
+  const defaultLat = useStore((s) => s.defaultLat)
+  const defaultLon = useStore((s) => s.defaultLon)
 
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
   const setCalendarEvents = useCalendarEventsStore((s) => s.setEvents)
@@ -185,6 +257,10 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [settingsEventsInterval, setSettingsEventsInterval] = useState<1 | 5 | 60>(eventsReloadIntervalMinutes)
   const [settingsShowReloadBars, setSettingsShowReloadBars] = useState(showReloadBars)
   const [settingsShowLastUpdate, setSettingsShowLastUpdate] = useState(showLastUpdate)
+  const [settingsCalculateTravelTime, setSettingsCalculateTravelTime] = useState(calculateTravelTime)
+
+  // ── Travel time state (event id → rounded minutes) ────────────────────────
+  const [eventTravelMinutes, setEventTravelMinutes] = useState<Record<string, number>>({})
 
   // ── Token exchange helpers ────────────────────────────────────────────────
 
@@ -559,6 +635,32 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents, reloadTrigger])
 
+  // ── Compute travel times for events with locations ────────────────────────
+  useEffect(() => {
+    if (!calculateTravelTime || defaultLat === undefined || defaultLon === undefined) {
+      setEventTravelMinutes({})
+      return
+    }
+    const eventsWithLocation = events.filter((e) => e.start.dateTime && e.location?.trim())
+    if (eventsWithLocation.length === 0) return
+    let cancelled = false
+    const compute = async () => {
+      // Process sequentially to respect Nominatim's 1 req/s policy
+      for (const ev of eventsWithLocation) {
+        if (cancelled) break
+        const geoResult = await geocodeLocation(ev.location!)
+        if (!geoResult || cancelled) continue
+        const seconds = await fetchOsrmDurationSeconds(defaultLat!, defaultLon!, geoResult.lat, geoResult.lon)
+        if (seconds === null || cancelled) continue
+        setEventTravelMinutes((prev) => ({ ...prev, [ev.id]: roundUpToFiveMinutes(seconds) }))
+        // Respect Nominatim usage policy (max 1 req/s) only after uncached requests
+        if (!geoResult.cached) await new Promise((resolve) => setTimeout(resolve, 1100))
+      }
+    }
+    compute()
+    return () => { cancelled = true }
+  }, [calculateTravelTime, defaultLat, defaultLon, events])
+
   // ── Settings helpers ─────────────────────────────────────────────────────
   const handleSettingsOpen = () => {
     setSettingsCalendars(
@@ -574,6 +676,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     setSettingsEventsInterval(eventsReloadIntervalMinutes)
     setSettingsShowReloadBars(showReloadBars)
     setSettingsShowLastUpdate(showLastUpdate)
+    setSettingsCalculateTravelTime(calculateTravelTime)
   }
 
   const getExtraConfig = () => {
@@ -587,6 +690,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       eventsReloadIntervalMinutes: settingsEventsInterval,
       showReloadBars: settingsShowReloadBars,
       showLastUpdate: settingsShowLastUpdate,
+      calculateTravelTime: settingsCalculateTravelTime,
     }
   }
 
@@ -699,6 +803,17 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         showLastUpdate={settingsShowLastUpdate}
         onShowLastUpdateChange={setSettingsShowLastUpdate}
         label="Aktualisierung"
+      />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={settingsCalculateTravelTime}
+            onChange={(e) => setSettingsCalculateTravelTime(e.target.checked)}
+            size="small"
+          />
+        }
+        label="Fahrtzeit berechnen (benötigt globalen Startort)"
+        sx={{ display: 'block', mt: 1 }}
       />
     </>
   )
@@ -837,6 +952,64 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
                 <List dense disablePadding>
                   {group.events.map((ev) => {
                     const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
+                    const travelMin = calculateTravelTime && ev.location?.trim() ? eventTravelMinutes[ev.id] : undefined
+                    if (travelMin !== undefined && ev.start.dateTime) {
+                      const arrivalDate = new Date(ev.start.dateTime)
+                      const departureDate = new Date(arrivalDate.getTime() - travelMin * 60 * 1000)
+                      const deptStr = `${String(departureDate.getHours()).padStart(2, '0')}:${String(departureDate.getMinutes()).padStart(2, '0')}`
+                      const arrStr = formatEventTime(ev)
+                      return (
+                        <ListItem
+                          key={ev.id}
+                          disableGutters
+                          disablePadding
+                          sx={{ mb: 0.5, alignItems: 'flex-start', borderRadius: 1 }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5, width: '100%' }}>
+                            <Box
+                              component="span"
+                              sx={{
+                                fontSize: '0.65rem',
+                                bgcolor: evColor ?? 'action.selected',
+                                color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                                borderRadius: '12px',
+                                px: 1,
+                                py: 0.25,
+                                fontWeight: 'bold',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {deptStr}
+                            </Box>
+                            <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
+                              <DirectionsCarIcon sx={{ fontSize: '0.85rem', color: 'text.secondary' }} />
+                              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                                {travelMin} Min.
+                              </Typography>
+                            </Box>
+                            <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
+                            <Box
+                              component="span"
+                              sx={{
+                                fontSize: '0.65rem',
+                                bgcolor: evColor ?? 'action.selected',
+                                color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                                borderRadius: '12px',
+                                px: 1,
+                                py: 0.25,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {arrStr}
+                            </Box>
+                            <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: '0.8rem' }}>
+                              {ev.summary}
+                            </Typography>
+                          </Box>
+                        </ListItem>
+                      )
+                    }
                     return (
                       <CalendarEventItem
                         key={ev.id}
