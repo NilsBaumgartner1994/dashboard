@@ -32,6 +32,8 @@ export default function SettingsScreen() {
   const setTheme = useStore((s) => s.setTheme)
   const gridColumns = useStore((s) => s.gridColumns)
   const setGridColumns = useStore((s) => s.setGridColumns)
+  const mobileGridColumns = useStore((s) => s.mobileGridColumns)
+  const setMobileGridColumns = useStore((s) => s.setMobileGridColumns)
   const defaultLat = useStore((s) => s.defaultLat)
   const defaultLon = useStore((s) => s.defaultLon)
   const defaultLocationName = useStore((s) => s.defaultLocationName)
@@ -48,6 +50,7 @@ export default function SettingsScreen() {
   const [showClientSecret, setShowClientSecret] = useState(false)
   const [backendUrlInput, setBackendUrlInput] = useState(backendUrl)
   const [gridColumnsInput, setGridColumnsInput] = useState(String(gridColumns))
+  const [mobileGridColumnsInput, setMobileGridColumnsInput] = useState(String(mobileGridColumns))
   const [locationInput, setLocationInput] = useState(defaultLocationName ?? '')
   const [geocodeLoading, setGeocodeLoading] = useState(false)
   const [geocodeError, setGeocodeError] = useState<string | null>(null)
@@ -63,6 +66,13 @@ export default function SettingsScreen() {
     const parsed = parseInt(gridColumnsInput, 10)
     if (!isNaN(parsed) && parsed >= 1) {
       setGridColumns(parsed)
+    }
+  }
+
+  const handleSaveMobileGridColumns = () => {
+    const parsed = parseInt(mobileGridColumnsInput, 10)
+    if (!isNaN(parsed) && parsed >= 1) {
+      setMobileGridColumns(parsed)
     }
   }
 
@@ -98,6 +108,7 @@ export default function SettingsScreen() {
       tiles: useStore.getState().tiles,
       notes: useStore.getState().notes,
       gridColumns: useStore.getState().gridColumns,
+      mobileGridColumns: useStore.getState().mobileGridColumns,
       defaultLat: useStore.getState().defaultLat,
       defaultLon: useStore.getState().defaultLon,
       defaultLocationName: useStore.getState().defaultLocationName,
@@ -142,6 +153,7 @@ export default function SettingsScreen() {
       if (Array.isArray(s.tiles)) setTiles(s.tiles)
       if (Array.isArray(s.notes)) setNotes(s.notes)
       if (typeof s.gridColumns === 'number') setGridColumns(s.gridColumns)
+      if (typeof s.mobileGridColumns === 'number') setMobileGridColumns(s.mobileGridColumns)
       if (typeof s.defaultLat === 'number' && typeof s.defaultLon === 'number') {
         setDefaultLocation(s.defaultLat, s.defaultLon, s.defaultLocationName ?? '')
       }
@@ -297,6 +309,29 @@ export default function SettingsScreen() {
           sx={{ mb: 2 }}
         />
         <Button variant="contained" onClick={handleSaveGridColumns}>
+          Speichern
+        </Button>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Mobil – Anzeigebreite (Spalten)
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Legt die Anzahl an Rasterspalten auf Mobilgeräten fest (Standard: 12). Kachelpositionen
+          werden automatisch von der Desktop-Breite auf diese Anzahl skaliert. Eine niedrigere Zahl
+          ergibt größere Kacheln auf dem Smartphone.
+        </Typography>
+        <TextField
+          fullWidth
+          label="Anzahl Spalten (Mobil)"
+          value={mobileGridColumnsInput}
+          onChange={(e) => setMobileGridColumnsInput(e.target.value)}
+          type="number"
+          inputProps={{ min: 1 }}
+          sx={{ mb: 2 }}
+        />
+        <Button variant="contained" onClick={handleSaveMobileGridColumns}>
           Speichern
         </Button>
       </Paper>

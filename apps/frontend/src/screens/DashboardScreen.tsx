@@ -42,18 +42,17 @@ import GoogleTasksTile from '../components/tiles/GoogleTasksTile'
 import NotesTile from '../components/tiles/NotesTile'
 import PostItTile from '../components/tiles/PostItTile'
 
-const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
 const DESKTOP_ROW_HEIGHT = 60 // px per grid row unit on desktop
 
 
 /** Scales a tile's x/w from the desktop grid to the mobile grid. */
-function getMobileTilePos(tile: TileInstance, desktopCols: number): { x: number; w: number } {
-  const scale = MOBILE_COLS / desktopCols
+function getMobileTilePos(tile: TileInstance, desktopCols: number, mobileCols: number): { x: number; w: number } {
+  const scale = mobileCols / desktopCols
   const rawX = Math.round(tile.x * scale)
   const rawW = Math.max(1, Math.round(tile.w * scale))
-  const x = Math.min(rawX, MOBILE_COLS - 1)
-  const w = Math.min(rawW, MOBILE_COLS - x)
+  const x = Math.min(rawX, mobileCols - 1)
+  const w = Math.min(rawW, mobileCols - x)
   return { x, w }
 }
 
@@ -75,12 +74,14 @@ function DraggableTile({
   editMode,
   isMobile,
   gridColumns,
+  mobileGridColumns,
   anyModalOpen,
 }: {
   tile: TileInstance
   editMode: boolean
   isMobile: boolean
   gridColumns: number
+  mobileGridColumns: number
   anyModalOpen: boolean
 }) {
   const { updateTile, removeTile } = useStore()
@@ -91,7 +92,7 @@ function DraggableTile({
     disabled: !editMode || isMobile || anyModalOpen,
   })
 
-  const { x: mobileX, w: mobileW } = getMobileTilePos(tile, gridColumns)
+  const { x: mobileX, w: mobileW } = getMobileTilePos(tile, gridColumns, mobileGridColumns)
   const effectiveX = isMobile ? mobileX : tile.x
   const effectiveW = isMobile ? mobileW : tile.w
 
@@ -117,7 +118,7 @@ function DraggableTile({
     if (!resizeStartRef.current) return
     const gridEl = document.getElementById('dashboard-grid')
     if (!gridEl) return
-    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
+    const gridColCount = isMobile ? mobileGridColumns : gridColumns
     const cellW = gridEl.clientWidth / gridColCount
     const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
     const dx = Math.round((e.clientX - resizeStartRef.current.x) / cellW)
@@ -206,7 +207,7 @@ function DraggableTile({
 }
 
 export default function DashboardScreen() {
-  const { tiles, editMode, toggleEditMode, addTile, updateTile, gridColumns } = useStore()
+  const { tiles, editMode, toggleEditMode, addTile, updateTile, gridColumns, mobileGridColumns } = useStore()
   const anyModalOpen = useUIStore((s) => s.openModalCount > 0)
   const [addOpen, setAddOpen] = useState(false)
   const theme = useTheme()
@@ -220,13 +221,13 @@ export default function DashboardScreen() {
     if (!tile) return
     const gridEl = document.getElementById('dashboard-grid')
     if (!gridEl) return
-    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
+    const gridColCount = isMobile ? mobileGridColumns : gridColumns
     const cellW = gridEl.clientWidth / gridColCount
     const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
     const dx = Math.round(delta.x / cellW)
     const dy = Math.round(delta.y / cellH)
     if (dx === 0 && dy === 0) return
-    const dxDesktop = isMobile ? dx * Math.round(gridColumns / MOBILE_COLS) : dx
+    const dxDesktop = isMobile ? dx * Math.round(gridColumns / mobileGridColumns) : dx
     const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dxDesktop))
     const ny = Math.max(0, tile.y + dy)
     updateTile(tile.id, { x: nx, y: ny })
@@ -265,14 +266,14 @@ export default function DashboardScreen() {
               id="dashboard-grid"
               sx={{
                 display: 'grid',
-                gridTemplateColumns: `repeat(${isMobile ? MOBILE_COLS : gridColumns}, 1fr)`,
+                gridTemplateColumns: `repeat(${isMobile ? mobileGridColumns : gridColumns}, 1fr)`,
                 gridAutoRows: `${isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT}px`,
                 width: '100%',
                 gap: 0.5,
               }}
             >
               {tiles.map((tile) => (
-                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
+                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} mobileGridColumns={mobileGridColumns} anyModalOpen={anyModalOpen} />
               ))}
             </Box>
           </DndContext>

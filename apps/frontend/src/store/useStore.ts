@@ -17,6 +17,9 @@ export interface TileInstance {
   w: number
   h: number
   hidden: boolean
+  /** Display priority for responsive layouts (1 = highest). Lower-priority tiles
+   *  can be hidden automatically on narrow screens in future. */
+  priority?: number
   config?: Record<string, unknown>
 }
 
@@ -26,6 +29,7 @@ interface AppState {
   notes: Note[]
   editMode: boolean
   gridColumns: number
+  mobileGridColumns: number
   defaultLat?: number
   defaultLon?: number
   defaultLocationName?: string
@@ -39,6 +43,7 @@ interface AppState {
   removeNote: (id: string) => void
   toggleEditMode: () => void
   setGridColumns: (n: number) => void
+  setMobileGridColumns: (n: number) => void
   setDefaultLocation: (lat: number, lon: number, name: string) => void
   setDebugMode: (v: boolean) => void
   setBackendUrl: (url: string) => void
@@ -59,6 +64,7 @@ export const useStore = create<AppState>()(
       notes: [],
       editMode: false,
       gridColumns: 32,
+      mobileGridColumns: 12,
       defaultLat: undefined,
       defaultLon: undefined,
       defaultLocationName: undefined,
@@ -89,6 +95,7 @@ export const useStore = create<AppState>()(
       removeNote: (id) => set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
       toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),
       setGridColumns: (gridColumns) => set({ gridColumns }),
+      setMobileGridColumns: (mobileGridColumns) => set({ mobileGridColumns }),
       setDefaultLocation: (defaultLat, defaultLon, defaultLocationName) =>
         set({ defaultLat, defaultLon, defaultLocationName }),
       setDebugMode: (debugMode) => set({ debugMode }),
