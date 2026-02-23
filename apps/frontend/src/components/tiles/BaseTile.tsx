@@ -41,6 +41,8 @@ interface BaseTileProps {
   /** Called when the tile content area is clicked in non-edit mode */
   onTileClick?: () => void
   style?: React.CSSProperties
+  /** If provided, will be set to the openSettings function so the parent can trigger it */
+  settingsOpenerRef?: React.MutableRefObject<(() => void) | null>
 }
 
 export default function BaseTile({
@@ -52,6 +54,7 @@ export default function BaseTile({
   overrideBackgroundImage,
   onTileClick,
   style,
+  settingsOpenerRef,
 }: BaseTileProps) {
   const { updateTile, duplicateTile, removeTile, editMode, gridColumns } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -67,6 +70,10 @@ export default function BaseTile({
     setMaxWidthInput(tile.config?.maxWidth != null ? String(tile.config.maxWidth) : '')
     onSettingsOpen?.()
     setSettingsOpen(true)
+  }
+
+  if (settingsOpenerRef) {
+    settingsOpenerRef.current = handleOpenSettings
   }
 
   const handleSave = () => {
@@ -132,7 +139,7 @@ export default function BaseTile({
             sx={{
               position: 'absolute',
               top: 4,
-              right: 4,
+              left: 4,
               zIndex: 10,
               backgroundColor: 'rgba(0,0,0,0.35)',
               color: '#fff',
