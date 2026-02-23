@@ -40,10 +40,28 @@ interface RouteConfig {
 
 type CalendarEvent = CalendarEventData
 
+// Nominatim usage policy requires a meaningful User-Agent identifying the application.
+// See: https://operations.osmfoundation.org/policies/nominatim/
+const NOMINATIM_USER_AGENT = 'NilsBaumgartner1994-dashboard/1.0 (https://github.com/NilsBaumgartner1994/dashboard)'
+
 async function geocodeName(name: string): Promise<{ lat: number; lon: number; name: string } | null> {
+  const query = name.trim()
+  // Try Nominatim first – handles both full addresses and place names
   try {
     const res = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name.trim())}&count=1&language=de&format=json`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`,
+      { headers: { 'User-Agent': NOMINATIM_USER_AGENT } },
+    )
+    const data = await res.json()
+    if (Array.isArray(data) && data.length > 0) {
+      const displayName: string = data[0].display_name ?? query
+      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: displayName.split(',')[0].trim() }
+    }
+  } catch { /* ignore */ }
+  // Fallback: Open-Meteo geocoding (city/place names)
+  try {
+    const res = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=de&format=json`,
     )
     const data = await res.json()
     if (data.results?.length) {
@@ -93,6 +111,8 @@ export default function RouteTile({ tile }: RouteTileProps) {
   const [eventLat, setEventLat] = useState<number | null>(null)
   const [eventLon, setEventLon] = useState<number | null>(null)
   const [calLoading, setCalLoading] = useState(false)
+  const [eventGeoLoading, setEventGeoLoading] = useState(false)
+  const [eventGeoError, setEventGeoError] = useState<string | null>(null)
 
   // Countdown timer
   const [countdown, setCountdown] = useState<string | null>(null)
@@ -191,12 +211,24 @@ export default function RouteTile({ tile }: RouteTileProps) {
 
   // ── Geocode calendar event location ──────────────────────────────────────
   useEffect(() => {
-    if (!config.useCalendar || !nextEvent?.location) return
+    if (!config.useCalendar || !nextEvent?.location) {
+      setEventLat(null)
+      setEventLon(null)
+      setEventGeoError(null)
+      return
+    }
+    setEventGeoLoading(true)
+    setEventGeoError(null)
+    setEventLat(null)
+    setEventLon(null)
     geocodeName(nextEvent.location).then((r) => {
       if (r) {
         setEventLat(r.lat)
         setEventLon(r.lon)
+      } else {
+        setEventGeoError('Ort des Termins konnte nicht gefunden werden')
       }
+      setEventGeoLoading(false)
     })
   }, [config.useCalendar, nextEvent])
 
@@ -549,11 +581,14 @@ export default function RouteTile({ tile }: RouteTileProps) {
         <Divider />
 
         {/* Travel time / departure */}
-        {routeLoading && <CircularProgress size={20} />}
+        {(routeLoading || eventGeoLoading) && <CircularProgress size={20} />}
+        {eventGeoError && !eventGeoLoading && (
+          <Typography variant="caption" color="error">{eventGeoError}</Typography>
+        )}
         {routeError && (
           <Typography variant="caption" color="error">{routeError}</Typography>
         )}
-        {!routeLoading && travelSeconds !== null && (
+        {!routeLoading && !eventGeoLoading && travelSeconds !== null && (
           <Box>
             <Typography variant="body2">
               🚗 {formatDuration(travelSeconds)}
@@ -570,7 +605,7 @@ export default function RouteTile({ tile }: RouteTileProps) {
             )}
           </Box>
         )}
-        {!routeLoading && travelSeconds === null && !routeError && (
+        {!routeLoading && !eventGeoLoading && travelSeconds === null && !routeError && !eventGeoError && (
           <Typography variant="caption" color="text.secondary">
             {effectiveStartLat === undefined
               ? 'Startort eingeben oder Standard-Standort in Einstellungen setzen.'
