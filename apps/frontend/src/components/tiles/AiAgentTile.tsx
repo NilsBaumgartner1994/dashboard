@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Box,
   Typography,
@@ -8,10 +8,13 @@ import {
   Chip,
   Tooltip,
   Divider,
+  Switch,
+  FormControlLabel,
 } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import LanguageIcon from '@mui/icons-material/Language'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -19,35 +22,94 @@ import { useStore } from '../../store/useStore'
 import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
+const POLL_INTERVAL_MS = 2000
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
 }
 
+interface JobStatusResponse {
+  status: 'pending' | 'running' | 'done' | 'error'
+  partialContent: string
+  message?: { role: string; content: string }
+  error?: string
+}
+
 interface AiChatProps {
   backendUrl: string
   model: string
+  allowInternet: boolean
   messages: Message[]
   onMessages: (msgs: Message[]) => void
   compact?: boolean
 }
 
-function AiChat({ backendUrl, model, messages, onMessages, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, messages, onMessages, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [partialContent, setPartialContent] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, partialContent])
+
+  // Clean up polling timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current !== null) clearTimeout(pollTimerRef.current)
+    }
+  }, [])
+
+  const pollJob = useCallback(
+    (jobId: string, newMessages: Message[]) => {
+      const poll = async () => {
+        try {
+          const res = await fetch(`${backendUrl}/ai-agent/job/${jobId}`)
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`)
+          }
+          const data = (await res.json()) as JobStatusResponse
+
+          // Update partial content so the user sees the AI "thinking"
+          if (data.partialContent) {
+            setPartialContent(data.partialContent)
+          }
+
+          if (data.status === 'done') {
+            const reply = data.message?.content ?? ''
+            onMessages([...newMessages, { role: 'assistant', content: reply }])
+            setPartialContent('')
+            setLoading(false)
+          } else if (data.status === 'error') {
+            setError(data.error ?? 'Unbekannter Fehler')
+            setPartialContent('')
+            setLoading(false)
+          } else {
+            // Still running – poll again after interval
+            pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS)
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          setError(msg)
+          setPartialContent('')
+          setLoading(false)
+        }
+      }
+      pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS)
+    },
+    [backendUrl, onMessages],
+  )
 
   const send = async () => {
     const trimmed = input.trim()
     if (!trimmed || loading) return
     setInput('')
     setError(null)
+    setPartialContent('')
     const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
     onMessages(newMessages)
     setLoading(true)
@@ -55,19 +117,19 @@ function AiChat({ backendUrl, model, messages, onMessages, compact = false }: Ai
       const res = await fetch(`${backendUrl}/ai-agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: newMessages, stream: false }),
+        body: JSON.stringify({ model, messages: newMessages, allowInternet }),
       })
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({})) as { error?: string }
+        const errData = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(errData.error ?? `HTTP ${res.status}`)
       }
-      const data = await res.json() as { message?: { content?: string }; error?: string }
-      const reply = data.message?.content ?? ''
-      onMessages([...newMessages, { role: 'assistant', content: reply }])
+      const data = (await res.json()) as { jobId?: string; error?: string }
+      if (!data.jobId) throw new Error('Kein jobId in der Antwort')
+      // Start polling for the job result
+      pollJob(data.jobId, newMessages)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
-    } finally {
       setLoading(false)
     }
   }
@@ -83,7 +145,7 @@ function AiChat({ backendUrl, model, messages, onMessages, compact = false }: Ai
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1 }}>
       {/* Message list */}
       <Box sx={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {messages.length === 0 && (
+        {messages.length === 0 && !loading && (
           <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
             Starte eine Unterhaltung mit dem KI-Agenten…
           </Typography>
@@ -119,10 +181,38 @@ function AiChat({ backendUrl, model, messages, onMessages, compact = false }: Ai
             )}
           </Box>
         ))}
+        {/* Partial / streaming response while the AI is still generating */}
+        {loading && partialContent && (
+          <Box
+            sx={{
+              alignSelf: 'flex-start',
+              maxWidth: '85%',
+              bgcolor: 'action.hover',
+              color: 'text.primary',
+              borderRadius: 2,
+              px: 1.5,
+              py: 0.75,
+              opacity: 0.85,
+            }}
+          >
+            <Box
+              sx={{
+                '& p': { my: 0.25 },
+                '& pre': { bgcolor: 'action.selected', p: 0.5, borderRadius: 1, overflow: 'auto', fontSize: '0.8rem' },
+                '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
+                fontSize: compact ? '0.8rem' : '0.875rem',
+              }}
+            >
+              <ReactMarkdown>{partialContent}</ReactMarkdown>
+            </Box>
+          </Box>
+        )}
         {loading && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
             <CircularProgress size={16} />
-            <Typography variant="caption" color="text.secondary">KI denkt nach…</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {partialContent ? 'KI schreibt…' : 'KI denkt nach…'}
+            </Typography>
           </Box>
         )}
         {error && (
@@ -171,8 +261,12 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [modelInput, setModelInput] = useState((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
+  const [allowInternetInput, setAllowInternetInput] = useState(
+    tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
+  )
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
+  const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
 
   return (
@@ -180,7 +274,10 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
       <BaseTile
         tile={tile}
         onTileClick={() => setModalOpen(true)}
-        onSettingsOpen={() => setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)}
+        onSettingsOpen={() => {
+          setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
+          setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
+        }}
         settingsChildren={
           <Box>
             <Divider sx={{ mb: 2 }}>KI-Modell</Divider>
@@ -193,9 +290,23 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               sx={{ mb: 2 }}
               helperText="Muss auf dem Ollama-Server verfügbar sein"
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={allowInternetInput}
+                  onChange={(e) => setAllowInternetInput(e.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <LanguageIcon fontSize="small" />
+                  <Typography variant="body2">Internet-Zugriff erlauben</Typography>
+                </Box>
+              }
+            />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -204,6 +315,11 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               {tileTitle}
             </Typography>
             <Chip label={model} size="small" variant="outlined" sx={{ fontSize: '0.65rem' }} />
+            {allowInternet && (
+              <Tooltip title="Internet-Zugriff aktiv">
+                <LanguageIcon fontSize="small" color="action" />
+              </Tooltip>
+            )}
             {messages.length > 0 && (
               <Tooltip title="Verlauf löschen">
                 <IconButton size="small" onClick={(e) => { e.stopPropagation(); setMessages([]) }}>
@@ -245,6 +361,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             <AiChat
               backendUrl={backendUrl}
               model={model}
+              allowInternet={allowInternet}
               messages={messages}
               onMessages={setMessages}
             />
