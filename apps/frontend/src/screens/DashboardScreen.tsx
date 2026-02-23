@@ -37,16 +37,14 @@ import GoogleCalendarTile from '../components/tiles/GoogleCalendarTile'
 import WeatherTile from '../components/tiles/WeatherTile'
 import NewsTile from '../components/tiles/NewsTile'
 
-const GRID_COLS = 32
-const GRID_ROWS = 18
-const MOBILE_COLS = 4
+const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
-// Number of desktop grid columns that correspond to one mobile column
-const MOBILE_STEP = Math.round(GRID_COLS / MOBILE_COLS)
+const DESKTOP_ROW_HEIGHT = 60 // px per grid row unit on desktop
 
-/** Scales a tile's x/w from the 32-column desktop grid to the 4-column mobile grid. */
-function getMobileTilePos(tile: TileInstance): { x: number; w: number } {
-  const scale = MOBILE_COLS / GRID_COLS
+
+/** Scales a tile's x/w from the desktop grid to the mobile grid. */
+function getMobileTilePos(tile: TileInstance, desktopCols: number): { x: number; w: number } {
+  const scale = MOBILE_COLS / desktopCols
   const rawX = Math.round(tile.x * scale)
   const rawW = Math.max(1, Math.round(tile.w * scale))
   const x = Math.min(rawX, MOBILE_COLS - 1)
@@ -67,10 +65,12 @@ function DraggableTile({
   tile,
   editMode,
   isMobile,
+  gridColumns,
 }: {
   tile: TileInstance
   editMode: boolean
   isMobile: boolean
+  gridColumns: number
 }) {
   const { updateTile, removeTile } = useStore()
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
@@ -78,7 +78,7 @@ function DraggableTile({
     disabled: !editMode || isMobile,
   })
 
-  const { x: mobileX, w: mobileW } = getMobileTilePos(tile)
+  const { x: mobileX, w: mobileW } = getMobileTilePos(tile, gridColumns)
   const effectiveX = isMobile ? mobileX : tile.x
   const effectiveW = isMobile ? mobileW : tile.w
 
@@ -133,7 +133,7 @@ function DraggableTile({
 }
 
 export default function DashboardScreen() {
-  const { tiles, editMode, toggleEditMode, addTile, updateTile } = useStore()
+  const { tiles, editMode, toggleEditMode, addTile, updateTile, gridColumns } = useStore()
   const [addOpen, setAddOpen] = useState(false)
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -146,20 +146,20 @@ export default function DashboardScreen() {
     if (!tile) return
     const gridEl = document.getElementById('dashboard-grid')
     if (!gridEl) return
-    const gridColCount = isMobile ? MOBILE_COLS : GRID_COLS
+    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
     const cellW = gridEl.clientWidth / gridColCount
-    const cellH = gridEl.clientHeight / GRID_ROWS
+    const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
     const dx = Math.round(delta.x / cellW)
     const dy = Math.round(delta.y / cellH)
     if (dx === 0 && dy === 0) return
-    const dxDesktop = isMobile ? dx * MOBILE_STEP : dx
-    const nx = Math.max(0, Math.min(GRID_COLS - tile.w, tile.x + dxDesktop))
-    const ny = Math.max(0, Math.min(GRID_ROWS - tile.h, tile.y + dy))
+    const dxDesktop = isMobile ? dx * Math.round(gridColumns / MOBILE_COLS) : dx
+    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dxDesktop))
+    const ny = Math.max(0, tile.y + dy)
     updateTile(tile.id, { x: nx, y: ny })
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: isMobile ? 'auto' : 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Top bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', px: 2, py: 1, flexShrink: 0 }}>
         {editMode && (
@@ -177,18 +177,10 @@ export default function DashboardScreen() {
       </Box>
 
       {/* Grid area */}
-      <Box sx={{ flex: 1, px: 2, pb: 2, overflow: isMobile ? 'visible' : 'hidden' }}>
+      <Box sx={{ flex: 1, px: 2, pb: 2, overflow: 'auto' }}>
         <Box
-          sx={isMobile ? {
+          sx={{
             width: '100%',
-            position: 'relative',
-            border: editMode ? `2px dashed ${theme.palette.primary.main}` : 'none',
-            boxSizing: 'border-box',
-          } : {
-            width: '100%',
-            aspectRatio: '32 / 18',
-            maxHeight: '100%',
-            margin: '0 auto',
             position: 'relative',
             border: editMode ? `2px dashed ${theme.palette.primary.main}` : 'none',
             boxSizing: 'border-box',
@@ -197,23 +189,16 @@ export default function DashboardScreen() {
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <Box
               id="dashboard-grid"
-              sx={isMobile ? {
+              sx={{
                 display: 'grid',
-                gridTemplateColumns: `repeat(${MOBILE_COLS}, 1fr)`,
-                gridAutoRows: `${MOBILE_ROW_HEIGHT}px`,
+                gridTemplateColumns: `repeat(${isMobile ? MOBILE_COLS : gridColumns}, 1fr)`,
+                gridAutoRows: `${isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT}px`,
                 width: '100%',
-                gap: 0.5,
-              } : {
-                display: 'grid',
-                gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-                gridTemplateRows: `repeat(${GRID_ROWS}, 1fr)`,
-                width: '100%',
-                height: '100%',
                 gap: 0.5,
               }}
             >
               {tiles.map((tile) => (
-                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} />
+                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} />
               ))}
             </Box>
           </DndContext>
