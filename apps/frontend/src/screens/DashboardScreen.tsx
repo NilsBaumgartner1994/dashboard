@@ -158,6 +158,13 @@ export default function DashboardScreen() {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: isMobile ? 'auto' : 'hidden' }}>
       {/* Top bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', px: 2, py: 1, flexShrink: 0 }}>
+        {editMode && (
+          <Tooltip title="Add tile">
+            <IconButton onClick={() => setAddOpen(true)} color="primary">
+              <AddIcon />
+            </IconButton>
+          </Tooltip>
+        )}
         <Tooltip title={editMode ? 'Exit edit mode' : 'Edit mode'}>
           <IconButton onClick={toggleEditMode} color={editMode ? 'primary' : 'default'}>
             <SettingsIcon />

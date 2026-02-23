@@ -7,14 +7,16 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions,
-  Button,
   TextField,
   Typography,
   Divider,
+  Button,
 } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckIcon from '@mui/icons-material/Check'
+import CloseIcon from '@mui/icons-material/Close'
+import DeleteIcon from '@mui/icons-material/Delete'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
@@ -51,7 +53,7 @@ export default function BaseTile({
   overrideBackgroundImage,
   style,
 }: BaseTileProps) {
-  const { updateTile, duplicateTile } = useStore()
+  const { updateTile, duplicateTile, removeTile } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [nameInput, setNameInput] = useState((tile.config?.name as string) ?? '')
   const [bgInput, setBgInput] = useState((tile.config?.backgroundImage as string) ?? '')
@@ -150,12 +152,35 @@ export default function BaseTile({
             width: '100%',
             maxWidth: '100%',
             borderRadius: '16px 16px 0 0',
-            maxHeight: '80vh',
+            maxHeight: '50vh',
           },
         }}
         sx={{ '& .MuiDialog-container': { alignItems: 'flex-end' } }}
       >
-        <DialogTitle>Kachel Einstellungen</DialogTitle>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
+          <Box sx={{ flex: 1 }}>Kachel Einstellungen</Box>
+          <Tooltip title="Duplizieren">
+            <IconButton
+              size="small"
+              onClick={() => {
+                duplicateTile(tile.id)
+                setSettingsOpen(false)
+              }}
+            >
+              <ContentCopyIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Abbrechen">
+            <IconButton size="small" onClick={() => setSettingsOpen(false)}>
+              <CloseIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Speichern">
+            <IconButton size="small" color="primary" onClick={handleSave}>
+              <CheckIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
         <DialogContent dividers>
           {/* Tile-specific settings first */}
           {settingsChildren}
@@ -217,23 +242,22 @@ export default function BaseTile({
               <IconButton size="small" onClick={() => resize(0, 1)}><AddCircleOutlineIcon fontSize="inherit" /></IconButton>
             </Tooltip>
           </Box>
+
+          {/* Delete button at the bottom */}
+          <Box sx={{ mt: 4, mb: 2, display: 'flex', justifyContent: 'center' }}>
+            <Button
+              variant="contained"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={() => {
+                removeTile(tile.id)
+                setSettingsOpen(false)
+              }}
+            >
+              Löschen
+            </Button>
+          </Box>
         </DialogContent>
-        <DialogActions>
-          <Button
-            startIcon={<ContentCopyIcon />}
-            onClick={() => {
-              duplicateTile(tile.id)
-              setSettingsOpen(false)
-            }}
-          >
-            Duplizieren
-          </Button>
-          <Box sx={{ flex: 1 }} />
-          <Button onClick={() => setSettingsOpen(false)}>Abbrechen</Button>
-          <Button onClick={handleSave} variant="contained">
-            Speichern
-          </Button>
-        </DialogActions>
       </Dialog>
     </Paper>
   )
