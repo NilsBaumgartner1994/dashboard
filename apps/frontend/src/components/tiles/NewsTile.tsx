@@ -28,9 +28,13 @@ import type { TileInstance } from '../../store/useStore'
 
 // Pre-defined RSS feed presets
 const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
-  { id: 'tagesschau', label: 'Tagesschau', url: 'https://www.tagesschau.de/xml/rss2/' },
-  { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/index' },
+  { id: 'tagesschau', label: 'Tagesschau', url: 'https://www.tagesschau.de/infoservices/alle-meldungen-100~rss2.xml' },
+  { id: 'zeit', label: 'Zeit Online', url: 'https://newsfeed.zeit.de/' },
 ]
+
+// Build a Google News RSS URL for a given German search query
+const buildGoogleNewsUrl = (query: string) =>
+  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=de&gl=DE&ceid=DE:de`
 
 // CORS proxy for browser RSS fetching
 const CORS_PROXY = 'https://api.allorigins.win/raw?url='
@@ -74,7 +78,7 @@ function parseRssXml(xml: string, sourceLabel: string): NewsItem[] {
       })(),
       link: item.querySelector('link')?.textContent?.trim() ?? '',
       pubDate: item.querySelector('pubDate')?.textContent?.trim() ?? '',
-      source: sourceLabel,
+      source: item.querySelector('source')?.textContent?.trim() || sourceLabel,
     }))
   } catch {
     return []
@@ -118,6 +122,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   // Settings form state
   const [feedsInput, setFeedsInput] = useState<string[]>(config.feeds ?? [])
   const [customUrlInput, setCustomUrlInput] = useState('')
+  const [googleSearchInput, setGoogleSearchInput] = useState('')
   const [intervalInput, setIntervalInput] = useState(String(config.interval ?? 10))
 
   // Timers
@@ -194,6 +199,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const handleSettingsOpen = () => {
     setFeedsInput(config.feeds ?? [])
     setCustomUrlInput('')
+    setGoogleSearchInput('')
     setIntervalInput(String(config.interval ?? 10))
   }
 
@@ -208,6 +214,16 @@ export default function NewsTile({ tile }: NewsTileProps) {
     if (!url || feedsInput.includes(url)) return
     setFeedsInput((prev) => [...prev, url])
     setCustomUrlInput('')
+  }
+
+  const addGoogleSearch = () => {
+    const term = googleSearchInput.trim()
+    if (!term) return
+    const url = buildGoogleNewsUrl(term)
+    if (!feedsInput.includes(url)) {
+      setFeedsInput((prev) => [...prev, url])
+    }
+    setGoogleSearchInput('')
   }
 
   const removeUrl = (url: string) => {
@@ -255,6 +271,32 @@ export default function NewsTile({ tile }: NewsTileProps) {
           variant="outlined"
           onClick={addCustomUrl}
           disabled={!customUrlInput.trim()}
+          startIcon={<AddIcon />}
+          sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
+        >
+          Hinzufügen
+        </Button>
+      </Box>
+
+      {/* Google News keyword search */}
+      <Divider sx={{ mb: 2 }}>Google News Suche</Divider>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        Suchbegriff eingeben – erzeugt einen Google News RSS-Feed für diesen Begriff.
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        <TextField
+          fullWidth
+          size="small"
+          label="Suchbegriff"
+          placeholder="z.B. Dinklage"
+          value={googleSearchInput}
+          onChange={(e) => setGoogleSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGoogleSearch() } }}
+        />
+        <Button
+          variant="outlined"
+          onClick={addGoogleSearch}
+          disabled={!googleSearchInput.trim()}
           startIcon={<AddIcon />}
           sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
         >
