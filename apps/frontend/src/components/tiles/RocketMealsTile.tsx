@@ -46,12 +46,16 @@ function MultiServerView({
   settingsContent,
   getExtraConfig,
   onSettingsOpen,
+  overrideName,
+  overrideBackgroundImage,
 }: {
   tile: TileInstance
   selectedServers: string[]
   settingsContent: React.ReactNode
   getExtraConfig: () => Record<string, unknown>
   onSettingsOpen: () => void
+  overrideName?: string
+  overrideBackgroundImage?: string
 }) {
   const config = (tile.config ?? {}) as RocketMealsConfig
   const checkInterval = config.checkInterval ?? 60
@@ -103,8 +107,30 @@ function MultiServerView({
       settingsChildren={settingsContent}
       getExtraConfig={getExtraConfig}
       onSettingsOpen={onSettingsOpen}
+      overrideBackgroundImage={overrideBackgroundImage}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {overrideName ? (
+          <Box
+            sx={{
+              display: 'inline-block',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              borderRadius: 1,
+              px: 1,
+              py: 0.25,
+              mb: 1,
+              maxWidth: 'calc(100% - 32px)',
+            }}
+          >
+            <Typography
+              variant="subtitle2"
+              fontWeight="bold"
+              sx={{ color: '#fff', wordBreak: 'break-word' }}
+            >
+              {overrideName}
+            </Typography>
+          </Box>
+        ) : null}
         {allOnline ? (
           <Chip
             size="small"
@@ -311,6 +337,8 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
         settingsContent={extraSettings}
         getExtraConfig={getChildExtraConfig}
         onSettingsOpen={handleExtraSettingsOpen}
+        overrideName={overrideName || undefined}
+        overrideBackgroundImage={autoBackgroundImage}
       />
     )
   }
