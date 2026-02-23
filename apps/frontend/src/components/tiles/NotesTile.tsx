@@ -17,6 +17,7 @@ import {
   Divider,
   ToggleButtonGroup,
   ToggleButton,
+  InputAdornment,
 } from '@mui/material'
 import NoteIcon from '@mui/icons-material/Note'
 import AddIcon from '@mui/icons-material/Add'
@@ -24,6 +25,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import PreviewIcon from '@mui/icons-material/Preview'
 import CloseIcon from '@mui/icons-material/Close'
+import SearchIcon from '@mui/icons-material/Search'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -138,6 +140,12 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null)
   const [newNoteOpen, setNewNoteOpen] = useState(false)
 
+  // Inline quick-add state
+  const [quickTitle, setQuickTitle] = useState('')
+
+  // Search state (used in modal)
+  const [searchQuery, setSearchQuery] = useState('')
+
   const handleNoteClick = (note: Note) => {
     setSelectedNote(note)
     setEditorOpen(true)
@@ -164,14 +172,36 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
     setNewNoteOpen(false)
   }
 
+  const handleQuickAdd = () => {
+    const trimmed = quickTitle.trim()
+    if (!trimmed) return
+    addNote(trimmed, '')
+    setQuickTitle('')
+  }
+
+  const handleQuickAddKeyDown = (e: { key: string; stopPropagation: () => void }) => {
+    if (e.key === 'Enter' && quickTitle.trim()) {
+      e.stopPropagation()
+      handleQuickAdd()
+    }
+  }
+
+  const filteredNotes = searchQuery.trim()
+    ? notes.filter(
+        (n) =>
+          n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          n.content.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : notes
+
   const noteList = (
     <List dense disablePadding>
-      {notes.length === 0 && (
+      {filteredNotes.length === 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ px: 1 }}>
-          Keine Notizen vorhanden.
+          {searchQuery.trim() ? 'Keine Notizen gefunden.' : 'Keine Notizen vorhanden.'}
         </Typography>
       )}
-      {notes.map((note) => (
+      {filteredNotes.map((note) => (
         <ListItemButton
           key={note.id}
           dense
@@ -198,7 +228,7 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
           <Typography variant="subtitle2" fontWeight="bold" sx={{ flex: 1 }}>
             {(tile.config?.name as string) || 'Notizen'}
           </Typography>
-          <Tooltip title="Neue Notiz">
+          <Tooltip title="Neue Notiz (mit Details)">
             <IconButton
               size="small"
               onClick={(e) => { e.stopPropagation(); setNewNoteOpen(true) }}
@@ -207,6 +237,27 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
             </IconButton>
           </Tooltip>
         </Box>
+
+        {/* Inline quick-add */}
+        <TextField
+          size="small"
+          fullWidth
+          placeholder="Neue Notiz…"
+          value={quickTitle}
+          onChange={(e) => setQuickTitle(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={handleQuickAddKeyDown}
+          sx={{ mb: 1 }}
+          InputProps={{
+            endAdornment: quickTitle.trim() ? (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleQuickAdd() }}>
+                  <AddIcon fontSize="inherit" />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
+          }}
+        />
 
         {/* Compact note list */}
         <Box sx={{ overflow: 'auto', flex: 1 }}>
@@ -245,10 +296,28 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
         onClose={() => setModalOpen(false)}
         title={(tile.config?.name as string) || 'Notizen'}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, flexShrink: 0, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="subtitle2" sx={{ flex: 1 }}>
-            {notes.length === 0 ? 'Keine Notizen' : `${notes.length} Notiz${notes.length === 1 ? '' : 'en'}`}
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, flexShrink: 0, borderBottom: 1, borderColor: 'divider', gap: 1 }}>
+          <TextField
+            size="small"
+            placeholder="Suchen…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{ flex: 1 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: searchQuery ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearchQuery('')}>
+                    <CloseIcon fontSize="inherit" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
           <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setNewNoteOpen(true)}>
             Neue Notiz
           </Button>

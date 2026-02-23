@@ -708,6 +708,28 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
           </Box>
         )}
 
+        {/* Inline quick-add input – at the top */}
+        {tokenOk && !loading && !error && (
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Neue Aufgabe…"
+            value={quickAddTitle}
+            onChange={(e) => setQuickAddTitle(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleQuickAddKeyDown}
+            disabled={quickAddLoading}
+            sx={{ mb: 1 }}
+            InputProps={{
+              endAdornment: quickAddLoading ? (
+                <InputAdornment position="end">
+                  <CircularProgress size={14} />
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
+        )}
+
         {/* Task list (compact) */}
         {tokenOk && !loading && !error && tasks.length === 0 && (
           <Typography variant="body2" color="text.secondary">
@@ -724,28 +746,6 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
               </Typography>
             )}
           </Box>
-        )}
-
-        {/* Inline quick-add input */}
-        {tokenOk && !loading && !error && (
-          <TextField
-            size="small"
-            fullWidth
-            placeholder="Neue Aufgabe…"
-            value={quickAddTitle}
-            onChange={(e) => setQuickAddTitle(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={handleQuickAddKeyDown}
-            disabled={quickAddLoading}
-            sx={{ mt: 1 }}
-            InputProps={{
-              endAdornment: quickAddLoading ? (
-                <InputAdornment position="end">
-                  <CircularProgress size={14} />
-                </InputAdornment>
-              ) : undefined,
-            }}
-          />
         )}
       </BaseTile>
 
