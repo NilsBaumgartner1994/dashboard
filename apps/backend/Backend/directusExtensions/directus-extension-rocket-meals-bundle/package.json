@@ -62,11 +62,6 @@
         "type": "endpoint",
         "name": "cors-proxy-endpoint",
         "source": "src/cors-proxy-endpoint/index.ts"
-      },
-      {
-        "type": "endpoint",
-        "name": "google-news-html-parse-endpoint",
-        "source": "src/google-news-html-parse-endpoint/index.ts"
       }
     ],
     "host": "^10.10.0"

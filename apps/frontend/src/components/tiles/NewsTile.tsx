@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { parse as parseHtml } from 'node-html-parser'
 import {
   Box,
   Typography,
@@ -57,6 +58,83 @@ function isGoogleNewsHtmlUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+const resolveGoogleNewsHref = (raw: string): string => {
+  if (!raw) return ''
+  if (raw.startsWith('http')) return raw
+  try { return new URL(raw, 'https://news.google.com').toString() } catch { return raw }
+}
+
+const CONTAINER_TAGS = new Set(['div', 'section', 'main', 'article'])
+
+/**
+ * Parse Google News HTML in the browser using node-html-parser.
+ * Three fallback strategies (tried in order until results are found):
+ *  1. <article> elements
+ *  2. <h3>/<h4> headings that contain an <a>
+ *  3. Any <a href*="/articles/"> anchor with meaningful text
+ */
+function parseGoogleNewsHtml(html: string, sourceLabel: string): NewsItem[] {
+  const doc = parseHtml(html)
+  const results: NewsItem[] = []
+
+  // Strategy 1 – <article> elements
+  for (const art of doc.querySelectorAll('article')) {
+    if (results.length >= MAX_NEWS_ITEMS) break
+    const headingEl = art.querySelector('h3, h4, h2')
+    const title = headingEl?.text.trim() ?? art.querySelector('a')?.text.trim() ?? ''
+    if (!title) continue
+
+    const linkEl = art.querySelector('a[href*="articles"]') ?? art.querySelector('a[href]')
+    const link = resolveGoogleNewsHref(linkEl?.getAttribute('href') ?? '')
+
+    const timeEl = art.querySelector('time')
+    const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.text.trim() ?? ''
+
+    const imgEl = art.querySelector('figure img') ?? art.querySelector('img')
+    const imageUrl = resolveGoogleNewsHref(imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? '')
+
+    const sourceEl = art.querySelector('a[href*="publications"]') ?? art.querySelector('[data-n-tid]')
+    const source = sourceEl?.text.trim() || sourceLabel
+
+    results.push({ title, description: '', link, pubDate, source, imageUrl })
+  }
+  if (results.length > 0) return results
+
+  // Strategy 2 – headings (<h3>/<h4>) containing a link
+  for (const heading of doc.querySelectorAll('h3, h4')) {
+    if (results.length >= MAX_NEWS_ITEMS) break
+    const anchor = heading.querySelector('a[href]')
+    const title = heading.text.trim()
+    const link = resolveGoogleNewsHref(anchor?.getAttribute('href') ?? '')
+    if (!title || !link) continue
+
+    // Walk up to a meaningful container
+    let container = heading.parentNode
+    while (container && !CONTAINER_TAGS.has(container.rawTagName?.toLowerCase() ?? '')) {
+      container = container.parentNode
+    }
+    const timeEl = container?.querySelector('time')
+    const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.text.trim() ?? ''
+    const imgEl = container?.querySelector('img')
+    const imageUrl = resolveGoogleNewsHref(imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? '')
+
+    results.push({ title, description: '', link, pubDate, source: sourceLabel, imageUrl })
+  }
+  if (results.length > 0) return results
+
+  // Strategy 3 – any <a href*="/articles/"> anchor with meaningful text
+  for (const anchor of doc.querySelectorAll('a[href]')) {
+    if (results.length >= MAX_NEWS_ITEMS) break
+    const rawHref = anchor.getAttribute('href') ?? ''
+    if (!rawHref.includes('/articles/')) continue
+    const title = anchor.text.trim()
+    if (!title || title.length < 10) continue
+    results.push({ title, description: '', link: resolveGoogleNewsHref(rawHref), pubDate: '', source: sourceLabel, imageUrl: '' })
+  }
+
+  return results
 }
 
 /** Format a RSS pubDate string into a human-readable German locale string. */
@@ -185,34 +263,34 @@ async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: New
     catch { return url }
   })()
 
-  // Google News HTML pages (e.g. /topics/...) must be fetched and parsed server-side
-  // using the dedicated backend endpoint (which uses cheerio).
-  // Only /rss/... URLs are true RSS feeds and use the standard RSS path below.
+  // Google News HTML pages (e.g. /topics/...) – fetch the HTML via proxy, parse in the browser
   if (isGoogleNewsHtmlUrl(url)) {
-    if (!backendUrl) {
-      debugInfo.push(`✗ Kein Backend verfügbar – Google News HTML-Seite kann nicht geparst werden`)
-      return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
-    }
-    try {
-      const res = await fetch(`${backendUrl}/google-news-html-parse?url=${encodeURIComponent(url)}`, {
-        signal: AbortSignal.timeout(30000),
-      })
-      if (res.ok) {
-        const data = (await res.json()) as { items: NewsItem[]; debug?: { htmlLength: number; itemCount: number } }
-        if (data.debug) {
-          debugInfo.push(`HTML geladen (${data.debug.htmlLength} Zeichen)`)
-          debugInfo.push(`Artikel gefunden: ${data.debug.itemCount}`)
-        }
-        if (Array.isArray(data.items) && data.items.length > 0) {
-          debugInfo.push(`✓ Backend-Parse erfolgreich`)
-          return { items: data.items.map((it) => ({ ...it, source: it.source || sourceLabel })), error: null, debugInfo }
-        }
-        debugInfo.push(`✗ Backend-Parse: keine Artikel gefunden`)
+    let html: string | null = null
+    for (const proxy of CORS_PROXIES) {
+      html = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
+      if (html) {
+        debugInfo.push(`✓ Proxy erfolgreich: ${proxy}`)
+        break
       } else {
-        debugInfo.push(`✗ Backend-Parse fehlgeschlagen: HTTP ${res.status}`)
+        debugInfo.push(`✗ Proxy fehlgeschlagen: ${proxy}`)
       }
-    } catch (err) {
-      debugInfo.push(`✗ Backend-Parse Fehler: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (!html && backendUrl) {
+      html = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+      if (html) {
+        debugInfo.push(`✓ Backend-Proxy erfolgreich`)
+      } else {
+        debugInfo.push(`✗ Backend-Proxy fehlgeschlagen`)
+      }
+    }
+    if (html) {
+      debugInfo.push(`HTML geladen (${html.length} Zeichen)`)
+      const items = parseGoogleNewsHtml(html, sourceLabel)
+      debugInfo.push(`Artikel gefunden: ${items.length}`)
+      if (items.length === 0) {
+        debugInfo.push(`Kein Artikel konnte geparst werden – HTML-Struktur möglicherweise geändert`)
+      }
+      if (items.length > 0) return { items, error: null, debugInfo }
     }
     return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
   }
