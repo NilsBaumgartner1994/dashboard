@@ -60,12 +60,18 @@ function isGoogleNewsHtmlUrl(url: string): boolean {
 }
 
 /** Parse a Google News HTML page and return news items (title, date, image from <figure>). */
-function parseGoogleNewsHtml(html: string, sourceLabel: string): NewsItem[] {
+function parseGoogleNewsHtml(html: string, sourceLabel: string, baseUrl?: string): NewsItem[] {
   try {
     const parser = new DOMParser()
     const doc = parser.parseFromString(html, 'text/html')
     const articles = Array.from(doc.querySelectorAll('article'))
     if (articles.length === 0) return []
+
+    // Determine the base origin for resolving relative URLs (e.g. /api/attachments/...)
+    let baseOrigin = 'https://news.google.com'
+    if (baseUrl) {
+      try { baseOrigin = new URL(baseUrl).origin } catch { /* keep default */ }
+    }
 
     return articles.slice(0, MAX_NEWS_ITEMS).flatMap((article): NewsItem[] => {
       // Title – prefer the first heading, fall back to any anchor text
@@ -83,9 +89,13 @@ function parseGoogleNewsHtml(html: string, sourceLabel: string): NewsItem[] {
       const timeEl = article.querySelector('time')
       const pubDate = timeEl?.getAttribute('datetime') ?? timeEl?.textContent?.trim() ?? ''
 
-      // Image from <figure><img>
+      // Image from <figure><img> – resolve relative src against the Google News origin
       const imgEl = article.querySelector('figure img')
-      const imageUrl = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? ''
+      const rawSrc = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? ''
+      let imageUrl = rawSrc
+      if (rawSrc) {
+        try { imageUrl = new URL(rawSrc, baseOrigin).toString() } catch { imageUrl = rawSrc }
+      }
 
       return [{ title, description: '', link, pubDate, source: sourceLabel, imageUrl }]
     })
@@ -211,43 +221,72 @@ async function tryFetchText(fetchUrl: string): Promise<string | null> {
   }
 }
 
-async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null }> {
+async function fetchFeed(url: string, backendUrl?: string): Promise<{ items: NewsItem[]; error: string | null; debugInfo: string[] }> {
+  const debugInfo: string[] = []
   const sourceLabel = (() => {
     try { return new URL(url).hostname.replace('www.', '') }
     catch { return url }
   })()
+  debugInfo.push(`URL: ${url}`)
 
   // For Google News HTML pages, fetch and parse the HTML directly to get images
   if (isGoogleNewsHtmlUrl(url)) {
     let html: string | null = null
     for (const proxy of CORS_PROXIES) {
       html = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
-      if (html) break
+      if (html) {
+        debugInfo.push(`✓ Proxy erfolgreich: ${proxy}`)
+        break
+      } else {
+        debugInfo.push(`✗ Proxy fehlgeschlagen: ${proxy}`)
+      }
     }
     if (!html && backendUrl) {
       html = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+      if (html) {
+        debugInfo.push(`✓ Backend-Proxy erfolgreich`)
+      } else {
+        debugInfo.push(`✗ Backend-Proxy fehlgeschlagen`)
+      }
     }
     if (html) {
-      const items = parseGoogleNewsHtml(html, sourceLabel)
-      if (items.length > 0) return { items, error: null }
+      debugInfo.push(`HTML geladen (${html.length} Zeichen)`)
+      const items = parseGoogleNewsHtml(html, sourceLabel, url)
+      debugInfo.push(`Artikel gefunden: ${items.length}`)
+      if (items.length === 0) {
+        debugInfo.push(`Kein Artikel konnte geparst werden – HTML-Struktur möglicherweise geändert (keine <article>-Elemente gefunden)`)
+      }
+      if (items.length > 0) return { items, error: null, debugInfo }
     }
-    return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
+    return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
   }
 
   // For all other URLs use the RSS path
   let text: string | null = null
   for (const proxy of CORS_PROXIES) {
     text = await tryFetchText(`${proxy}${encodeURIComponent(url)}`)
-    if (text) break
+    if (text) {
+      debugInfo.push(`✓ Proxy erfolgreich: ${proxy}`)
+      break
+    } else {
+      debugInfo.push(`✗ Proxy fehlgeschlagen: ${proxy}`)
+    }
   }
   if (!text && backendUrl) {
     text = await tryFetchText(`${backendUrl}/cors-proxy?url=${encodeURIComponent(url)}`)
+    if (text) {
+      debugInfo.push(`✓ Backend-Proxy erfolgreich`)
+    } else {
+      debugInfo.push(`✗ Backend-Proxy fehlgeschlagen`)
+    }
   }
   if (text) {
+    debugInfo.push(`XML geladen (${text.length} Zeichen)`)
     const items = parseRssXml(text, sourceLabel)
-    return { items, error: null }
+    debugInfo.push(`Einträge gefunden: ${items.length}`)
+    return { items, error: null, debugInfo }
   }
-  return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}` }
+  return { items: [], error: `Feed konnte nicht geladen werden: ${sourceLabel}`, debugInfo }
 }
 
 /** Asynchronously fetch the og:image from an article URL via CORS proxy. */
@@ -294,6 +333,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [fetchErrors, setFetchErrors] = useState<string[]>([])
+  const [fetchDebugInfo, setFetchDebugInfo] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [imageCache, setImageCache] = useState<Record<string, string>>({})
   const [lastFeedUpdate, setLastFeedUpdate] = useState<number | null>(null)
@@ -356,6 +396,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     if (!feedUrls.length) return
     setLoading(true)
     setFetchErrors([])
+    setFetchDebugInfo([])
     setImageCache({})
     imageCacheRef.current = {}
     imageFetchingRef.current.clear()
@@ -363,8 +404,10 @@ export default function NewsTile({ tile }: NewsTileProps) {
       const results = await Promise.all(feedUrls.map((url) => fetchFeed(url, backendUrl)))
       const allItems = results.flatMap((r) => r.items).filter((item) => item.title)
       const errors = results.map((r) => r.error).filter((e): e is string => e !== null)
+      const debugLines = results.flatMap((r) => r.debugInfo)
       setItems(allItems)
       setFetchErrors(errors)
+      setFetchDebugInfo(debugLines)
       setCurrentIndex(0)
       setLastFeedUpdate(Date.now())
     } finally {
@@ -621,6 +664,24 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 {err}
               </Alert>
             ))}
+            {debugMode && fetchDebugInfo.length > 0 && (
+              <Box
+                component="pre"
+                sx={{
+                  fontSize: '0.65rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  bgcolor: 'action.hover',
+                  p: 0.5,
+                  borderRadius: 1,
+                  mt: 0.5,
+                  maxHeight: 200,
+                  overflow: 'auto',
+                }}
+              >
+                {fetchDebugInfo.join('\n')}
+              </Box>
+            )}
           </Box>
         )}
 
@@ -699,6 +760,29 @@ export default function NewsTile({ tile }: NewsTileProps) {
                 >
                   {JSON.stringify(currentItem, null, 2)}
                 </Box>
+                {fetchDebugInfo.length > 0 && (
+                  <>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold" sx={{ mt: 0.5, display: 'block' }}>
+                      Debug – Feed-Ladeprotokoll:
+                    </Typography>
+                    <Box
+                      component="pre"
+                      sx={{
+                        fontSize: '0.65rem',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        bgcolor: 'action.hover',
+                        p: 0.5,
+                        borderRadius: 1,
+                        mt: 0.25,
+                        maxHeight: 150,
+                        overflow: 'auto',
+                      }}
+                    >
+                      {fetchDebugInfo.join('\n')}
+                    </Box>
+                  </>
+                )}
               </Box>
             )}
           </>
