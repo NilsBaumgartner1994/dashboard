@@ -1,4 +1,16 @@
 services:
+  my-dashboard-ai:
+    image: ollama/ollama:latest
+    restart: always
+    networks:
+      - directus_network
+    volumes:
+      - ./data/ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+    # Pull the model on startup if not already present
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3.1:8b} && wait"]
+
   prepare-data:
     image: debian:bookworm-slim
     volumes:
@@ -23,6 +35,10 @@ services:
         condition: service_completed_successfully
       my-dashboard-cache:
         condition: service_started
+      my-dashboard-ai:
+        condition: service_started
+    environment:
+      OLLAMA_URL: "http://my-dashboard-ai:11434"
     extends:
       service: my-dashboard-directus
       file: apps/backend/docker-compose.yaml
