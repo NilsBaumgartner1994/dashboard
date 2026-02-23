@@ -241,6 +241,24 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     return JSON.parse(body)
   }, [clientId, clientSecret, refreshToken, addLog])
 
+  /** Tries to refresh the access token on demand (e.g. after a 401 response).
+   *  Returns the new access token on success, or null when no refresh is possible
+   *  or the refresh itself fails (token is cleared in that case). */
+  const tryRefreshAccessToken = useCallback(async (): Promise<string | null> => {
+    if (!refreshToken || !clientSecret) return null
+    try {
+      const tokens = await refreshAccessToken()
+      addLog(`Access-Token automatisch erneuert (läuft ab in ${tokens.expires_in}s)`)
+      setToken(tokens.access_token, tokens.expires_in)
+      return tokens.access_token
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      addLog(`Automatische Token-Erneuerung fehlgeschlagen: ${msg}`)
+      clearToken()
+      return null
+    }
+  }, [refreshToken, clientSecret, refreshAccessToken, setToken, clearToken, addLog])
+
   // ── Google login – implicit flow ──────────────────────────────────────────
   const isSilentRefresh = useRef(false)
 
@@ -346,7 +364,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     )
     addLog(`Kalenderliste Antwort: HTTP ${res.status}`)
     if (res.status === 401) {
-      clearToken()
       throw new Error('TOKEN_EXPIRED')
     }
     if (!res.ok) {
@@ -362,7 +379,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     }))
     addLog(`Kalenderliste geladen: ${cals.length} Kalender`)
     return cals
-  }, [clearToken, addLog])
+  }, [addLog])
 
   // ── Fetch events for N days ahead ────────────────────────────────────────
   const fetchEvents = useCallback(
@@ -387,7 +404,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           })
           if (res.status === 401) {
             addLog(`Events Antwort: HTTP 401 für Kalender ${calId} – Token abgelaufen`)
-            clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
           if (!res.ok) {
@@ -408,7 +424,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       addLog(`Events geladen: ${flat.length} Ereignisse`)
       return flat
     },
-    [clearToken, addLog],
+    [addLog],
   )
 
   // ── Fetch events for a custom time range ────────────────────────────────
@@ -430,7 +446,6 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           })
           if (res.status === 401) {
             addLog(`Events Antwort: HTTP 401 für Kalender ${calId} – Token abgelaufen`)
-            clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
           if (!res.ok) {
@@ -451,7 +466,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       addLog(`Events geladen: ${flat.length} Ereignisse`)
       return flat
     },
-    [clearToken, addLog],
+    [addLog],
   )
 
   // ── Fetch modal events for a given week offset ───────────────────────────
@@ -459,18 +474,29 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     async (token: string, calIds: string[], weekOffset: number) => {
       setModalLoading(true)
       setModalError(null)
+      const now = new Date()
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const startDate = new Date(startOfToday.getTime() + weekOffset * 7 * 24 * 3600 * 1000)
+      const endDate = new Date(startDate.getTime() + 7 * 24 * 3600 * 1000)
+      const calendarIds = calendars.map((c) => c.id)
+      const ids = calIds.length > 0 ? calIds : (calendarIds.length > 0 ? calendarIds : ['primary'])
       try {
-        const now = new Date()
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        const startDate = new Date(startOfToday.getTime() + weekOffset * 7 * 24 * 3600 * 1000)
-        const endDate = new Date(startDate.getTime() + 7 * 24 * 3600 * 1000)
-        const calendarIds = calendars.map((c) => c.id)
-        const ids = calIds.length > 0 ? calIds : (calendarIds.length > 0 ? calendarIds : ['primary'])
         const evts = await fetchEventsForRange(token, ids, startDate.toISOString(), endDate.toISOString())
         setModalEvents(evts)
       } catch (err: unknown) {
         if ((err as Error).message === 'TOKEN_EXPIRED') {
-          setModalError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+          const newToken = await tryRefreshAccessToken()
+          if (newToken) {
+            addLog('Token erneuert nach 401 (Modal), lade Woche neu...')
+            try {
+              const retryEvts = await fetchEventsForRange(newToken, ids, startDate.toISOString(), endDate.toISOString())
+              setModalEvents(retryEvts)
+            } catch (retryErr: unknown) {
+              setModalError((retryErr as Error).message)
+            }
+          } else {
+            setModalError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+          }
         } else {
           setModalError((err as Error).message)
         }
@@ -478,7 +504,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         setModalLoading(false)
       }
     },
-    [fetchEventsForRange, calendars],
+    [fetchEventsForRange, calendars, tryRefreshAccessToken, addLog],
   )
 
   // ── Open modal ───────────────────────────────────────────────────────────
@@ -548,16 +574,23 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         setCalendarEvents(evts)
         setLastEventsUpdate(Date.now())
       })
-      .catch((err: Error) => {
+      .catch(async (err: Error) => {
         if (err.message === 'TOKEN_EXPIRED') {
-          setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+          const newToken = await tryRefreshAccessToken()
+          if (newToken) {
+            addLog('Token erneuert nach 401, lade Daten neu...')
+            triggerEventsReload()
+          } else {
+            clearToken()
+            setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+          }
         } else {
           setError(err.message)
         }
       })
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents, reloadTrigger])
+  }, [tokenOk, accessToken, selectedCalendarIds.join(','), daysAhead, fetchCalendars, fetchEvents, reloadTrigger, tryRefreshAccessToken, triggerEventsReload, clearToken, addLog])
 
   // ── Settings helpers ─────────────────────────────────────────────────────
   const handleSettingsOpen = () => {
