@@ -113,6 +113,10 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       clearToken()
       throw new Error('TOKEN_EXPIRED')
     }
+    if (res.status === 403) {
+      clearToken()
+      throw new Error('TOKEN_FORBIDDEN')
+    }
     if (!res.ok) throw new Error(`Kalender laden fehlgeschlagen (${res.status})`)
     const data = await res.json()
     return (data.items ?? []).map((c: CalendarInfo & { backgroundColor?: string }) => ({
@@ -146,6 +150,10 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
             clearToken()
             throw new Error('TOKEN_EXPIRED')
           }
+          if (res.status === 403) {
+            clearToken()
+            throw new Error('TOKEN_FORBIDDEN')
+          }
           if (!res.ok) return []
           const data = await res.json()
           return ((data.items ?? []) as CalendarEvent[]).map((ev) => ({ ...ev, calendarId: calId }))
@@ -176,7 +184,13 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       })
       .then(setEvents)
       .catch((err: Error) => {
-        if (err.message !== 'TOKEN_EXPIRED') setError(err.message)
+        if (err.message === 'TOKEN_EXPIRED') {
+          setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+        } else if (err.message === 'TOKEN_FORBIDDEN') {
+          setError('Zugriff verweigert (403). Bitte Token zurücksetzen und erneut anmelden.')
+        } else {
+          setError(err.message)
+        }
       })
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,6 +218,11 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     setSettingsCalendars((prev) =>
       prev.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c)),
     )
+  }
+
+  const handleTokenReset = () => {
+    clearToken()
+    setError(null)
   }
 
   // ── Settings content ─────────────────────────────────────────────────────
@@ -247,14 +266,23 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           </FormGroup>
         </>
       ) : (
-        <Button
-          variant="outlined"
-          startIcon={<LoginIcon />}
-          onClick={() => login()}
-          sx={{ mb: 1 }}
-        >
-          Mit Google anmelden
-        </Button>
+        <>
+          <Button
+            variant="outlined"
+            startIcon={<LoginIcon />}
+            onClick={() => login()}
+            sx={{ mb: 1 }}
+          >
+            Mit Google anmelden
+          </Button>
+          <Button
+            variant="text"
+            onClick={handleTokenReset}
+            sx={{ mb: 1 }}
+          >
+            Token zurücksetzen
+          </Button>
+        </>
       )}
     </>
   )
@@ -307,9 +335,15 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       {/* Body */}
       {!tokenOk && (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Nicht angemeldet.
-          </Typography>
+          {error ? (
+            <Typography variant="body2" color="error">
+              {error}
+            </Typography>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Nicht angemeldet.
+            </Typography>
+          )}
           <Button
             size="small"
             variant="outlined"
@@ -318,15 +352,31 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
           >
             Mit Google anmelden
           </Button>
+          <Button
+            size="small"
+            variant="text"
+            onClick={handleTokenReset}
+          >
+            Token zurücksetzen
+          </Button>
         </Box>
       )}
 
       {tokenOk && loading && <CircularProgress size={20} />}
 
       {tokenOk && error && (
-        <Typography variant="body2" color="error">
-          {error}
-        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
+          <Typography variant="body2" color="error">
+            {error}
+          </Typography>
+          <Button
+            size="small"
+            variant="text"
+            onClick={handleTokenReset}
+          >
+            Token zurücksetzen
+          </Button>
+        </Box>
       )}
 
       {tokenOk && !loading && !error && events.length === 0 && (
