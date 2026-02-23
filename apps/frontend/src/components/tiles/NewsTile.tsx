@@ -237,6 +237,7 @@ interface NewsConfig {
   reloadIntervalMinutes?: 1 | 5 | 60
   showReloadBar?: boolean
   showLastUpdate?: boolean
+  maxAgeDays?: number     // maximum age of news items in days (0 = no limit)
 }
 
 interface NewsTileProps {
@@ -405,6 +406,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const reloadIntervalMinutes: 1 | 5 | 60 = config.reloadIntervalMinutes ?? 5
   const showReloadBar = config.showReloadBar ?? false
   const showLastUpdate = config.showLastUpdate ?? false
+  const maxAgeDays = config.maxAgeDays ?? 14
   const backendUrl = useStore((s) => s.backendUrl)
   const debugMode = useStore((s) => s.debugMode)
   const openModal = useUIStore((s) => s.openModal)
@@ -427,6 +429,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
   const [reloadIntervalInput, setReloadIntervalInput] = useState<1 | 5 | 60>(reloadIntervalMinutes)
   const [showReloadBarInput, setShowReloadBarInput] = useState(showReloadBar)
   const [showLastUpdateInput, setShowLastUpdateInput] = useState(showLastUpdate)
+  const [maxAgeDaysInput, setMaxAgeDaysInput] = useState(String(config.maxAgeDays ?? 14))
 
   // Timers / refs
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -483,7 +486,15 @@ export default function NewsTile({ tile }: NewsTileProps) {
     imageFetchingRef.current.clear()
     try {
       const results = await Promise.all(feedUrls.map((url) => fetchFeed(url, backendUrl)))
-      const allItems = results.flatMap((r) => r.items).filter((item) => item.title)
+      const rawItems = results.flatMap((r) => r.items).filter((item) => item.title)
+      const cutoffMs = maxAgeDays > 0 ? Date.now() - maxAgeDays * 24 * 60 * 60 * 1000 : null
+      const allItems = cutoffMs === null
+        ? rawItems
+        : rawItems.filter((item) => {
+            if (!item.pubDate) return true
+            const ts = Date.parse(item.pubDate)
+            return isNaN(ts) || ts >= cutoffMs
+          })
       const errors = results.map((r) => r.error).filter((e): e is string => e !== null)
       const debugLines = results.flatMap((r) => r.debugInfo)
       setItems(allItems)
@@ -494,7 +505,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     } finally {
       setLoading(false)
     }
-  }, [backendUrl])
+  }, [backendUrl, maxAgeDays])
 
   useEffect(() => {
     fetchAllFeeds(feeds)
@@ -521,6 +532,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     setReloadIntervalInput(reloadIntervalMinutes)
     setShowReloadBarInput(showReloadBar)
     setShowLastUpdateInput(showLastUpdate)
+    setMaxAgeDaysInput(String(config.maxAgeDays ?? 14))
   }
 
   const togglePreset = (url: string) => {
@@ -556,6 +568,7 @@ export default function NewsTile({ tile }: NewsTileProps) {
     reloadIntervalMinutes: reloadIntervalInput,
     showReloadBar: showReloadBarInput,
     showLastUpdate: showLastUpdateInput,
+    maxAgeDays: Math.max(0, isNaN(Number(maxAgeDaysInput)) ? 14 : Number(maxAgeDaysInput)),
   })
 
   // Settings content
@@ -662,6 +675,18 @@ export default function NewsTile({ tile }: NewsTileProps) {
         inputProps={{ min: 5 }}
         value={intervalInput}
         onChange={(e) => setIntervalInput(e.target.value)}
+        sx={{ mb: 2 }}
+      />
+      <Divider sx={{ mb: 2 }}>Filteroptionen</Divider>
+      <TextField
+        fullWidth
+        size="small"
+        label="Max. Alter der News (Tage, 0 = kein Limit)"
+        type="number"
+        inputProps={{ min: 0 }}
+        value={maxAgeDaysInput}
+        onChange={(e) => setMaxAgeDaysInput(e.target.value)}
+        helperText="News ohne Datum werden immer angezeigt. Standard: 14 Tage."
         sx={{ mb: 2 }}
       />
       <ReloadIntervalSettings
