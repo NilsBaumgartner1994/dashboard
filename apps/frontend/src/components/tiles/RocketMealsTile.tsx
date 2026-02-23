@@ -8,6 +8,7 @@ import {
   Divider,
   FormGroup,
   Checkbox,
+  TextField,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
@@ -182,6 +183,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
   const [selectedServersInput, setSelectedServersInput] = useState<string[]>(
     config.selectedServers ?? [],
   )
+  const [checkIntervalInput, setCheckIntervalInput] = useState(String(config.checkInterval ?? 60))
 
   const fetchProjectInfo = useCallback(async () => {
     if (!serverUrl) return
@@ -228,6 +230,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     setHideLastUpdateInput(config.hideLastUpdate ?? false)
     setMultiServerInput(config.multiServer ?? false)
     setSelectedServersInput(config.selectedServers ?? [])
+    setCheckIntervalInput(String(config.checkInterval ?? 60))
   }
 
   const allPresetKeys = MONITORABLE_PRESETS.map((p) => p.key)
@@ -254,6 +257,7 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
     hideLastUpdate: hideLastUpdateInput,
     multiServer: multiServerInput,
     selectedServers: selectedServersInput,
+    checkInterval: Math.max(10, Number(checkIntervalInput) || 60),
   })
 
   const extraSettings = (
@@ -326,6 +330,15 @@ export default function RocketMealsTile({ tile }: RocketMealsTileProps) {
           />
         </>
       )}
+      <TextField
+        fullWidth
+        label="Abfrageintervall (Sekunden)"
+        type="number"
+        inputProps={{ min: 10 }}
+        value={checkIntervalInput}
+        onChange={(e) => setCheckIntervalInput(e.target.value)}
+        sx={{ mb: 2 }}
+      />
     </>
   )
 
