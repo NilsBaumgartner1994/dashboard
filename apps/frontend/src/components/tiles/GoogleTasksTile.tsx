@@ -34,6 +34,8 @@ import CloseIcon from '@mui/icons-material/Close'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ReactMarkdown from 'react-markdown'
 import {
   DndContext,
   closestCenter,
@@ -135,9 +137,10 @@ interface SortableTaskItemProps {
   task: Task
   onComplete: (task: Task) => void
   onDelete: (task: Task) => void
+  onEdit: (task: Task) => void
 }
 
-function SortableTaskItem({ task, onComplete, onDelete }: SortableTaskItemProps) {
+function SortableTaskItem({ task, onComplete, onDelete, onEdit }: SortableTaskItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -172,6 +175,8 @@ function SortableTaskItem({ task, onComplete, onDelete }: SortableTaskItemProps)
         />
       </ListItemIcon>
       <ListItemText
+        onClick={() => onEdit(task)}
+        sx={{ cursor: 'pointer', '&:hover .MuiTypography-root': { color: 'primary.main' } }}
         primary={task.title}
         secondary={
           <>
@@ -245,6 +250,15 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
   const [newDue, setNewDue] = useState('')
   const [newRepeat, setNewRepeat] = useState('never')
   const [addLoading, setAddLoading] = useState(false)
+
+  // Edit task state
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [editDue, setEditDue] = useState('')
+  const [editRepeat, setEditRepeat] = useState('never')
+  const [editLoading, setEditLoading] = useState(false)
+  const [editPreview, setEditPreview] = useState(false)
 
   // Quick-add inline state
   const [quickAddTitle, setQuickAddTitle] = useState('')
@@ -618,6 +632,71 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
     setAddOpen(true)
   }
 
+  const openEditTask = (task: Task) => {
+    const { cleanNotes, repeat } = extractRepeat(task.notes)
+    setEditingTask(task)
+    setEditTitle(task.title)
+    setEditNotes(cleanNotes)
+    setEditDue(task.due ? task.due.split('T')[0] : '')
+    setEditRepeat(repeat)
+    setEditPreview(false)
+  }
+
+  const closeEditTask = () => {
+    setEditingTask(null)
+  }
+
+  const handleUpdateTask = async () => {
+    if (!accessToken || !editingTask || !editTitle.trim()) return
+    setEditLoading(true)
+    try {
+      let notes = editNotes.trim()
+      if (editRepeat !== 'never') {
+        const repeatLabel = REPEAT_OPTIONS.find((o) => o.value === editRepeat)?.label ?? ''
+        notes = notes ? `${notes}\n${REPEAT_PREFIX}${repeatLabel}` : `${REPEAT_PREFIX}${repeatLabel}`
+      }
+      const body: { title: string; notes: string; due?: string } = {
+        title: editTitle.trim(),
+        notes: notes || '',
+      }
+      if (editDue) body.due = new Date(editDue + 'T00:00:00').toISOString()
+      const res = await fetch(
+        `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(selectedListId)}/tasks/${encodeURIComponent(editingTask.id)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      if (res.status === 401) { clearToken(); setError('Sitzung abgelaufen (401). Bitte erneut anmelden.'); return }
+      if (res.ok) {
+        const updated: Task = await res.json()
+        setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t))
+        setEditingTask(null)
+      } else {
+        setError(`Aufgabe konnte nicht gespeichert werden (HTTP ${res.status}).`)
+      }
+    } catch (err: unknown) {
+      setError((err as Error).message ?? 'Aufgabe konnte nicht gespeichert werden.')
+    } finally {
+      setEditLoading(false)
+    }
+  }
+
+  const setEditDueToday = () => {
+    const d = new Date()
+    setEditDue(d.toISOString().split('T')[0])
+  }
+
+  const setEditDueTomorrow = () => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    setEditDue(d.toISOString().split('T')[0])
+  }
+
   const setDueToday = () => {
     const d = new Date()
     setNewDue(d.toISOString().split('T')[0])
@@ -727,6 +806,7 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
               task={task}
               onComplete={handleComplete}
               onDelete={handleDelete}
+              onEdit={openEditTask}
             />
           ))}
         </List>
@@ -841,30 +921,163 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
       {/* ── Full task list modal ─────────────────────────────────────────── */}
       <LargeModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={(tile.config?.name as string) || 'Aufgaben'}
+        onClose={() => { setModalOpen(false); setEditingTask(null) }}
+        title={editingTask ? editTitle || 'Aufgabe bearbeiten' : ((tile.config?.name as string) || 'Aufgaben')}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, flexShrink: 0, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="subtitle2" sx={{ flex: 1 }}>
-            {tasks.length === 0 ? 'Keine offenen Aufgaben' : `${tasks.length} Aufgabe${tasks.length === 1 ? '' : 'n'}`}
-          </Typography>
-          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={openAddDialog}>
-            Neue Aufgabe
-          </Button>
-        </Box>
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
-          {loading && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-              <CircularProgress />
+        {editingTask ? (
+          /* ── Task detail / edit view ─────────────────────────────────── */
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, flexShrink: 0, borderBottom: 1, borderColor: 'divider' }}>
+              <Tooltip title="Zurück zur Liste">
+                <IconButton size="small" onClick={closeEditTask} sx={{ mr: 1 }}>
+                  <ArrowBackIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Typography variant="subtitle2" sx={{ flex: 1 }}>
+                Aufgabe bearbeiten
+              </Typography>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={editLoading ? <CircularProgress size={14} /> : <CheckIcon />}
+                onClick={handleUpdateTask}
+                disabled={!editTitle.trim() || editLoading}
+              >
+                Speichern
+              </Button>
             </Box>
-          )}
-          {!loading && tasks.length === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              Keine offenen Aufgaben.
-            </Typography>
-          )}
-          {!loading && renderTaskList(tasks)}
-        </Box>
+            <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
+              {/* Title */}
+              <TextField
+                autoFocus
+                fullWidth
+                label="Titel"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && editTitle.trim()) handleUpdateTask() }}
+                sx={{ mb: 2 }}
+              />
+              {/* Notes / Description with markdown */}
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                  <Typography variant="subtitle2" sx={{ flex: 1 }}>
+                    Beschreibung (Markdown)
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={editPreview ? <VisibilityOffIcon fontSize="inherit" /> : <VisibilityIcon fontSize="inherit" />}
+                    onClick={() => setEditPreview((v) => !v)}
+                  >
+                    {editPreview ? 'Bearbeiten' : 'Vorschau'}
+                  </Button>
+                </Box>
+                {editPreview ? (
+                  <Box
+                    sx={{
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                      p: 1.5,
+                      minHeight: 80,
+                      '& p': { mt: 0, mb: 1 },
+                      '& ul, & ol': { pl: 2, mt: 0, mb: 1 },
+                      '& code': { bgcolor: 'action.hover', px: 0.5, borderRadius: 0.5 },
+                    }}
+                  >
+                    {editNotes ? (
+                      <ReactMarkdown>{editNotes}</ReactMarkdown>
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">
+                        Keine Beschreibung
+                      </Typography>
+                    )}
+                  </Box>
+                ) : (
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={3}
+                    placeholder="Beschreibung in Markdown…"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                  />
+                )}
+              </Box>
+              {/* Due date */}
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                Fälligkeitsdatum
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Button
+                  size="small"
+                  variant={editDue === todayStr ? 'contained' : 'outlined'}
+                  onClick={setEditDueToday}
+                >
+                  Heute
+                </Button>
+                <Button
+                  size="small"
+                  variant={editDue === tomorrowStr ? 'contained' : 'outlined'}
+                  onClick={setEditDueTomorrow}
+                >
+                  Morgen
+                </Button>
+                <TextField
+                  size="small"
+                  type="date"
+                  value={editDue}
+                  onChange={(e) => setEditDue(e.target.value)}
+                  inputProps={{ min: todayStr }}
+                  sx={{ flex: 1, minWidth: 140 }}
+                />
+                {editDue && (
+                  <IconButton size="small" onClick={() => setEditDue('')}>
+                    <DeleteIcon fontSize="inherit" />
+                  </IconButton>
+                )}
+              </Box>
+              {/* Repeat */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Wiederholen</InputLabel>
+                <Select
+                  value={editRepeat}
+                  label="Wiederholen"
+                  onChange={(e) => setEditRepeat(e.target.value)}
+                >
+                  {REPEAT_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          </>
+        ) : (
+          /* ── Task list view ──────────────────────────────────────────── */
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, flexShrink: 0, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="subtitle2" sx={{ flex: 1 }}>
+                {tasks.length === 0 ? 'Keine offenen Aufgaben' : `${tasks.length} Aufgabe${tasks.length === 1 ? '' : 'n'}`}
+              </Typography>
+              <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={openAddDialog}>
+                Neue Aufgabe
+              </Button>
+            </Box>
+            <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+              {loading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                  <CircularProgress />
+                </Box>
+              )}
+              {!loading && tasks.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  Keine offenen Aufgaben.
+                </Typography>
+              )}
+              {!loading && renderTaskList(tasks)}
+            </Box>
+          </>
+        )}
       </LargeModal>
 
       {/* ── Add task dialog ──────────────────────────────────────────────── */}
