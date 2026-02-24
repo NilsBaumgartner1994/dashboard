@@ -18,6 +18,9 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import LanguageIcon from '@mui/icons-material/Language'
 import AddIcon from '@mui/icons-material/Add'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import EditIcon from '@mui/icons-material/Edit'
+import CheckIcon from '@mui/icons-material/Check'
+import CloseIcon from '@mui/icons-material/Close'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -69,6 +72,8 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
   const [currentActivity, setCurrentActivity] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [debugPayload, setDebugPayload] = useState<Record<string, unknown> | null>(null)
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [editingContent, setEditingContent] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -145,6 +150,34 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
     [backendUrl, onMessages, debugMode],
   )
 
+  /** Submit a pre-built messages array to the backend and start polling. */
+  const submitMessages = useCallback(
+    async (newMessages: Message[]) => {
+      onMessages(newMessages)
+      setLoading(true)
+      const startTime = Date.now()
+      try {
+        const res = await fetch(`${backendUrl}/ai-agent/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages: newMessages, allowInternet }),
+        })
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as { error?: string }
+          throw new Error(errData.error ?? `HTTP ${res.status}`)
+        }
+        const data = (await res.json()) as { jobId?: string; error?: string }
+        if (!data.jobId) throw new Error('Kein jobId in der Antwort')
+        pollJob(data.jobId, newMessages, startTime)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(msg)
+        setLoading(false)
+      }
+    },
+    [backendUrl, model, allowInternet, onMessages, pollJob],
+  )
+
   const send = async () => {
     const trimmed = input.trim()
     if (!trimmed || loading) return
@@ -154,28 +187,26 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
     setCurrentActivity('')
     setDebugPayload(null)
     const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
-    onMessages(newMessages)
-    setLoading(true)
-    const startTime = Date.now()
-    try {
-      const res = await fetch(`${backendUrl}/ai-agent/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: newMessages, allowInternet }),
-      })
-      if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(errData.error ?? `HTTP ${res.status}`)
-      }
-      const data = (await res.json()) as { jobId?: string; error?: string }
-      if (!data.jobId) throw new Error('Kein jobId in der Antwort')
-      // Start polling for the job result
-      pollJob(data.jobId, newMessages, startTime)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
-      setLoading(false)
-    }
+    await submitMessages(newMessages)
+  }
+
+  /** Save an edited user message at index `idx` and re-send from there. */
+  const handleEditSave = async (idx: number) => {
+    const trimmed = editingContent.trim()
+    if (!trimmed) return
+    setEditingIdx(null)
+    setError(null)
+    setPartialContent('')
+    setCurrentActivity('')
+    setDebugPayload(null)
+    // Truncate history to everything before the edited message, then append the edited version
+    const newMessages: Message[] = [...messages.slice(0, idx), { role: 'user', content: trimmed }]
+    await submitMessages(newMessages)
+  }
+
+  const handleEditCancel = () => {
+    setEditingIdx(null)
+    setEditingContent('')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -205,6 +236,8 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
               borderRadius: 2,
               px: 1.5,
               py: 0.75,
+              position: 'relative',
+              '&:hover .msg-edit-btn': { opacity: 1 },
             }}
           >
             {msg.role === 'assistant' ? (
@@ -249,27 +282,83 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
                   </Typography>
                 )}
               </Box>
-            ) : (
-              // User message: in debug mode show what was actually sent to Ollama
-              debugMode && msg.debugSentPayload ? (
-                <Box
-                  component="pre"
-                  sx={{
-                    m: 0,
-                    fontSize: '0.7rem',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-all',
-                    maxHeight: 300,
-                    overflow: 'auto',
+            ) : editingIdx === i ? (
+              /* Inline edit mode for user messages */
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 200 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  maxRows={8}
+                  value={editingContent}
+                  onChange={(e) => setEditingContent(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditSave(i) }
+                    if (e.key === 'Escape') handleEditCancel()
                   }}
-                >
-                  {JSON.stringify(msg.debugSentPayload, null, 2)}
+                  autoFocus
+                  sx={{
+                    '& .MuiInputBase-root': { color: 'primary.contrastText', fontSize: compact ? '0.8rem' : '0.875rem' },
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.light' },
+                  }}
+                />
+                <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                  <Tooltip title="Speichern & neu senden (Enter)">
+                    <IconButton size="small" onClick={() => handleEditSave(i)} sx={{ color: 'primary.contrastText' }}>
+                      <CheckIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Abbrechen (Esc)">
+                    <IconButton size="small" onClick={handleEditCancel} sx={{ color: 'primary.contrastText' }}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Box>
-              ) : (
-                <Typography variant={compact ? 'caption' : 'body2'} sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {msg.content}
-                </Typography>
-              )
+              </Box>
+            ) : (
+              /* Normal user message display */
+              <>
+                {debugMode && msg.debugSentPayload ? (
+                  <Box
+                    component="pre"
+                    sx={{
+                      m: 0,
+                      fontSize: '0.7rem',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      maxHeight: 300,
+                      overflow: 'auto',
+                    }}
+                  >
+                    {JSON.stringify(msg.debugSentPayload, null, 2)}
+                  </Box>
+                ) : (
+                  <Typography variant={compact ? 'caption' : 'body2'} sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {msg.content}
+                  </Typography>
+                )}
+                {/* Edit button – visible on hover, hidden while loading */}
+                {!loading && (
+                  <Tooltip title="Nachricht bearbeiten & ab hier neu senden">
+                    <IconButton
+                      className="msg-edit-btn"
+                      size="small"
+                      onClick={() => { setEditingIdx(i); setEditingContent(msg.content) }}
+                      sx={{
+                        position: 'absolute',
+                        top: 2,
+                        left: -28,
+                        opacity: 0,
+                        transition: 'opacity 0.15s',
+                        color: 'text.secondary',
+                        p: 0.25,
+                      }}
+                    >
+                      <EditIcon sx={{ fontSize: '0.85rem' }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </>
             )}
           </Box>
         ))}
@@ -437,7 +526,20 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     navigator.clipboard.writeText(chatId).then(() => {
       setCopiedId(true)
       setTimeout(() => setCopiedId(false), 1500)
-    }).catch(() => { /* ignore */ })
+    }).catch((err) => { console.error('Clipboard write failed:', err) })
+  }
+
+  const [copiedHistory, setCopiedHistory] = useState(false)
+
+  const handleCopyHistory = () => {
+    if (messages.length === 0) return
+    const text = messages
+      .map((m) => `${m.role === 'assistant' ? 'KI' : 'Ich'}: ${m.content}`)
+      .join('\n\n')
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedHistory(true)
+      setTimeout(() => setCopiedHistory(false), 1500)
+    }).catch((err) => { console.error('Clipboard write failed:', err) })
   }
 
   const [modelInput, setModelInput] = useState((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
@@ -565,6 +667,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 Neuer Chat
               </Button>
             </Tooltip>
+            {messages.length > 0 && (
+              <Tooltip title={copiedHistory ? 'Kopiert!' : 'Verlauf kopieren (KI: … / Ich: …)'}>
+                <IconButton size="small" onClick={handleCopyHistory}>
+                  <ContentCopyIcon fontSize="inherit" />
+                </IconButton>
+              </Tooltip>
+            )}
             {messages.length > 0 && (
               <Tooltip title="Verlauf löschen">
                 <IconButton size="small" onClick={() => handleSetMessages([])}>
