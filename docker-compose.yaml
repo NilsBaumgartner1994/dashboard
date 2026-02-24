@@ -60,6 +60,8 @@ services:
   my-dashboard-directus:
     env_file:
       - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       prepare-data:
         condition: service_completed_successfully
@@ -70,6 +72,7 @@ services:
     environment:
       OLLAMA_URL: "http://my-dashboard-ai:11434"
       TTS_URL: "http://my-dashboard-tts-cpu:8880"
+      DOCKER_SOCKET_PATH: "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
     extends:
       service: my-dashboard-directus
       file: apps/backend/docker-compose.yaml
