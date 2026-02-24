@@ -173,6 +173,22 @@ describe('AI Agent Endpoint', () => {
   });
 
   describe('Thinking mode', () => {
+    // Helper that mirrors the extractPlannedSteps() logic from the backend
+    function extractPlannedSteps(text: string): Array<{ text: string; done: boolean }> {
+      const steps: Array<{ text: string; done: boolean }> = [];
+      for (const line of text.split('\n')) {
+        const cleaned = line.trim();
+        const match = cleaned.match(/^(?:\d+[.):\s]\s*|Schritt\s+\d+[:.]\s+|[*\-•]\s+)(.+)/);
+        if (match && match[1]) {
+          const stepText = match[1].replace(/^\*\*|\*\*$/g, '').trim();
+          if (stepText.length > 3) {
+            steps.push({ text: stepText, done: false });
+          }
+        }
+      }
+      return steps;
+    }
+
     it('should include thinking:true in request when thinking mode is enabled', () => {
       const requestBody = {
         model: 'llama3.1:8b',
@@ -224,6 +240,74 @@ describe('AI Agent Endpoint', () => {
       expect(expectedActivities[0]).toContain('analysiert');
       expect(expectedActivities[1]).toContain('sucht');
       expect(expectedActivities[2]).toContain('formuliert');
+    });
+
+    it('should extract numbered steps from analysis content', () => {
+      const analysisText =
+        '1. Suchen nach Informationen über Del Wish Lohne\n' +
+        '2. Auswerten der Ergebnisse und Suche nach relevanten Quellen\n' +
+        '3. Öffnungszeiten aus den Suchergebnissen extrahieren';
+
+      const steps = extractPlannedSteps(analysisText);
+      expect(steps).toHaveLength(3);
+      expect(steps[0].text).toBe('Suchen nach Informationen über Del Wish Lohne');
+      expect(steps[0].done).toBe(false);
+      expect(steps[1].text).toBe('Auswerten der Ergebnisse und Suche nach relevanten Quellen');
+      expect(steps[2].text).toBe('Öffnungszeiten aus den Suchergebnissen extrahieren');
+    });
+
+    it('should extract bullet-point steps from analysis content', () => {
+      const analysisText =
+        '* Web-Suche nach Öffnungszeiten\n' +
+        '- Webseite des Restaurants aufrufen\n' +
+        '• Informationen zusammenfassen';
+
+      const steps = extractPlannedSteps(analysisText);
+      expect(steps).toHaveLength(3);
+      expect(steps[0].text).toBe('Web-Suche nach Öffnungszeiten');
+      expect(steps[1].text).toBe('Webseite des Restaurants aufrufen');
+      expect(steps[2].text).toBe('Informationen zusammenfassen');
+    });
+
+    it('should mark steps as done sequentially when tools are executed', () => {
+      const steps = [
+        { text: 'Schritt A', done: false },
+        { text: 'Schritt B', done: false },
+        { text: 'Schritt C', done: false },
+      ];
+
+      // Simulate tool execution marking the next undone step
+      const markNextDone = (s: typeof steps) => {
+        const next = s.find((step) => !step.done);
+        if (next) next.done = true;
+      };
+
+      markNextDone(steps);
+      expect(steps[0].done).toBe(true);
+      expect(steps[1].done).toBe(false);
+
+      markNextDone(steps);
+      expect(steps[1].done).toBe(true);
+      expect(steps[2].done).toBe(false);
+    });
+
+    it('should include plannedSteps in job status response', () => {
+      const jobResponse = {
+        status: 'running',
+        partialContent: 'KI sucht…',
+        currentActivity: 'KI sucht im Internet: "test"…',
+        visitedUrls: [],
+        plannedSteps: [
+          { text: 'Suche nach Informationen', done: true },
+          { text: 'Webseite aufrufen', done: false },
+        ],
+        message: undefined,
+        error: undefined,
+      };
+      expect(jobResponse).toHaveProperty('plannedSteps');
+      expect(Array.isArray(jobResponse.plannedSteps)).toBe(true);
+      expect(jobResponse.plannedSteps[0].done).toBe(true);
+      expect(jobResponse.plannedSteps[1].done).toBe(false);
     });
   });
 

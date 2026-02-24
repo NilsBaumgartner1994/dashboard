@@ -11,6 +11,7 @@ import {
   Switch,
   FormControlLabel,
   Button,
+  Checkbox,
 } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
@@ -51,6 +52,7 @@ interface JobStatusResponse {
   partialContent: string
   currentActivity?: string
   visitedUrls?: string[]
+  plannedSteps?: Array<{ text: string; done: boolean }>
   message?: { role: string; content: string }
   error?: string
   debugPayload?: Record<string, unknown>
@@ -72,6 +74,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
   const [currentActivity, setCurrentActivity] = useState<string>('')
+  const [plannedSteps, setPlannedSteps] = useState<Array<{ text: string; done: boolean }>>([])
   const [error, setError] = useState<string | null>(null)
   const [debugPayload, setDebugPayload] = useState<Record<string, unknown> | null>(null)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
@@ -110,6 +113,11 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setCurrentActivity(data.currentActivity)
           }
 
+          // Update planned steps checkboxes (thinking mode)
+          if (data.plannedSteps !== undefined) {
+            setPlannedSteps(data.plannedSteps)
+          }
+
           if (data.status === 'done') {
             const reply = data.message?.content ?? ''
             const responseTimeMs = Date.now() - startTime
@@ -128,12 +136,14 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             onMessages([...finalNewMessages, { role: 'assistant', content: reply, responseTimeMs, sources }])
             setPartialContent('')
             setCurrentActivity('')
+            setPlannedSteps([])
             if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
             setPartialContent('')
             setCurrentActivity('')
+            setPlannedSteps([])
             setLoading(false)
           } else {
             // Still running – poll again after interval
@@ -144,6 +154,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           setError(msg)
           setPartialContent('')
           setCurrentActivity('')
+          setPlannedSteps([])
           setLoading(false)
         }
       }
@@ -187,6 +198,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     setError(null)
     setPartialContent('')
     setCurrentActivity('')
+    setPlannedSteps([])
     setDebugPayload(null)
     const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
     await submitMessages(newMessages)
@@ -200,6 +212,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     setError(null)
     setPartialContent('')
     setCurrentActivity('')
+    setPlannedSteps([])
     setDebugPayload(null)
     // Truncate history to everything before the edited message, then append the edited version
     const newMessages: Message[] = [...messages.slice(0, idx), { role: 'user', content: trimmed }]
@@ -396,6 +409,33 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             <Typography variant="caption" color="text.secondary">
               {currentActivity || (partialContent ? 'KI schreibt…' : 'KI denkt nach…')}
             </Typography>
+          </Box>
+        )}
+        {/* Planned steps checkboxes – shown in thinking mode while the AI is working */}
+        {loading && plannedSteps.length > 0 && (
+          <Box sx={{ px: 1, pb: 0.5 }}>
+            {plannedSteps.map((step, i) => (
+              <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                <Checkbox
+                  size="small"
+                  checked={step.done}
+                  disabled
+                  sx={{ p: 0.25, mt: 0.1, flexShrink: 0 }}
+                />
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    textDecoration: step.done ? 'line-through' : 'none',
+                    opacity: step.done ? 0.5 : 1,
+                    lineHeight: 1.4,
+                    pt: 0.3,
+                  }}
+                >
+                  {step.text}
+                </Typography>
+              </Box>
+            ))}
           </Box>
         )}
         {error && (
