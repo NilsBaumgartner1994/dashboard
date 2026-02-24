@@ -67,6 +67,11 @@
         "type": "endpoint",
         "name": "ai-agent-endpoint",
         "source": "src/ai-agent-endpoint/index.ts"
+      },
+      {
+        "type": "endpoint",
+        "name": "tts-endpoint",
+        "source": "src/tts-endpoint/index.ts"
       }
     ],
     "host": "^10.10.0"

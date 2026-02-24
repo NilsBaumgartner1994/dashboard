@@ -25,8 +25,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import CloseIcon from '@mui/icons-material/Close'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 
-const DEFAULT_TTS_URL = 'http://localhost:8880'
 const DEFAULT_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
 
@@ -70,7 +70,9 @@ function formatDate(date: Date): string {
 }
 
 export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
-  const ttsUrl: string = (tile.config?.ttsUrl as string) || DEFAULT_TTS_URL
+  const backendUrl = useStore((s) => s.backendUrl)
+  const defaultTtsUrl = `${backendUrl}/tts`
+  const ttsUrl: string = (tile.config?.ttsUrl as string) || defaultTtsUrl
   const checkIntervalS: number =
     typeof tile.config?.checkInterval === 'number' && tile.config.checkInterval >= 10
       ? (tile.config.checkInterval as number)
@@ -149,7 +151,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
     const start = Date.now()
     try {
-      const res = await fetch(`${ttsUrl}/tts/generate`, {
+      const res = await fetch(`${ttsUrl}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: textInput }),
@@ -204,7 +206,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       <BaseTile
         tile={tile}
         onSettingsOpen={() => {
-          setTtsUrlInput((tile.config?.ttsUrl as string) || DEFAULT_TTS_URL)
+          setTtsUrlInput((tile.config?.ttsUrl as string) || defaultTtsUrl)
           setCheckIntervalInput(String(checkIntervalS))
         }}
         settingsChildren={
@@ -213,7 +215,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             <TextField
               fullWidth
               label="TTS Server URL"
-              placeholder={DEFAULT_TTS_URL}
+              placeholder={defaultTtsUrl}
               value={ttsUrlInput}
               onChange={(e) => setTtsUrlInput(e.target.value)}
               sx={{ mb: 2 }}
@@ -231,7 +233,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           </Box>
         }
         getExtraConfig={() => ({
-          ttsUrl: ttsUrlInput || DEFAULT_TTS_URL,
+          ttsUrl: ttsUrlInput || defaultTtsUrl,
           checkInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_CHECK_INTERVAL_S),
         })}
       >
