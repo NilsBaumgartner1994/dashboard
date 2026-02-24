@@ -67,6 +67,7 @@ services:
         condition: service_started
     environment:
       OLLAMA_URL: "http://my-dashboard-ai:11434"
+      TTS_URL: "http://my-dashboard-tts-cpu:8880"
     extends:
       service: my-dashboard-directus
       file: apps/backend/docker-compose.yaml
