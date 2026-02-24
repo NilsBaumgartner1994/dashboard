@@ -1,56 +1,50 @@
 # Qwen3-TTS API (CPU)
 
-Local text-to-speech service based on [Qwen/Qwen3-TTS-12Hz-0.6B-Base](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base).
+Local text-to-speech service based on Qwen3-TTS models.
 
-## Wo wird das Modell heruntergeladen? / Where is the model downloaded from?
+## CPU-only + multiple models
 
-Das Modell wird beim **ersten Start des Containers automatisch vom [Hugging Face Hub](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base)** heruntergeladen.
+Der Container läuft **rein auf CPU** und lädt beim Start standardmäßig beide Modelle:
 
-- **Kein API-Key erforderlich** – `Qwen/Qwen3-TTS-12Hz-0.6B-Base` ist ein öffentliches Modell.
-- Die Modelldateien werden im Docker-Volume `./data/tts-models/` gespeichert und beim nächsten Start wiederverwendet (kein erneuter Download notwendig).
-- Benötigter Speicherplatz: ca. **1–2 GB** für das 0.6B-Modell.
+- `Qwen/Qwen3-TTS-12Hz-0.6B-Base`
+- `Qwen/Qwen3-TTS-1.7B-Base`
 
----
+Beide bleiben lokal im Cache (`./data/tts-models`) und werden bei Neustarts wiederverwendet.
 
-*The model is downloaded automatically from Hugging Face Hub on the first container start.*
-*No API key is required – it is a public model.*
-*Files are cached in `./data/tts-models/` and reused on subsequent starts.*
+## Hugging Face Token
 
-## Optional: Hugging Face Token
+Für die beiden Default-Modelle ist **kein Token nötig** (öffentlich).
 
-Ein Token wird für dieses Modell **nicht benötigt**. Falls du ein privates oder gated Modell verwenden möchtest, kannst du optional einen Token setzen:
+Optional für private/gated Modelle:
 
 ```dotenv
-# .env
 HUGGING_FACE_HUB_TOKEN=hf_...
 ```
 
-Der Token wird automatisch an den Container weitergereicht und von der `transformers`-Bibliothek verwendet.
-
-## Schnellstart / Quick start
+## Quick start
 
 ```bash
-# Nur TTS starten (CPU-Profil)
 docker-compose --profile cpu up my-dashboard-tts-cpu
-
-# Oder manuell bauen und starten
-docker build -t qwen3-tts-api-cpu --target cpu-base ./apps/tts
-docker run -p 8880:8880 -v "$(pwd)/data/tts-models:/root/.cache/huggingface" qwen3-tts-api-cpu
 ```
 
-## Umgebungsvariablen / Environment variables
+## Umgebungsvariablen
 
-| Variable | Standard / Default | Beschreibung |
+| Variable | Default | Beschreibung |
 |---|---|---|
-| `TTS_MODEL_ID` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | HuggingFace-Modell-ID |
-| `HUGGING_FACE_HUB_TOKEN` | *(leer / empty)* | HF-Token für private/gated Modelle |
-| `TTS_MEMORY` | `4g` | Docker-Speicherlimit für den Container |
+| `TTS_MODEL_ID` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | Fallback/Default Modell-ID |
+| `TTS_MODEL_IDS` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base,Qwen/Qwen3-TTS-1.7B-Base` | Komma-getrennte Liste aller beim Start zu ladenden Modelle |
+| `TTS_DEFAULT_MODEL_ID` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | Standardmodell, wenn kein `model_id` in Request übergeben wird |
+| `HUGGING_FACE_HUB_TOKEN` | *(leer)* | Optionaler HF Token |
 
-## Endpunkte / Endpoints
+## Endpoints
 
-| Method | Path | Beschreibung |
-|---|---|---|
-| `GET` | `/health` | Gibt `{"status": "ok", "model": "..."}` zurück, sobald das Modell geladen ist |
-| `POST` | `/tts/generate` | Generiert Audio; Body: `{"text": "..."}` → WAV-Datei |
-
-Der Response-Header `X-Generation-Time-Ms` enthält die Generierungszeit in Millisekunden.
+- `GET /health`
+  - Liefert Status + geladene/supported Modelle.
+- `POST /tts/generate`
+  - Aktuell unterstützt: `mode=voice_design`.
+  - Request-Felder:
+    - `text` (required)
+    - `voice` (optional)
+    - `model_id` (optional)
+    - `mode` (optional, default `voice_design`)
+    - `reference_audio_base64`, `reference_text` (optional, bereits für zukünftiges Voice-Clone-Handling vorgesehen)

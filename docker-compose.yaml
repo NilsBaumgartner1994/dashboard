@@ -15,6 +15,8 @@ services:
       - ./data/tts-models:/root/.cache/huggingface
     environment:
       TTS_MODEL_ID: "${TTS_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
+      TTS_MODEL_IDS: "${TTS_MODEL_IDS:-Qwen/Qwen3-TTS-12Hz-0.6B-Base,Qwen/Qwen3-TTS-1.7B-Base}"
+      TTS_DEFAULT_MODEL_ID: "${TTS_DEFAULT_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
       # Optional: set HUGGING_FACE_HUB_TOKEN in .env for private/gated models.
       # Not required for the default public model.
       HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
