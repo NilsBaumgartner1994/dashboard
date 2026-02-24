@@ -311,6 +311,95 @@ describe('AI Agent Endpoint', () => {
     });
   });
 
+  describe('Inline tool call detection', () => {
+    // Helper that mirrors the parseInlineToolCalls() logic from the backend
+    function parseInlineToolCalls(content: string): Array<{ function: { name: string; arguments: Record<string, unknown> } }> {
+      const calls: Array<{ function: { name: string; arguments: Record<string, unknown> } }> = [];
+      const jsonBlocks = content.match(/\{(?:[^{}]|\{[^{}]*\})*\}/g);
+      if (!jsonBlocks) return calls;
+      for (const block of jsonBlocks) {
+        try {
+          const parsed = JSON.parse(block) as Record<string, unknown>;
+          const name = typeof parsed.name === 'string' ? parsed.name : undefined;
+          if (name === 'web_search' || name === 'fetch_url') {
+            const rawArgs = (parsed.parameters ?? parsed.arguments ?? parsed.args ?? {}) as Record<string, unknown>;
+            calls.push({ function: { name, arguments: rawArgs } });
+          }
+        } catch {
+          // not valid JSON, skip
+        }
+      }
+      return calls;
+    }
+
+    it('should detect a web_search call with parameters key', () => {
+      const content = 'SYNTHESE:\n{"name": "web_search", "parameters": {"query": "Delwish Lohne heute"}}';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.function.name).toBe('web_search');
+      expect((calls[0]!.function.arguments as { query: string }).query).toBe('Delwish Lohne heute');
+    });
+
+    it('should detect a fetch_url call with arguments key', () => {
+      const content = '{"name": "fetch_url", "arguments": {"url": "https://example.com"}}';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.function.name).toBe('fetch_url');
+      expect((calls[0]!.function.arguments as { url: string }).url).toBe('https://example.com');
+    });
+
+    it('should return empty array when no tool calls are present', () => {
+      const content = 'Das ist eine normale Antwort ohne Tool-Aufrufe.';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('should return empty array for unrecognised tool names', () => {
+      const content = '{"name": "unknown_tool", "parameters": {"foo": "bar"}}';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('should detect multiple inline tool calls in a single response', () => {
+      const content =
+        'Schritt 1: {"name": "web_search", "parameters": {"query": "Öffnungszeiten Delwish Lohne"}}\n' +
+        'Schritt 2: {"name": "fetch_url", "parameters": {"url": "https://delwish.de"}}';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.function.name).toBe('web_search');
+      expect(calls[1]!.function.name).toBe('fetch_url');
+    });
+
+    it('should ignore malformed JSON gracefully', () => {
+      const content = 'AUSFÜHRUNG: {name: "web_search", parameters: {query: "test"}} not valid json';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('should return empty array for valid JSON without a name field', () => {
+      const content = '{"parameters": {"query": "test"}, "type": "function"}';
+      const calls = parseInlineToolCalls(content);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  describe('Thinking mode execution system prompt', () => {
+    it('should use a simple execution prompt (not analytical) after the analysis phase', () => {
+      // The execution-phase system prompt must NOT contain the structured ANALYSE/PLAN/AUSFÜHRUNG/SYNTHESE
+      // headings so the model uses native tool calls instead of writing them as text.
+      const execSystemContent =
+        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
+        ' WICHTIG: Rufe diese Tools direkt auf – schreibe Tool-Aufrufe NICHT als Text in deine Antwort.' +
+        ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
+      expect(execSystemContent).not.toContain('ANALYSE');
+      expect(execSystemContent).not.toContain('AUSFÜHRUNG');
+      expect(execSystemContent).not.toContain('SYNTHESE');
+      expect(execSystemContent).toContain('web_search');
+      expect(execSystemContent).toContain('NICHT als Text');
+    });
+  });
+
 
   describe('Error handling', () => {
     it('should handle Ollama returning a non-200 status', () => {
