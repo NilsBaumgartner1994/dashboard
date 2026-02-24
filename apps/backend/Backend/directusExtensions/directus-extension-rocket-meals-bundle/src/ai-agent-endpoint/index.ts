@@ -331,6 +331,12 @@ async function runAgentLoop(
   // When internet tools are active, also instruct the model to use them.
   // In thinking mode, use a structured analytical system prompt.
   if (currentMessages[0]?.role !== 'system') {
+    // Instructions shared by all system prompts to improve handling of user input.
+    const INPUT_TRUST_INSTRUCTIONS =
+      ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
+      ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+      ' Informelle Ausdrücke: "auf?" / "hat auf" / "offen?" bei einem Geschäft oder Ort bedeutet immer' +
+      ' "geöffnet?" bzw. "Öffnungszeiten".';
     let systemContent: string;
     if (thinking) {
       systemContent =
@@ -339,7 +345,8 @@ async function runAgentLoop(
         '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
         '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
         '3. AUSFÜHRUNG: Führe alle Schritte systematisch aus.\n' +
-        '4. SYNTHESE: Gib eine vollständige, destillierte Antwort.';
+        '4. SYNTHESE: Gib eine vollständige, destillierte Antwort.' +
+        INPUT_TRUST_INSTRUCTIONS;
       if (tools.length > 0) {
         systemContent +=
           '\nDu hast Zugriff auf web_search und fetch_url.' +
@@ -350,7 +357,8 @@ async function runAgentLoop(
       }
     } else {
       systemContent =
-        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        INPUT_TRUST_INSTRUCTIONS;
       if (tools.length > 0) {
         systemContent +=
           ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
@@ -390,6 +398,7 @@ async function runAgentLoop(
         '- Was genau möchte der Benutzer wissen?\n' +
         '- Welche konkreten Informationen werden benötigt?\n' +
         '- Welche Schritte sind notwendig, um alle Informationen zu beschaffen?\n' +
+        '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen).\n' +
         'Gib NUR die Analyse und den Plan aus, noch KEINE endgültige Antwort.',
     };
 
@@ -418,7 +427,9 @@ async function runAgentLoop(
     // Replace the analytical system prompt with a simpler execution-focused prompt
     // so the model calls tools natively instead of writing tool calls as plain text.
     if (currentMessages[0]?.role === 'system') {
-      let execSystemContent = 'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+      let execSystemContent =
+        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        ' Übernimm Eigennamen GENAU so wie vom Benutzer angegeben – keine automatische Rechtschreibkorrektur.';
       if (tools.length > 0) {
         execSystemContent +=
           ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
