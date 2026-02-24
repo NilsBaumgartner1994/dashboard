@@ -582,10 +582,10 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     try {
       await fetch(backendUrl, { method: 'HEAD', mode: 'no-cors', signal: AbortSignal.timeout(5000) })
       setBackendStatus('online')
-      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'online' }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'online' as const }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     } catch (err) {
       setBackendStatus('offline')
-      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'offline', detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'offline' as const, detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     }
   }, [backendUrl])
 

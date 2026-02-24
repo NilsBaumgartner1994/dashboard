@@ -140,10 +140,10 @@ export default function ServerTile({
         signal: AbortSignal.timeout(5000),
       })
       setStatus('online')
-      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'online' }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'online' as const }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     } catch (err) {
       setStatus('offline')
-      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'offline', detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'offline' as const, detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     }
     setLastChecked(new Date())
   }, [serverUrl])
