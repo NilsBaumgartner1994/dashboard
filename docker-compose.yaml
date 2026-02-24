@@ -5,8 +5,6 @@ services:
       target: cpu-base
     image: qwen3-tts-api-cpu
     restart: always
-    profiles:
-      - cpu
     networks:
       - directus_network
     ports:
