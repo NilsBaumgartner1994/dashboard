@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 
-# configure-ram.sh – detect host RAM and write OLLAMA_MEMORY to .env
+# configure-ram.sh – detect host RAM and write OLLAMA_MEMORY and TTS_MEMORY to .env
 #
-# Reads the total system RAM, allocates 80 % of it to the Ollama AI container,
-# and updates (or creates) the OLLAMA_MEMORY key in the project .env file so
-# that docker compose can set the container memory limit accordingly.
+# Reads the total system RAM and allocates proportional shares to the AI containers:
+#   OLLAMA_MEMORY – 80 % of host RAM (min 2 GB) for the Ollama LLM container
+#   TTS_MEMORY    – 30 % of host RAM (min 2 GB) for the Qwen3-TTS container
+#
+# Updates (or creates) both keys in the project .env file so that
+# docker compose can use them as container memory limits.
 
 set -euo pipefail
 
@@ -39,6 +42,21 @@ fi
 OLLAMA_MEMORY="${OLLAMA_RAM_GB}g"
 log "Gesamt-RAM des Hosts: ${TOTAL_RAM_MB} MB  →  Ollama-Zuteilung: ${OLLAMA_MEMORY}"
 
+# ── Calculate TTS allocation (30 %, minimum 2 GB) ────────────────────────────
+TTS_RAM_MB=$(( TOTAL_RAM_MB * 30 / 100 ))
+TTS_RAM_GB=$(( TTS_RAM_MB / 1024 ))
+
+# Apply 2 GB minimum only when 30 % of available RAM is already >= 2 GB
+# (i.e. total RAM >= 6827 MB), to avoid allocating more than what the host has.
+if [ "$TTS_RAM_GB" -lt 2 ] && [ "$TTS_RAM_MB" -ge 2048 ]; then
+  TTS_RAM_GB=2
+elif [ "$TTS_RAM_GB" -lt 1 ]; then
+  TTS_RAM_GB=1
+fi
+
+TTS_MEMORY="${TTS_RAM_GB}g"
+log "Gesamt-RAM des Hosts: ${TOTAL_RAM_MB} MB  →  TTS-Zuteilung: ${TTS_MEMORY}"
+
 # ── Write to .env ─────────────────────────────────────────────────────────────
 if [ ! -f "$ENV_FILE" ]; then
   log "WARNUNG: .env nicht gefunden in $REPO_DIR – überspringe RAM-Konfiguration"
@@ -51,4 +69,12 @@ if grep -q "^OLLAMA_MEMORY=" "$ENV_FILE"; then
 else
   echo "OLLAMA_MEMORY=${OLLAMA_MEMORY}" >> "$ENV_FILE"
   log "OLLAMA_MEMORY in .env hinzugefügt: ${OLLAMA_MEMORY}"
+fi
+
+if grep -q "^TTS_MEMORY=" "$ENV_FILE"; then
+  sed -i "s/^TTS_MEMORY=.*/TTS_MEMORY=${TTS_MEMORY}/" "$ENV_FILE"
+  log "TTS_MEMORY in .env aktualisiert: ${TTS_MEMORY}"
+else
+  echo "TTS_MEMORY=${TTS_MEMORY}" >> "$ENV_FILE"
+  log "TTS_MEMORY in .env hinzugefügt: ${TTS_MEMORY}"
 fi

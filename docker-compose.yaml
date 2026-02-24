@@ -1,4 +1,25 @@
 services:
+  my-dashboard-tts-cpu:
+    build:
+      context: ./apps/tts
+      target: cpu-base
+    image: qwen3-tts-api-cpu
+    restart: always
+    profiles:
+      - cpu
+    networks:
+      - directus_network
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./data/tts-models:/root/.cache/huggingface
+    environment:
+      TTS_MODEL_ID: "${TTS_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
+      # Optional: set HUGGING_FACE_HUB_TOKEN in .env for private/gated models.
+      # Not required for the default public model.
+      HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
+    mem_limit: ${TTS_MEMORY:-4g}
+
   my-dashboard-ai:
     image: ollama/ollama:latest
     restart: always

@@ -1,0 +1,9 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+torch==2.6.0+cpu
+torchaudio==2.6.0+cpu
+transformers==4.48.0
+huggingface_hub==0.27.0
+soundfile==0.12.1
+numpy==2.0.2
+scipy==1.14.1
