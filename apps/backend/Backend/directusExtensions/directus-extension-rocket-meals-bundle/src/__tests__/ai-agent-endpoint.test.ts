@@ -250,10 +250,10 @@ describe('AI Agent Endpoint', () => {
 
       const steps = extractPlannedSteps(analysisText);
       expect(steps).toHaveLength(3);
-      expect(steps[0].text).toBe('Suchen nach Informationen über Del Wish Lohne');
-      expect(steps[0].done).toBe(false);
-      expect(steps[1].text).toBe('Auswerten der Ergebnisse und Suche nach relevanten Quellen');
-      expect(steps[2].text).toBe('Öffnungszeiten aus den Suchergebnissen extrahieren');
+      expect(steps[0]!.text).toBe('Suchen nach Informationen über Del Wish Lohne');
+      expect(steps[0]!.done).toBe(false);
+      expect(steps[1]!.text).toBe('Auswerten der Ergebnisse und Suche nach relevanten Quellen');
+      expect(steps[2]!.text).toBe('Öffnungszeiten aus den Suchergebnissen extrahieren');
     });
 
     it('should extract bullet-point steps from analysis content', () => {
@@ -264,9 +264,9 @@ describe('AI Agent Endpoint', () => {
 
       const steps = extractPlannedSteps(analysisText);
       expect(steps).toHaveLength(3);
-      expect(steps[0].text).toBe('Web-Suche nach Öffnungszeiten');
-      expect(steps[1].text).toBe('Webseite des Restaurants aufrufen');
-      expect(steps[2].text).toBe('Informationen zusammenfassen');
+      expect(steps[0]!.text).toBe('Web-Suche nach Öffnungszeiten');
+      expect(steps[1]!.text).toBe('Webseite des Restaurants aufrufen');
+      expect(steps[2]!.text).toBe('Informationen zusammenfassen');
     });
 
     it('should mark steps as done sequentially when tools are executed', () => {
@@ -283,12 +283,12 @@ describe('AI Agent Endpoint', () => {
       };
 
       markNextDone(steps);
-      expect(steps[0].done).toBe(true);
-      expect(steps[1].done).toBe(false);
+      expect(steps[0]!.done).toBe(true);
+      expect(steps[1]!.done).toBe(false);
 
       markNextDone(steps);
-      expect(steps[1].done).toBe(true);
-      expect(steps[2].done).toBe(false);
+      expect(steps[1]!.done).toBe(true);
+      expect(steps[2]!.done).toBe(false);
     });
 
     it('should include plannedSteps in job status response', () => {
