@@ -306,8 +306,8 @@ describe('AI Agent Endpoint', () => {
       };
       expect(jobResponse).toHaveProperty('plannedSteps');
       expect(Array.isArray(jobResponse.plannedSteps)).toBe(true);
-      expect(jobResponse.plannedSteps[0].done).toBe(true);
-      expect(jobResponse.plannedSteps[1].done).toBe(false);
+      expect(jobResponse.plannedSteps[0]!.done).toBe(true);
+      expect(jobResponse.plannedSteps[1]!.done).toBe(false);
     });
   });
 
