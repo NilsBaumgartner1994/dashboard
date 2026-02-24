@@ -340,7 +340,7 @@ async function runAgentLoop(
     let systemContent: string;
     if (thinking) {
       systemContent =
-        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Du bist ein KI-Agent. Antworte IMMER auf Deutsch.\n' +
         'Gehe bei jeder Anfrage strukturiert vor:\n' +
         '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
         '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
@@ -349,8 +349,10 @@ async function runAgentLoop(
         INPUT_TRUST_INSTRUCTIONS;
       if (tools.length > 0) {
         systemContent +=
-          '\nDu hast Zugriff auf web_search und fetch_url.' +
+          '\nDu bist ein autonomer KI-Agent mit Zugriff auf web_search und fetch_url.' +
           ' Nutze diese Tools SYSTEMATISCH für jeden Schritt deines Plans.' +
+          ' Beantworte Fragen über lokale Geschäfte, Öffnungszeiten, Veranstaltungen oder aktuelle Fakten' +
+          ' IMMER durch eine web_search – verlasse dich NIEMALS auf Trainingsdaten für solche Anfragen.' +
           ' Höre NICHT auf zu suchen, bis du ALLE benötigten Informationen gefunden hast.' +
           ' Sage dem Benutzer NIEMALS, dass er selbst nachschauen soll.' +
           ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
@@ -393,12 +395,15 @@ async function runAgentLoop(
     const analysisSystemMsg: OllamaMessage = {
       role: 'system',
       content:
-        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Du bist ein KI-Agent. Antworte IMMER auf Deutsch.\n' +
         'Analysiere die folgende Frage und erstelle einen detaillierten Schritt-für-Schritt-Plan:\n' +
         '- Was genau möchte der Benutzer wissen?\n' +
         '- Welche konkreten Informationen werden benötigt?\n' +
         '- Welche Schritte sind notwendig, um alle Informationen zu beschaffen?\n' +
         '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen).\n' +
+        (tools.length > 0
+          ? 'WICHTIG: Plane für jeden Schritt konkrete web_search-Suchanfragen – du musst die Informationen aktiv suchen.\n'
+          : '') +
         'Gib NUR die Analyse und den Plan aus, noch KEINE endgültige Antwort.',
     };
 
@@ -424,16 +429,18 @@ async function runAgentLoop(
     job.partialContent = '';
     job.currentActivity = undefined;
 
-    // Replace the analytical system prompt with a simpler execution-focused prompt
+    // Replace the analytical system prompt with an execution-focused agent prompt
     // so the model calls tools natively instead of writing tool calls as plain text.
     if (currentMessages[0]?.role === 'system') {
       let execSystemContent =
-        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        'Du bist ein KI-Agent. Antworte IMMER auf Deutsch.' +
         ' Übernimm Eigennamen GENAU so wie vom Benutzer angegeben – keine automatische Rechtschreibkorrektur.';
       if (tools.length > 0) {
         execSystemContent +=
           ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
           ' WICHTIG: Rufe diese Tools direkt auf – schreibe Tool-Aufrufe NICHT als Text in deine Antwort.' +
+          ' Führe JEDEN Schritt deines Plans aus und rufe web_search für JEDEN Schritt auf, der Informationen erfordert.' +
+          ' Beantworte die Frage NUR auf Basis der tatsächlich gefundenen Informationen – NICHT aus deinen Trainingsdaten.' +
           ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
       }
       currentMessages[0] = { role: 'system', content: execSystemContent };
