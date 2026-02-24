@@ -15,15 +15,15 @@ FROM base AS cpu-base
 
 # Install PyTorch CPU-only wheel first so the torch index is used
 RUN pip install --no-cache-dir \
-    torch==2.5.1+cpu \
-    torchaudio==2.5.1+cpu \
+    torch==2.6.0+cpu \
+    torchaudio==2.6.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Install remaining requirements (excluding torch/torchaudio already installed)
 RUN pip install --no-cache-dir \
     fastapi==0.115.5 \
     "uvicorn[standard]==0.32.1" \
-    transformers==4.47.1 \
+    transformers==4.48.0 \
     huggingface_hub==0.27.0 \
     soundfile==0.12.1 \
     "numpy==2.0.2" \
