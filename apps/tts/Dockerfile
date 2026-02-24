@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     fastapi==0.115.5 \
     "uvicorn[standard]==0.32.1" \
-    transformers==4.57.6 \
-    huggingface_hub==0.36.2 \
+    transformers==5.2.0 \
+    huggingface_hub==1.4.1 \
     soundfile==0.12.1 \
     "numpy==2.0.2" \
     scipy==1.14.1

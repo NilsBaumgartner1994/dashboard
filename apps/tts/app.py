@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import AutoProcessor, AutoModelForCausalLM, PretrainedConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tts-api")
@@ -43,7 +43,16 @@ def _load_model() -> None:
     # custom 'qwen3_tts' architecture not yet registered in the transformers library.
     # Ensure you only use this with trusted, pinned model checkpoints.
     _processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-    _model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float32, trust_remote_code=True)
+    # Pre-load the config via PretrainedConfig to bypass AutoConfig.from_pretrained's
+    # CONFIG_MAPPING check.  Models with a custom model_type (e.g. "qwen3_tts") that
+    # is not natively registered in transformers would otherwise raise a ValueError
+    # even when trust_remote_code=True is set, because AutoConfig requires an
+    # "AutoConfig" entry in the model's auto_map to enable remote-code loading.
+    # Passing a pre-built PretrainedConfig skips that AutoConfig call entirely;
+    # AutoModelForCausalLM then resolves the concrete model class through the
+    # "AutoModelForCausalLM" entry in auto_map with trust_remote_code=True.
+    _config = PretrainedConfig.from_pretrained(MODEL_ID)
+    _model = AutoModelForCausalLM.from_pretrained(MODEL_ID, config=_config, torch_dtype=torch.float32, trust_remote_code=True)
     _model.to(DEVICE)
     _model.eval()
     logger.info("Model loaded in %.1f s", time.time() - start)
