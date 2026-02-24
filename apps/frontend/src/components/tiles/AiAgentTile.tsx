@@ -20,6 +20,7 @@ import {
   ListItemText,
 } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
+import StopIcon from '@mui/icons-material/Stop'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import LanguageIcon from '@mui/icons-material/Language'
@@ -86,6 +87,13 @@ function uniqueUrls(sources: string[]): string[] {
   return [...new Set(sources)]
 }
 
+/** Calls the backend abort endpoint for a running job. Errors are silently ignored. */
+async function abortAgentJob(backendUrl: string, jobId: string): Promise<void> {
+  try {
+    await fetch(`${backendUrl}/ai-agent/job/${jobId}`, { method: 'DELETE' })
+  } catch { /* ignore network errors – the job will time out on its own */ }
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
@@ -98,7 +106,7 @@ interface Message {
 }
 
 interface JobStatusResponse {
-  status: 'pending' | 'running' | 'done' | 'error'
+  status: 'pending' | 'running' | 'done' | 'error' | 'aborted'
   partialContent: string
   currentActivity?: string
   visitedUrls?: string[]
@@ -137,6 +145,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   const [editingContent, setEditingContent] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentJobIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -155,6 +164,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   useEffect(() => {
     if (!initialJobId || didResumeRef.current) return
     didResumeRef.current = true
+    currentJobIdRef.current = initialJobId
     setLoading(true)
     pollJob(initialJobId, messages, Date.now())
     // Intentionally run once on mount – pollJob/messages captured from initial render are correct
@@ -207,6 +217,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setPlannedSteps([])
             if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
+            currentJobIdRef.current = null
             onJobDone?.()
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
@@ -214,6 +225,14 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setCurrentActivity('')
             setPlannedSteps([])
             setLoading(false)
+            currentJobIdRef.current = null
+            onJobDone?.()
+          } else if (data.status === 'aborted') {
+            setPartialContent('')
+            setCurrentActivity('')
+            setPlannedSteps([])
+            setLoading(false)
+            currentJobIdRef.current = null
             onJobDone?.()
           } else {
             // Still running – poll again after interval
@@ -226,6 +245,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           setCurrentActivity('')
           setPlannedSteps([])
           setLoading(false)
+          currentJobIdRef.current = null
           onJobDone?.()
         }
       }
@@ -252,6 +272,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
         }
         const data = (await res.json()) as { jobId?: string; error?: string }
         if (!data.jobId) throw new Error('Kein jobId in der Antwort')
+        currentJobIdRef.current = data.jobId
         onJobStarted?.(data.jobId)
         pollJob(data.jobId, newMessages, startTime)
       } catch (err) {
@@ -302,6 +323,19 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
       e.preventDefault()
       send()
     }
+  }
+
+  const handleAbort = async () => {
+    if (!currentJobIdRef.current) return
+    if (pollTimerRef.current !== null) clearTimeout(pollTimerRef.current)
+    const jobId = currentJobIdRef.current
+    currentJobIdRef.current = null
+    await abortAgentJob(backendUrl, jobId)
+    setLoading(false)
+    setPartialContent('')
+    setCurrentActivity('')
+    setPlannedSteps([])
+    onJobDone?.()
   }
 
   return (
@@ -565,18 +599,26 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           onClick={(e) => e.stopPropagation()}
           disabled={loading}
         />
-        <Tooltip title="Senden">
-          <span>
-            <IconButton
-              color="primary"
-              onClick={send}
-              disabled={!input.trim() || loading}
-              size="small"
-            >
-              <SendIcon fontSize="small" />
+        {loading ? (
+          <Tooltip title="Antwort abbrechen">
+            <IconButton color="error" onClick={handleAbort} size="small">
+              <StopIcon fontSize="small" />
             </IconButton>
-          </span>
-        </Tooltip>
+          </Tooltip>
+        ) : (
+          <Tooltip title="Senden">
+            <span>
+              <IconButton
+                color="primary"
+                onClick={send}
+                disabled={!input.trim() || loading}
+                size="small"
+              >
+                <SendIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
       </Box>
     </Box>
   )
@@ -707,6 +749,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
       localStorage.removeItem(`ai-chat-messages-${newId}`)
       localStorage.removeItem(`ai-chat-job-${chatId}`)
     } catch { /* ignore */ }
+  }
+
+  const handleTileAbort = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!activeJobId) return
+    await abortAgentJob(backendUrl, activeJobId)
+    handleJobDone()
   }
 
   const handleCopyId = () => {
@@ -854,6 +903,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             {thinkingMode && (
               <Tooltip title="Denkmodus aktiv">
                 <PsychologyIcon fontSize="small" color="secondary" />
+              </Tooltip>
+            )}
+            {activeJobId && (
+              <Tooltip title="KI-Antwort abbrechen">
+                <IconButton size="small" color="error" onClick={handleTileAbort}>
+                  <StopIcon fontSize="inherit" />
+                </IconButton>
               </Tooltip>
             )}
             {messages.length > 0 && (

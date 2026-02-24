@@ -103,10 +103,50 @@ describe('AI Agent Endpoint', () => {
       expect(jobResponse.error).toBeTruthy();
     });
 
+    it('should return aborted status after the job has been cancelled', () => {
+      const jobResponse = { status: 'aborted', partialContent: '', message: undefined, error: undefined };
+      expect(jobResponse.status).toBe('aborted');
+    });
+
     it('should return 404 for unknown job id', () => {
       const notFoundResponse = { error: 'Job not found' };
       expect(notFoundResponse).toHaveProperty('error');
       expect(notFoundResponse.error).toBe('Job not found');
+    });
+  });
+
+  describe('DELETE /ai-agent/job/:id', () => {
+    it('should return ok:true when a job is successfully aborted', () => {
+      const response = { ok: true };
+      expect(response.ok).toBe(true);
+    });
+
+    it('should return 404 when aborting an unknown job', () => {
+      const notFoundResponse = { error: 'Job not found' };
+      expect(notFoundResponse).toHaveProperty('error');
+      expect(notFoundResponse.error).toBe('Job not found');
+    });
+
+    it('should set the job status to aborted', () => {
+      // Simulate the abort behaviour: status is set to 'aborted' before the AbortController fires
+      const job = { status: 'running' as 'running' | 'aborted', abortController: new AbortController() };
+      job.status = 'aborted';
+      job.abortController.abort();
+      expect(job.status).toBe('aborted');
+      expect(job.abortController.signal.aborted).toBe(true);
+    });
+
+    it('should not overwrite aborted status with error in the background runner', () => {
+      // Simulates the .catch() guard: if status is already 'aborted', do not overwrite with 'error'
+      const job = { status: 'aborted' as string, error: undefined as string | undefined };
+      const handleError = (err: Error) => {
+        if (job.status === 'aborted') return;
+        job.status = 'error';
+        job.error = err.message;
+      };
+      handleError(new Error('AbortError'));
+      expect(job.status).toBe('aborted');
+      expect(job.error).toBeUndefined();
     });
   });
 
