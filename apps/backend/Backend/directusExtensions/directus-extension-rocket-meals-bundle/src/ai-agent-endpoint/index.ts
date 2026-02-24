@@ -276,10 +276,15 @@ async function runAgentLoop(
   // When internet tools are active, also instruct the model to use them.
   // In thinking mode, use a structured analytical system prompt.
   if (currentMessages[0]?.role !== 'system') {
+    // Capture the current date/time at request start to inform the model of the current context.
+    const now = new Date();
+    const dateTimeInfo =
+      `Aktuelles Datum: ${now.toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. ` +
+      `Aktuelle Uhrzeit: ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr.`;
     let systemContent: string;
     if (thinking) {
       systemContent =
-        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        `Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n${dateTimeInfo}\n` +
         'Gehe bei jeder Anfrage strukturiert vor:\n' +
         '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
         '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
@@ -295,7 +300,7 @@ async function runAgentLoop(
       }
     } else {
       systemContent =
-        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+        `Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch. ${dateTimeInfo}`;
       if (tools.length > 0) {
         systemContent +=
           ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
