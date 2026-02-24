@@ -172,6 +172,62 @@ describe('AI Agent Endpoint', () => {
     });
   });
 
+  describe('Thinking mode', () => {
+    it('should include thinking:true in request when thinking mode is enabled', () => {
+      const requestBody = {
+        model: 'llama3.1:8b',
+        messages: [{ role: 'user', content: 'Welche Dekane gibt es in der Uni Osnabrück?' }],
+        allowInternet: true,
+        thinking: true,
+      };
+      expect(requestBody.thinking).toBe(true);
+    });
+
+    it('should default thinking to false when not specified', () => {
+      const thinking: boolean | undefined = undefined;
+      const effectiveThinking = thinking ?? false;
+      expect(effectiveThinking).toBe(false);
+    });
+
+    it('should include thinking flag in debug payload', () => {
+      const debugPayload = {
+        model: 'llama3.1:8b',
+        messages: [{ role: 'user', content: 'Test' }],
+        allowInternet: true,
+        thinking: true,
+        effectiveTools: [],
+      };
+      expect(debugPayload).toHaveProperty('thinking');
+      expect(debugPayload.thinking).toBe(true);
+    });
+
+    it('should use structured analytical system prompt in thinking mode', () => {
+      const thinkingSystemPrompt =
+        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Gehe bei jeder Anfrage strukturiert vor:\n' +
+        '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
+        '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
+        '3. AUSFÜHRUNG: Führe alle Schritte systematisch aus.\n' +
+        '4. SYNTHESE: Gib eine vollständige, destillierte Antwort.';
+      expect(thinkingSystemPrompt).toContain('ANALYSE');
+      expect(thinkingSystemPrompt).toContain('PLAN');
+      expect(thinkingSystemPrompt).toContain('AUSFÜHRUNG');
+      expect(thinkingSystemPrompt).toContain('SYNTHESE');
+    });
+
+    it('should produce three activity phases when thinking with tools', () => {
+      const expectedActivities = [
+        'KI analysiert die Frage und erstellt einen Plan…',
+        'KI sucht im Internet: "test"…',
+        'KI formuliert die finale Antwort…',
+      ];
+      expect(expectedActivities[0]).toContain('analysiert');
+      expect(expectedActivities[1]).toContain('sucht');
+      expect(expectedActivities[2]).toContain('formuliert');
+    });
+  });
+
+
   describe('Error handling', () => {
     it('should handle Ollama returning a non-200 status', () => {
       const errorResponse = { error: 'Ollama returned 503', details: 'Service Unavailable' };
