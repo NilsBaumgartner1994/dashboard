@@ -176,8 +176,14 @@ async function executeFetchUrl(url: string): Promise<string> {
     });
     if (!response.ok) return `Fetch failed with status ${response.status}`;
     const text = await response.text();
-    // Replace angle brackets so the result is clean plain text sent to the AI model only.
-    const cleaned = text.replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Remove script and style blocks entirely, then strip all remaining HTML tags
+    // so the AI receives clean readable plain text instead of raw markup.
+    const cleaned = text
+      .replace(/<script[\s\S]*?<\/script[^>]*>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style[^>]*>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     return cleaned.length > MAX_FETCHED_CONTENT_LENGTH ? `${cleaned.slice(0, MAX_FETCHED_CONTENT_LENGTH)}…` : cleaned;
   } catch (err) {
     return `Fetch error: ${err instanceof Error ? err.message : String(err)}`;
@@ -210,10 +216,13 @@ async function runAgentLoop(
       'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
     if (tools.length > 0) {
       systemContent +=
-        ' Du hast Zugriff auf aktuelle Internet-Tools.' +
+        ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
         ' WICHTIG: Wenn der Benutzer nach aktuellen Nachrichten, Ereignissen, Preisen, Wetter' +
         ' oder anderen Informationen fragt, die sich seit deinem Training geändert haben könnten,' +
-        ' MUSST du sofort das web_search oder fetch_url Tool aufrufen.' +
+        ' MUSST du sofort das web_search Tool aufrufen.' +
+        ' Nach einer Suche MUSST du mit fetch_url die relevantesten Seiten aufrufen um den genauen Inhalt zu lesen.' +
+        ' Du kannst und sollst mehrere fetch_url Aufrufe nacheinander machen um Informationen von verschiedenen Quellen zu sammeln.' +
+        ' Erst wenn du genug Informationen aus den Webseiten gesammelt hast, antworte dem Benutzer mit einer umfassenden Antwort.' +
         ' Sage NIEMALS, dass du keinen Internetzugriff hast – du hast die Tools und MUSST sie nutzen.';
     }
     currentMessages.unshift({ role: 'system', content: systemContent });
