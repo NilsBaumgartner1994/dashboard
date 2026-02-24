@@ -217,6 +217,34 @@ async function executeFetchUrl(url: string): Promise<string> {
   }
 }
 
+/**
+ * Detects inline JSON-formatted tool calls that some models output as plain text
+ * instead of using Ollama's native tool_calls format.
+ * Example: {"name": "web_search", "parameters": {"query": "..."}}
+ */
+function parseInlineToolCalls(content: string): Array<{ function: { name: string; arguments: Record<string, unknown> } }> {
+  const calls: Array<{ function: { name: string; arguments: Record<string, unknown> } }> = [];
+  // Match JSON objects with at most one level of nesting (sufficient for our tool schemas
+  // which have a single nested object for parameters, e.g. {"name": "...", "parameters": {"query": "..."}})
+  const jsonBlocks = content.match(/\{(?:[^{}]|\{[^{}]*\})*\}/g);
+  if (!jsonBlocks) return calls;
+  for (const block of jsonBlocks) {
+    try {
+      const parsed = JSON.parse(block) as Record<string, unknown>;
+      const name = typeof parsed.name === 'string' ? parsed.name : undefined;
+      if (name === 'web_search' || name === 'fetch_url') {
+        // Accept multiple field name variants: "parameters" (OpenAI-style text output),
+        // "arguments" (Ollama native), or "args" (other common variants).
+        const rawArgs = (parsed.parameters ?? parsed.arguments ?? parsed.args ?? {}) as Record<string, unknown>;
+        calls.push({ function: { name, arguments: rawArgs } });
+      }
+    } catch {
+      // not valid JSON, skip
+    }
+  }
+  return calls;
+}
+
 interface OllamaMessage {
   role: string;
   content: string | null;
@@ -386,6 +414,20 @@ async function runAgentLoop(
 
     job.partialContent = '';
     job.currentActivity = undefined;
+
+    // Replace the analytical system prompt with a simpler execution-focused prompt
+    // so the model calls tools natively instead of writing tool calls as plain text.
+    if (currentMessages[0]?.role === 'system') {
+      let execSystemContent = 'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+      if (tools.length > 0) {
+        execSystemContent +=
+          ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
+          ' WICHTIG: Rufe diese Tools direkt auf – schreibe Tool-Aufrufe NICHT als Text in deine Antwort.' +
+          ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
+      }
+      currentMessages[0] = { role: 'system', content: execSystemContent };
+      job.debugPayload = { ...job.debugPayload, actualMessages: currentMessages };
+    }
   }
 
   // === Phase 2 / Main: Execution loop ===
@@ -439,6 +481,48 @@ async function runAgentLoop(
       job.partialContent = '';
       job.currentActivity = undefined;
       continue;
+    }
+
+    // Fallback: detect inline JSON tool calls that some models write as plain text
+    // instead of using Ollama's native tool_calls format.
+    if (tools.length > 0) {
+      const inlineCalls = parseInlineToolCalls(accumulatedContent);
+      if (inlineCalls.length > 0) {
+        toolsWereUsed = true;
+        currentMessages.push({ role: 'assistant', content: accumulatedContent || null });
+
+        for (const toolCall of inlineCalls) {
+          const { name, arguments: args } = toolCall.function;
+          let toolResult: string;
+
+          if (name === 'web_search') {
+            const query = args.query as string;
+            setJobActivity(job, `KI sucht im Internet: "${query}"…`);
+            job.visitedUrls.push(`${DUCKDUCKGO_SEARCH_BASE_URL}${encodeURIComponent(query)}`);
+            toolResult = await executeWebSearch(query);
+          } else if (name === 'fetch_url') {
+            const url = args.url as string;
+            setJobActivity(job, `KI besucht Webseite: ${url}…`);
+            job.visitedUrls.push(url);
+            const rawContent = await executeFetchUrl(url);
+            setJobActivity(job, `KI verarbeitet Inhalt der Webseite: ${url}…`);
+            toolResult = rawContent;
+          } else {
+            toolResult = `Unknown tool: ${name}`;
+          }
+
+          if (job.plannedSteps) {
+            const nextStep = job.plannedSteps.find((s) => !s.done);
+            if (nextStep) nextStep.done = true;
+          }
+
+          currentMessages.push({ role: 'tool', content: toolResult });
+        }
+
+        job.partialContent = '';
+        job.currentActivity = undefined;
+        continue;
+      }
     }
 
     // No tool calls – in thinking mode with prior tool use, proceed to synthesis.
