@@ -721,7 +721,12 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const handleCopyHistory = () => {
     if (messages.length === 0) return
     const text = messages
-      .map((m) => `${m.role === 'assistant' ? 'KI' : 'Ich'}: ${m.content}`)
+      .map((m) => {
+        const label = m.role === 'assistant' ? 'KI' : 'Ich'
+        let content = m.content
+        try { content = decodeURIComponent(content) } catch { /* ignore invalid encoding */ }
+        return `${label}: ${content}`
+      })
       .join('\n\n')
     navigator.clipboard.writeText(text).then(() => {
       setCopiedHistory(true)
