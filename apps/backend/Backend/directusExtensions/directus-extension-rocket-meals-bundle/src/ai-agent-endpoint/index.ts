@@ -17,6 +17,20 @@ import { defineEndpoint } from '@directus/extensions-sdk';
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b';
+// Context window size sent to Ollama on every request.
+// llama3.1 defaults to 131 072 tokens which is extremely slow on CPU.
+// 4096 is sufficient for conversational use and gives a ~10–20× speed-up.
+const OLLAMA_NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX ?? '4096', 10);
+// Optional CPU-thread cap – leave unset to let Ollama auto-detect, or set via
+// OLLAMA_NUM_THREADS to reserve cores for co-located services (e.g. Postgres).
+const OLLAMA_NUM_THREADS = process.env.OLLAMA_NUM_THREADS
+  ? parseInt(process.env.OLLAMA_NUM_THREADS, 10)
+  : undefined;
+// Shared inference options sent on every /api/chat request.
+const OLLAMA_OPTIONS: Record<string, unknown> = {
+  num_ctx: OLLAMA_NUM_CTX,
+  ...(OLLAMA_NUM_THREADS !== undefined ? { num_thread: OLLAMA_NUM_THREADS } : {}),
+};
 const JOB_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_AGENT_ITERATIONS = 10;
 const MAX_FETCHED_CONTENT_LENGTH = 4000;
@@ -211,6 +225,7 @@ async function runAgentLoop(
     ...job.debugPayload,
     actualMessages: currentMessages,
     tools,
+    options: OLLAMA_OPTIONS,
   };
 
   for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration++) {
@@ -220,6 +235,7 @@ async function runAgentLoop(
       model,
       messages: currentMessages,
       stream: true,
+      options: OLLAMA_OPTIONS,
     };
     if (tools.length > 0) {
       ollamaBody.tools = tools;
