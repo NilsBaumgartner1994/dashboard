@@ -579,13 +579,19 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     if (!backendUrl) return
     setBackendStatus('checking')
     const now = new Date()
+    const healthUrl = `${backendUrl}/server/health`
     try {
-      await fetch(backendUrl, { method: 'HEAD', mode: 'no-cors', signal: AbortSignal.timeout(5000) })
-      setBackendStatus('online')
-      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'online' as const }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      const response = await fetch(healthUrl, { method: 'GET', signal: AbortSignal.timeout(5000) })
+      if (response.ok) {
+        setBackendStatus('online')
+        setBackendStatusLog((prev) => [{ timestamp: now, url: healthUrl, result: 'online' as const }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      } else {
+        setBackendStatus('offline')
+        setBackendStatusLog((prev) => [{ timestamp: now, url: healthUrl, result: 'offline' as const, detail: `HTTP ${response.status}` }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      }
     } catch (err) {
       setBackendStatus('offline')
-      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'offline' as const, detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+      setBackendStatusLog((prev) => [{ timestamp: now, url: healthUrl, result: 'offline' as const, detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     }
   }, [backendUrl])
 
