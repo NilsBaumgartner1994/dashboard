@@ -177,21 +177,40 @@ describe('AI Agent Endpoint', () => {
   });
 
   describe('Internet tools', () => {
-    it('web_search tool should have the correct schema', () => {
+    it('web_search tool should have the correct schema and enforce exact user terms', () => {
       const tool = {
         type: 'function',
         function: {
           name: 'web_search',
-          description: 'Search the web for current information.',
+          description:
+            'Search the web for current information. Use this to find up-to-date facts, news, or any information you are unsure about.' +
+            ' IMPORTANT: Use the EXACT words the user wrote as the search query – do NOT correct spelling, do NOT add umlauts (ü/ö/ä/ß), do NOT expand or reinterpret terms.' +
+            ' Example: if the user wrote "dehlwisch lohne", search for "dehlwisch lohne" – NOT "DeHlWich Löhne".',
           parameters: {
             type: 'object',
-            properties: { query: { type: 'string', description: 'The search query' } },
+            properties: {
+              query: {
+                type: 'string',
+                description:
+                  'The search query using the EXACT words the user wrote. Do NOT correct spelling or add umlauts.' +
+                  ' Example: user wrote "lohne" → search "lohne", NOT "Löhne".',
+              },
+            },
             required: ['query'],
           },
         },
       };
       expect(tool.function.name).toBe('web_search');
       expect(tool.function.parameters.required).toContain('query');
+      expect(tool.function.description).toContain('EXACT words the user wrote');
+      expect(tool.function.description).toContain('do NOT add umlauts');
+      expect(tool.function.description).toContain('do NOT expand or reinterpret terms');
+      expect(tool.function.description).toContain('"dehlwisch lohne"');
+      expect(tool.function.description).toContain('"DeHlWich Löhne"');
+      expect(tool.function.parameters.properties.query.description).toContain('EXACT words the user wrote');
+      expect(tool.function.parameters.properties.query.description).toContain('Do NOT correct spelling or add umlauts');
+      expect(tool.function.parameters.properties.query.description).toContain('"lohne"');
+      expect(tool.function.parameters.properties.query.description).toContain('"Löhne"');
     });
 
     it('fetch_url tool should have the correct schema', () => {

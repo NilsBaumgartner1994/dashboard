@@ -81,11 +81,18 @@ const INTERNET_TOOLS = [
     function: {
       name: 'web_search',
       description:
-        'Search the web for current information. Use this to find up-to-date facts, news, or any information you are unsure about.',
+        'Search the web for current information. Use this to find up-to-date facts, news, or any information you are unsure about.' +
+        ' IMPORTANT: Use the EXACT words the user wrote as the search query – do NOT correct spelling, do NOT add umlauts (ü/ö/ä/ß), do NOT expand or reinterpret terms.' +
+        ' Example: if the user wrote "dehlwisch lohne", search for "dehlwisch lohne" – NOT "DeHlWich Löhne".',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'The search query' },
+          query: {
+            type: 'string',
+            description:
+              'The search query using the EXACT words the user wrote. Do NOT correct spelling or add umlauts.' +
+              ' Example: user wrote "lohne" → search "lohne", NOT "Löhne".',
+          },
         },
         required: ['query'],
       },
