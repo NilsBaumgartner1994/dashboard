@@ -6,10 +6,18 @@ import {
   MenuItem,
   TextField,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import CloseIcon from '@mui/icons-material/Close'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 
@@ -35,6 +43,15 @@ export const SERVER_PRESETS: Record<string, { label: string; url: string }> = {
 }
 
 type ServerStatus = 'online' | 'offline' | 'unknown' | 'checking'
+
+const MAX_STATUS_LOG_ENTRIES = 50
+
+interface StatusLogEntry {
+  timestamp: Date
+  url: string
+  result: 'online' | 'offline' | 'error'
+  detail?: string
+}
 
 function formatCheckedDate(date: Date): string {
   const hh = String(date.getHours()).padStart(2, '0')
@@ -107,12 +124,15 @@ export default function ServerTile({
   // Status state
   const [status, setStatus] = useState<ServerStatus>('unknown')
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const [statusLog, setStatusLog] = useState<StatusLogEntry[]>([])
+  const [logModalOpen, setLogModalOpen] = useState(false)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const checkServer = useCallback(async () => {
     if (!serverUrl) return
     setStatus('checking')
+    const now = new Date()
     try {
       await fetch(serverUrl, {
         method: 'HEAD',
@@ -120,8 +140,10 @@ export default function ServerTile({
         signal: AbortSignal.timeout(5000),
       })
       setStatus('online')
-    } catch {
+      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'online' }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+    } catch (err) {
       setStatus('offline')
+      setStatusLog((prev) => [{ timestamp: now, url: serverUrl, result: 'offline', detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     }
     setLastChecked(new Date())
   }, [serverUrl])
@@ -182,6 +204,8 @@ export default function ServerTile({
           <HelpOutlineIcon />
         )
       }
+      onClick={() => setLogModalOpen(true)}
+      sx={{ cursor: 'pointer' }}
     />
   )
 
@@ -233,41 +257,18 @@ export default function ServerTile({
   )
 
   return (
-    <BaseTile
-      tile={tile}
-      settingsChildren={settingsContent}
-      getExtraConfig={getServerExtraConfig}
-      onSettingsOpen={handleSettingsOpen}
-      overrideBackgroundImage={overrideBackgroundImage}
-      bottomBar={afterContent}
-    >
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Name */}
-        {!hideName && displayName ? (
-          <Box
-            sx={{
-              display: 'inline-block',
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              borderRadius: 1,
-              px: 1,
-              py: 0.25,
-              mb: 1,
-              maxWidth: 'calc(100% - 32px)',
-            }}
-          >
-            <Typography
-              variant="subtitle2"
-              fontWeight="bold"
-              sx={{ color: '#fff', wordBreak: 'break-word' }}
-            >
-              {displayName}
-            </Typography>
-          </Box>
-        ) : null}
-
-        {/* Last checked */}
-        {!hideLastUpdate && lastChecked && (
-          hasBgImage ? (
+    <>
+      <BaseTile
+        tile={tile}
+        settingsChildren={settingsContent}
+        getExtraConfig={getServerExtraConfig}
+        onSettingsOpen={handleSettingsOpen}
+        overrideBackgroundImage={overrideBackgroundImage}
+        bottomBar={afterContent}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* Name */}
+          {!hideName && displayName ? (
             <Box
               sx={{
                 display: 'inline-block',
@@ -275,31 +276,104 @@ export default function ServerTile({
                 borderRadius: 1,
                 px: 1,
                 py: 0.25,
-                mb: 0.5,
+                mb: 1,
+                maxWidth: 'calc(100% - 32px)',
               }}
             >
-              <Typography variant="caption" sx={{ color: '#fff', display: 'block' }}>
-                {formatCheckedDate(lastChecked)}
+              <Typography
+                variant="subtitle2"
+                fontWeight="bold"
+                sx={{ color: '#fff', wordBreak: 'break-word' }}
+              >
+                {displayName}
               </Typography>
             </Box>
-          ) : (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              {formatCheckedDate(lastChecked)}
+          ) : null}
+
+          {/* Last checked */}
+          {!hideLastUpdate && lastChecked && (
+            hasBgImage ? (
+              <Box
+                sx={{
+                  display: 'inline-block',
+                  backgroundColor: 'rgba(0,0,0,0.55)',
+                  borderRadius: 1,
+                  px: 1,
+                  py: 0.25,
+                  mb: 0.5,
+                }}
+              >
+                <Typography variant="caption" sx={{ color: '#fff', display: 'block' }}>
+                  {formatCheckedDate(lastChecked)}
+                </Typography>
+              </Box>
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                {formatCheckedDate(lastChecked)}
+              </Typography>
+            )
+          )}
+
+          {!serverUrl && (
+            <Typography variant="caption" color="text.secondary">
+              Kein Server konfiguriert. ⚙ drücken.
             </Typography>
-          )
-        )}
+          )}
 
-        {!serverUrl && (
-          <Typography variant="caption" color="text.secondary">
-            Kein Server konfiguriert. ⚙ drücken.
-          </Typography>
-        )}
-
-        {/* Status chip – bottom or inline */}
-        <Box sx={statusAtBottom ? { mt: 'auto', pb: 0.5 } : { mt: 0.5 }}>
-          {statusChip}
+          {/* Status chip – bottom or inline */}
+          <Box sx={statusAtBottom ? { mt: 'auto', pb: 0.5 } : { mt: 0.5 }}>
+            {statusChip}
+          </Box>
         </Box>
-      </Box>
-    </BaseTile>
+      </BaseTile>
+
+      {/* Status log modal */}
+      <Dialog open={logModalOpen} onClose={() => setLogModalOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
+          <Box sx={{ flex: 1 }}>Server-Status Log</Box>
+          <IconButton size="small" onClick={() => setLogModalOpen(false)}>
+            <CloseIcon fontSize="inherit" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {statusLog.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">Noch keine Prüfungen durchgeführt.</Typography>
+          ) : (
+            <List dense disablePadding>
+              {statusLog.map((entry, i) => (
+                <ListItem key={i} disableGutters divider>
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Chip
+                          size="small"
+                          label={entry.result === 'online' ? 'Online' : 'Offline'}
+                          color={entry.result === 'online' ? 'success' : 'error'}
+                        />
+                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                          {formatCheckedDate(entry.timestamp)}
+                        </Typography>
+                      </Box>
+                    }
+                    secondary={
+                      <>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          URL: {entry.url}
+                        </Typography>
+                        {entry.detail && (
+                          <Typography variant="caption" color="error" sx={{ display: 'block', wordBreak: 'break-all' }}>
+                            {entry.detail}
+                          </Typography>
+                        )}
+                      </>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
