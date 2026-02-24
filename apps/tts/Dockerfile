@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     fastapi==0.115.5 \
     "uvicorn[standard]==0.32.1" \
-    transformers==5.2.0 \
+    transformers @ git+https://github.com/huggingface/transformers.git \
     huggingface_hub==1.4.1 \
     soundfile==0.12.1 \
     "numpy==2.0.2" \
