@@ -95,7 +95,7 @@ export const useStore = create<AppState>()(
       setBackendUrl: (backendUrl) => set({ backendUrl }),
       addTile: (type) =>
         set((s) => {
-          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks', 'notes', 'aiagent'].includes(type) ? 4 : type === 'postit' ? 3 : 2
+          const newH = ['server', 'rocketmeals', 'weather', 'news', 'route', 'tasks', 'notes', 'aiagent', 'dockerlogs'].includes(type) ? 4 : type === 'postit' ? 3 : 2
           const bottomY = s.tiles.reduce((max, t) => Math.max(max, t.y + t.h), 0)
           return {
             tiles: [

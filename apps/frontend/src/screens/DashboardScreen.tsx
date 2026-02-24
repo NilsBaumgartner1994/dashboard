@@ -43,6 +43,7 @@ import NotesTile from '../components/tiles/NotesTile'
 import PostItTile from '../components/tiles/PostItTile'
 import AiAgentTile from '../components/tiles/AiAgentTile'
 import VoiceTtsTile from '../components/tiles/VoiceTtsTile'
+import DockerLogsTile from '../components/tiles/DockerLogsTile'
 
 const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
@@ -72,6 +73,7 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   postit: { label: 'Notizzettel (Post-it)', component: PostItTile },
   aiagent: { label: 'KI-Agent (Ollama)', component: AiAgentTile },
   voicetts: { label: 'Sprachausgabe (TTS)', component: VoiceTtsTile },
+  dockerlogs: { label: 'Docker Logs', component: DockerLogsTile },
 }
 
 function DraggableTile({

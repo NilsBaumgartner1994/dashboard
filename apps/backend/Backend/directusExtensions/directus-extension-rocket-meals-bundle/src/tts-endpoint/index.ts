@@ -6,7 +6,14 @@ import { defineEndpoint } from '@directus/extensions-sdk';
 //   Returns: { ok: true, ttsUrl: string, status: string, model: string } or { ok: false, error: string }
 //
 // POST /tts/generate
-//   Body: { "text": "...", "voice": "..." }   (voice is optional)
+//   Body: {
+//     "text": "...",
+//     "voice": "...",                    (optional)
+//     "model_id": "Qwen/...",            (optional)
+//     "mode": "voice_design|voice_clone", (optional, defaults to voice_design)
+//     "reference_audio_base64": "...",    (optional, reserved for future clone support)
+//     "reference_text": "..."             (optional, reserved for future clone support)
+//   }
 //   Returns: audio/wav binary
 
 const TTS_URL = process.env.TTS_URL ?? 'http://localhost:8880';
@@ -33,13 +40,24 @@ export default defineEndpoint({
     // TTS generate – proxies to TTS container's /tts/generate endpoint and streams the audio back
     router.post('/generate', async (req, res) => {
       try {
-        const { text, voice } = req.body as { text?: string; voice?: string };
+        const { text, voice, model_id, mode, reference_audio_base64, reference_text } = req.body as {
+          text?: string;
+          voice?: string;
+          model_id?: string;
+          mode?: 'voice_design' | 'voice_clone';
+          reference_audio_base64?: string;
+          reference_text?: string;
+        };
         if (!text || !text.trim()) {
           return res.status(400).json({ error: 'text must not be empty' });
         }
 
-        const body: Record<string, unknown> = { text };
+        const body: Record<string, unknown> = { text, mode: mode ?? 'voice_design' };
         if (voice) body.voice = voice;
+        if (model_id) body.model_id = model_id;
+        // Forward clone fields unchanged so backend contract is already in place.
+        if (reference_audio_base64) body.reference_audio_base64 = reference_audio_base64;
+        if (reference_text) body.reference_text = reference_text;
 
         const response = await fetch(`${TTS_URL}/tts/generate`, {
           method: 'POST',

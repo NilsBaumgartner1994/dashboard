@@ -72,6 +72,11 @@
         "type": "endpoint",
         "name": "tts-endpoint",
         "source": "src/tts-endpoint/index.ts"
+      },
+      {
+        "type": "endpoint",
+        "name": "docker-logs-endpoint",
+        "source": "src/docker-logs-endpoint/index.ts"
       }
     ],
     "host": "^10.10.0"
