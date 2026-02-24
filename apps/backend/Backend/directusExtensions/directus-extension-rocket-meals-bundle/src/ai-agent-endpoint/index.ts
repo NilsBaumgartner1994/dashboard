@@ -39,6 +39,11 @@ const FETCH_URL_TIMEOUT_MS = 15_000;
 const OLLAMA_INFERENCE_TIMEOUT_MS = 300_000; // 5 minutes
 const DUCKDUCKGO_SEARCH_BASE_URL = 'https://duckduckgo.com/?q=';
 
+interface PlannedStep {
+  text: string;
+  done: boolean;
+}
+
 interface Job {
   status: 'pending' | 'running' | 'done' | 'error';
   partialContent: string;
@@ -46,6 +51,8 @@ interface Job {
   currentActivity?: string;
   /** URLs that were visited during the agent loop (for source attribution). */
   visitedUrls: string[];
+  /** Steps extracted from thinking-mode analysis, with completion status. */
+  plannedSteps?: PlannedStep[];
   message?: { role: string; content: string };
   error?: string;
   createdAt: number;
@@ -102,6 +109,26 @@ const INTERNET_TOOLS = [
 function setJobActivity(job: Job, activity: string): void {
   job.currentActivity = activity;
   job.partialContent = activity;
+}
+
+/**
+ * Parses a numbered/bulleted list from an AI-generated analysis text and returns
+ * an array of steps with initial `done: false` status.
+ */
+function extractPlannedSteps(text: string): PlannedStep[] {
+  const steps: PlannedStep[] = [];
+  for (const line of text.split('\n')) {
+    const cleaned = line.trim();
+    // Match "1. ...", "2) ...", "Schritt 1: ...", "* ...", "- ...", "• ..."
+    const match = cleaned.match(/^(?:\d+[.):\s]\s*|Schritt\s+\d+[:.]\s+|[*\-•]\s+)(.+)/);
+    if (match && match[1]) {
+      const stepText = match[1].replace(/^\*\*|\*\*$/g, '').trim();
+      if (stepText.length > 3) {
+        steps.push({ text: stepText, done: false });
+      }
+    }
+  }
+  return steps;
 }
 
 async function executeWebSearch(query: string): Promise<string> {
@@ -344,6 +371,9 @@ async function runAgentLoop(
       job,
     );
 
+    // Extract step-by-step plan from the analysis so the frontend can show checkboxes.
+    job.plannedSteps = extractPlannedSteps(analysisContent);
+
     // Inject the plan into the execution context so the model follows it.
     const executionPrompt =
       tools.length > 0
@@ -394,6 +424,12 @@ async function runAgentLoop(
           toolResult = rawContent;
         } else {
           toolResult = `Unknown tool: ${name}`;
+        }
+
+        // Mark the next uncompleted planned step as done so the frontend can update checkboxes.
+        if (job.plannedSteps) {
+          const nextStep = job.plannedSteps.find((s) => !s.done);
+          if (nextStep) nextStep.done = true;
         }
 
         currentMessages.push({ role: 'tool', content: toolResult });
@@ -485,6 +521,7 @@ export default defineEndpoint({
         partialContent: job.partialContent,
         currentActivity: job.currentActivity,
         visitedUrls: job.visitedUrls,
+        plannedSteps: job.plannedSteps,
         message: job.message,
         error: job.error,
         debugPayload: job.debugPayload,
