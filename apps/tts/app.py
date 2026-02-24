@@ -39,8 +39,11 @@ def _load_model() -> None:
     global _processor, _model
     logger.info("Loading TTS model %s on %s …", MODEL_ID, DEVICE)
     start = time.time()
-    _processor = AutoProcessor.from_pretrained(MODEL_ID)
-    _model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float32)
+    # trust_remote_code=True is required because the Qwen3-TTS model ships with a
+    # custom 'qwen3_tts' architecture not yet registered in the transformers library.
+    # Ensure you only use this with trusted, pinned model checkpoints.
+    _processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+    _model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float32, trust_remote_code=True)
     _model.to(DEVICE)
     _model.eval()
     logger.info("Model loaded in %.1f s", time.time() - start)
