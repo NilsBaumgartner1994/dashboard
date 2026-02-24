@@ -45,7 +45,7 @@ interface PlannedStep {
 }
 
 interface Job {
-  status: 'pending' | 'running' | 'done' | 'error';
+  status: 'pending' | 'running' | 'done' | 'error' | 'aborted';
   partialContent: string;
   /** Short status description of what the AI is currently doing (e.g. visiting a URL). */
   currentActivity?: string;
@@ -56,6 +56,8 @@ interface Job {
   message?: { role: string; content: string };
   error?: string;
   createdAt: number;
+  /** AbortController used to cancel an in-progress job. */
+  abortController: AbortController;
   /** The exact payload that was sent to Ollama – exposed for frontend debug mode. */
   debugPayload?: Record<string, unknown>;
 }
@@ -278,7 +280,7 @@ async function streamOllamaCall(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS),
+    signal: AbortSignal.any([AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS), job.abortController.signal]),
   });
 
   if (!response.ok) {
@@ -459,6 +461,7 @@ async function runAgentLoop(
   let toolsWereUsed = false;
 
   for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration++) {
+    if (job.status === 'aborted') return;
     job.status = 'running';
 
     const { content: accumulatedContent, toolCalls } = await streamOllamaCall(
@@ -637,6 +640,17 @@ export default defineEndpoint({
       });
     });
 
+    // Abort a running job
+    router.delete('/job/:id', (req, res) => {
+      const job = jobs.get(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+      job.status = 'aborted';
+      job.abortController.abort();
+      return res.json({ ok: true });
+    });
+
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
       const { messages, model, tools, allowInternet = true, thinking = false } = req.body as {
@@ -661,11 +675,13 @@ export default defineEndpoint({
       }
 
       const jobId = `job-${crypto.randomUUID()}`;
+      const abortController = new AbortController();
       const job: Job = {
         status: 'pending',
         partialContent: '',
         visitedUrls: [],
         createdAt: Date.now(),
+        abortController,
         debugPayload: {
           model: model ?? DEFAULT_MODEL,
           messages,
@@ -677,7 +693,10 @@ export default defineEndpoint({
       jobs.set(jobId, job);
 
       // Start inference in the background – do NOT await
+      // The status is set to 'aborted' before abort() is called in the DELETE handler,
+      // so by the time this .catch() callback runs (next event-loop tick), the check is reliable.
       runAgentLoop(messages as OllamaMessage[], model ?? DEFAULT_MODEL, effectiveTools, job, thinking).catch((err) => {
+        if (job.status === 'aborted') return;
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);
       });
