@@ -723,9 +723,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     const text = messages
       .map((m) => {
         const label = m.role === 'assistant' ? 'KI' : 'Ich'
-        let content = m.content
-        try { content = decodeURIComponent(content) } catch { /* ignore invalid encoding */ }
-        return `${label}: ${content}`
+        return `${label}: ${m.content}`
       })
       .join('\n\n')
     navigator.clipboard.writeText(text).then(() => {

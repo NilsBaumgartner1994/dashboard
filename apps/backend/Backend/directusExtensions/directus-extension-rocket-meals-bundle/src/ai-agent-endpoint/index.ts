@@ -335,8 +335,13 @@ async function runAgentLoop(
     const INPUT_TRUST_INSTRUCTIONS =
       ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
       ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+      ' Füge KEINE Umlaute (ü, ö, ä) hinzu, die der Benutzer nicht geschrieben hat.' +
+      ' Beispiel: Schreibt der Benutzer "Lohne", such nach "Lohne" – NICHT nach "Löhne".' +
       ' Informelle Ausdrücke: "auf?" / "hat auf" / "offen?" bei einem Geschäft oder Ort bedeutet immer' +
-      ' "geöffnet?" bzw. "Öffnungszeiten".';
+      ' "geöffnet?" bzw. "Öffnungszeiten".' +
+      ' Bei Folgefragen über eine andere Einrichtung oder einen anderen Ort MUSST du eine neue Suche' +
+      ' für diesen Ort/diese Einrichtung starten – stütze dich NIEMALS auf Suchergebnisse einer früheren Frage' +
+      ' um eine neue Frage zu beantworten.';
     let systemContent: string;
     if (thinking) {
       systemContent =
@@ -400,7 +405,8 @@ async function runAgentLoop(
         '- Was genau möchte der Benutzer wissen?\n' +
         '- Welche konkreten Informationen werden benötigt?\n' +
         '- Welche Schritte sind notwendig, um alle Informationen zu beschaffen?\n' +
-        '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen).\n' +
+        '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen, keine Umlaute ergänzen).\n' +
+        '- Bei einer Folgefrage über eine andere Einrichtung oder einen anderen Ort: plane eine neue Suche für genau diesen Ort.\n' +
         (tools.length > 0
           ? 'WICHTIG: Plane für jeden Schritt konkrete web_search-Suchanfragen – du musst die Informationen aktiv suchen.\n'
           : '') +
@@ -434,7 +440,8 @@ async function runAgentLoop(
     if (currentMessages[0]?.role === 'system') {
       let execSystemContent =
         'Du bist ein KI-Agent. Antworte IMMER auf Deutsch.' +
-        ' Übernimm Eigennamen GENAU so wie vom Benutzer angegeben – keine automatische Rechtschreibkorrektur.';
+        ' Übernimm Eigennamen GENAU so wie vom Benutzer angegeben – keine automatische Rechtschreibkorrektur, keine Umlaute ergänzen.' +
+        ' Bei einer Folgefrage über eine andere Einrichtung oder einen anderen Ort starte eine neue Suche für genau diesen Ort.';
       if (tools.length > 0) {
         execSystemContent +=
           ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
