@@ -444,9 +444,30 @@ describe('AI Agent Endpoint', () => {
     });
 
     it('should include exact-name instruction in the analysis phase prompt', () => {
-      const analysisBullet = '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen).';
+      const analysisBullet = '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen, keine Umlaute ergänzen).';
       expect(analysisBullet).toContain('GENAU so wie der Benutzer sie nennt');
       expect(analysisBullet).toContain('keine Rechtschreibkorrektur bei Eigennamen');
+      expect(analysisBullet).toContain('keine Umlaute ergänzen');
+    });
+
+    it('should instruct the model not to add umlauts when the user did not write them', () => {
+      const inputTrustInstructions =
+        ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
+        ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+        ' Füge KEINE Umlaute (ü, ö, ä) hinzu, die der Benutzer nicht geschrieben hat.' +
+        ' Beispiel: Schreibt der Benutzer "Lohne", such nach "Lohne" – NICHT nach "Löhne".';
+      expect(inputTrustInstructions).toContain('Füge KEINE Umlaute');
+      expect(inputTrustInstructions).toContain('"Lohne"');
+      expect(inputTrustInstructions).toContain('"Löhne"');
+    });
+
+    it('should instruct the model to do a fresh search for follow-up questions about different entities', () => {
+      const inputTrustInstructions =
+        ' Bei Folgefragen über eine andere Einrichtung oder einen anderen Ort MUSST du eine neue Suche' +
+        ' für diesen Ort/diese Einrichtung starten – stütze dich NIEMALS auf Suchergebnisse einer früheren Frage' +
+        ' um eine neue Frage zu beantworten.';
+      expect(inputTrustInstructions).toContain('neue Suche');
+      expect(inputTrustInstructions).toContain('NIEMALS auf Suchergebnisse einer früheren Frage');
     });
   });
 
