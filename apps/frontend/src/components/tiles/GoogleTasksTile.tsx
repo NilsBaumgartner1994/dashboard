@@ -33,6 +33,19 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CloseIcon from '@mui/icons-material/Close'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import {
+  DndContext,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -114,6 +127,85 @@ function extractRepeat(notes: string | undefined): { repeat: string; cleanNotes:
   const option = REPEAT_OPTIONS.find((o) => o.label === label)
   const cleanNotes = lines.filter((l) => !l.startsWith(REPEAT_PREFIX)).join('\n').trim()
   return { repeat: option?.value ?? 'never', cleanNotes }
+}
+
+// ─── Sortable task item with drag handle ──────────────────────────────────────
+
+interface SortableTaskItemProps {
+  task: Task
+  onComplete: (task: Task) => void
+  onDelete: (task: Task) => void
+}
+
+function SortableTaskItem({ task, onComplete, onDelete }: SortableTaskItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  const dueLabel = formatDue(task.due)
+  const { cleanNotes, repeat } = extractRepeat(task.notes)
+  const repeatLabel = repeat !== 'never'
+    ? REPEAT_OPTIONS.find((o) => o.value === repeat)?.label
+    : null
+  return (
+    <ListItem ref={setNodeRef} style={style} disableGutters dense sx={{ alignItems: 'flex-start', pr: 4 }}>
+      <ListItemIcon sx={{ minWidth: 24, mt: 0.5 }}>
+        <Tooltip title="Ziehen zum Sortieren">
+          <IconButton
+            size="small"
+            sx={{ cursor: 'grab', p: 0, color: 'text.disabled' }}
+            {...attributes}
+            {...listeners}
+          >
+            <DragIndicatorIcon sx={{ fontSize: '1rem' }} />
+          </IconButton>
+        </Tooltip>
+      </ListItemIcon>
+      <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
+        <Checkbox
+          checked={task.status === 'completed'}
+          size="small"
+          onChange={() => onComplete(task)}
+          sx={{ p: 0 }}
+        />
+      </ListItemIcon>
+      <ListItemText
+        primary={task.title}
+        secondary={
+          <>
+            {dueLabel && (
+              <Typography component="span" variant="caption" color="primary" sx={{ mr: 1 }}>
+                📅 {dueLabel}
+              </Typography>
+            )}
+            {repeatLabel && (
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+                🔄 {repeatLabel}
+              </Typography>
+            )}
+            {cleanNotes && (
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                {cleanNotes}
+              </Typography>
+            )}
+          </>
+        }
+        primaryTypographyProps={{ variant: 'body2', sx: { wordBreak: 'break-word' } }}
+      />
+      <Tooltip title="Löschen">
+        <IconButton
+          size="small"
+          edge="end"
+          onClick={() => onDelete(task)}
+          sx={{ position: 'absolute', right: 0, top: 4 }}
+        >
+          <DeleteIcon fontSize="inherit" />
+        </IconButton>
+      </Tooltip>
+    </ListItem>
+  )
 }
 
 // ─── Inner component (needs GoogleOAuthProvider in tree) ──────────────────────
@@ -405,7 +497,44 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
     } catch { /* ignore */ }
   }
 
-  // ── Add task ───────────────────────────────────────────────────────────────
+  // ── Reorder task via drag and drop ─────────────────────────────────────────
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = tasks.findIndex((t) => t.id === active.id)
+    const newIndex = tasks.findIndex((t) => t.id === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+    const prevTasks = tasks
+    const newTasks = arrayMove(tasks, oldIndex, newIndex)
+    setTasks(newTasks)
+    const previousTask = newIndex > 0 ? newTasks[newIndex - 1] : null
+    ;(async () => {
+      if (!accessToken) return
+      try {
+        const url = new URL(
+          `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(selectedListId)}/tasks/${encodeURIComponent(active.id as string)}/move`,
+        )
+        if (previousTask) url.searchParams.set('previous', previousTask.id)
+        const res = await fetch(url.toString(), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+        if (res.status === 401) {
+          clearToken()
+          setError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+          setTasks(prevTasks)
+        } else if (!res.ok) {
+          setTasks(prevTasks)
+          setError('Reihenfolge konnte nicht gespeichert werden.')
+        }
+      } catch {
+        setTasks(prevTasks)
+        setError('Reihenfolge konnte nicht gespeichert werden.')
+      }
+    })()
+  }
+
+
   const handleAddTask = async () => {
     if (!accessToken || !newTitle.trim()) return
     setAddLoading(true)
@@ -589,60 +718,20 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
 
   // ── Task list renderer ──────────────────────────────────────────────────────
   const renderTaskList = (taskItems: Task[]) => (
-    <List dense disablePadding>
-      {taskItems.map((task) => {
-        const dueLabel = formatDue(task.due)
-        const { cleanNotes, repeat } = extractRepeat(task.notes)
-        const repeatLabel = repeat !== 'never'
-          ? REPEAT_OPTIONS.find((o) => o.value === repeat)?.label
-          : null
-        return (
-          <ListItem key={task.id} disableGutters dense sx={{ alignItems: 'flex-start', pr: 4 }}>
-            <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
-              <Checkbox
-                checked={task.status === 'completed'}
-                size="small"
-                onChange={() => handleComplete(task)}
-                sx={{ p: 0 }}
-              />
-            </ListItemIcon>
-            <ListItemText
-              primary={task.title}
-              secondary={
-                <>
-                  {dueLabel && (
-                    <Typography component="span" variant="caption" color="primary" sx={{ mr: 1 }}>
-                      📅 {dueLabel}
-                    </Typography>
-                  )}
-                  {repeatLabel && (
-                    <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>
-                      🔄 {repeatLabel}
-                    </Typography>
-                  )}
-                  {cleanNotes && (
-                    <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      {cleanNotes}
-                    </Typography>
-                  )}
-                </>
-              }
-              primaryTypographyProps={{ variant: 'body2', sx: { wordBreak: 'break-word' } }}
+    <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={taskItems.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+        <List dense disablePadding>
+          {taskItems.map((task) => (
+            <SortableTaskItem
+              key={task.id}
+              task={task}
+              onComplete={handleComplete}
+              onDelete={handleDelete}
             />
-            <Tooltip title="Löschen">
-              <IconButton
-                size="small"
-                edge="end"
-                onClick={() => handleDelete(task)}
-                sx={{ position: 'absolute', right: 0, top: 4 }}
-              >
-                <DeleteIcon fontSize="inherit" />
-              </IconButton>
-            </Tooltip>
-          </ListItem>
-        )
-      })}
-    </List>
+          ))}
+        </List>
+      </SortableContext>
+    </DndContext>
   )
 
   // ── Tile body ────────────────────────────────────────────────────────────
