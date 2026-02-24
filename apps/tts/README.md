@@ -24,7 +24,7 @@ HUGGING_FACE_HUB_TOKEN=hf_...
 ## Quick start
 
 ```bash
-docker-compose --profile cpu up my-dashboard-tts-cpu
+docker-compose up my-dashboard-tts-cpu
 ```
 
 ## Umgebungsvariablen

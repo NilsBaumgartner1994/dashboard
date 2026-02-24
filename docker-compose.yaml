@@ -5,8 +5,6 @@ services:
       target: cpu-base
     image: qwen3-tts-api-cpu
     restart: always
-    profiles:
-      - cpu
     networks:
       - directus_network
     ports:
@@ -68,6 +66,8 @@ services:
       my-dashboard-cache:
         condition: service_started
       my-dashboard-ai:
+        condition: service_started
+      my-dashboard-tts-cpu:
         condition: service_started
     environment:
       OLLAMA_URL: "http://my-dashboard-ai:11434"
