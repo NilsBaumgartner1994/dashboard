@@ -21,6 +21,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
+import PsychologyIcon from '@mui/icons-material/Psychology'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -59,13 +60,14 @@ interface AiChatProps {
   backendUrl: string
   model: string
   allowInternet: boolean
+  thinking: boolean
   debugMode: boolean
   messages: Message[]
   onMessages: (msgs: Message[]) => void
   compact?: boolean
 }
 
-function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessages, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -160,7 +162,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
         const res = await fetch(`${backendUrl}/ai-agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: newMessages, allowInternet }),
+          body: JSON.stringify({ model, messages: newMessages, allowInternet, thinking }),
         })
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string }
@@ -175,7 +177,7 @@ function AiChat({ backendUrl, model, allowInternet, debugMode, messages, onMessa
         setLoading(false)
       }
     },
-    [backendUrl, model, allowInternet, onMessages, pollJob],
+    [backendUrl, model, allowInternet, thinking, onMessages, pollJob],
   )
 
   const send = async () => {
@@ -546,12 +548,16 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [allowInternetInput, setAllowInternetInput] = useState(
     tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
   )
+  const [thinkingModeInput, setThinkingModeInput] = useState(
+    tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false,
+  )
   const [debugModeInput, setDebugModeInput] = useState(
     tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false,
   )
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
+  const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
 
@@ -563,6 +569,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
         onSettingsOpen={() => {
           setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
+          setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
         }}
         settingsChildren={
@@ -594,6 +601,20 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             <FormControlLabel
               control={
                 <Switch
+                  checked={thinkingModeInput}
+                  onChange={(e) => setThinkingModeInput(e.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <PsychologyIcon fontSize="small" />
+                  <Typography variant="body2">Denkmodus (Analyse → Plan → Ausführung → Synthese)</Typography>
+                </Box>
+              }
+            />
+            <FormControlLabel
+              control={
+                <Switch
                   checked={debugModeInput}
                   onChange={(e) => setDebugModeInput(e.target.checked)}
                 />
@@ -604,7 +625,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, debugMode: debugModeInput })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -616,6 +637,11 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             {allowInternet && (
               <Tooltip title="Internet-Zugriff aktiv">
                 <LanguageIcon fontSize="small" color="action" />
+              </Tooltip>
+            )}
+            {thinkingMode && (
+              <Tooltip title="Denkmodus aktiv">
+                <PsychologyIcon fontSize="small" color="secondary" />
               </Tooltip>
             )}
             {messages.length > 0 && (
@@ -687,6 +713,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               backendUrl={backendUrl}
               model={model}
               allowInternet={allowInternet}
+              thinking={thinkingMode}
               debugMode={debugMode}
               messages={messages}
               onMessages={handleSetMessages}

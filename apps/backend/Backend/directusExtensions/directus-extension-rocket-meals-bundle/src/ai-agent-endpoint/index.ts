@@ -3,7 +3,7 @@ import { defineEndpoint } from '@directus/extensions-sdk';
 // AI Agent endpoint – runs chat requests as background jobs with polling support.
 //
 // POST /ai-agent/chat
-//   Body: { model?: string, messages: Array<{ role: string, content: string }>, allowInternet?: boolean, tools?: unknown[] }
+//   Body: { model?: string, messages: Array<{ role: string, content: string }>, allowInternet?: boolean, thinking?: boolean, tools?: unknown[] }
 //   Returns: { jobId: string }  (inference runs in the background)
 //
 // GET /ai-agent/job/:id
@@ -201,29 +201,112 @@ interface OllamaChatChunk {
   done?: boolean;
 }
 
+/**
+ * Sends a single chat request to Ollama with streaming and accumulates the response.
+ * Updates job.partialContent in real-time so pollers see live output.
+ */
+async function streamOllamaCall(
+  messages: OllamaMessage[],
+  model: string,
+  job: Job,
+  tools: unknown[] = [],
+): Promise<{ content: string; toolCalls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }> }> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+    options: OLLAMA_OPTIONS,
+  };
+  if (tools.length > 0) body.tools = tools;
+
+  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Ollama returned ${response.status}: ${text}`);
+  }
+  if (!response.body) throw new Error('No response body from Ollama');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let toolCalls: Array<{ function: { name: string; arguments: Record<string, unknown> } }> | undefined;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const chunk = JSON.parse(trimmed) as OllamaChatChunk;
+        if (chunk.message?.content) {
+          content += chunk.message.content;
+          job.partialContent = content;
+        }
+        if (chunk.message?.tool_calls) toolCalls = chunk.message.tool_calls;
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+  }
+
+  return { content, toolCalls };
+}
+
 async function runAgentLoop(
   messages: OllamaMessage[],
   model: string,
   tools: unknown[],
   job: Job,
+  thinking = false,
 ): Promise<void> {
   const currentMessages = [...messages];
 
   // Always prepend a German system prompt so the model answers in German.
   // When internet tools are active, also instruct the model to use them.
+  // In thinking mode, use a structured analytical system prompt.
   if (currentMessages[0]?.role !== 'system') {
-    let systemContent =
-      'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
-    if (tools.length > 0) {
-      systemContent +=
-        ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
-        ' WICHTIG: Wenn der Benutzer nach aktuellen Nachrichten, Ereignissen, Preisen, Wetter' +
-        ' oder anderen Informationen fragt, die sich seit deinem Training geändert haben könnten,' +
-        ' MUSST du sofort das web_search Tool aufrufen.' +
-        ' Nach einer Suche MUSST du mit fetch_url die relevantesten Seiten aufrufen um den genauen Inhalt zu lesen.' +
-        ' Du kannst und sollst mehrere fetch_url Aufrufe nacheinander machen um Informationen von verschiedenen Quellen zu sammeln.' +
-        ' Erst wenn du genug Informationen aus den Webseiten gesammelt hast, antworte dem Benutzer mit einer umfassenden Antwort.' +
-        ' Sage NIEMALS, dass du keinen Internetzugriff hast – du hast die Tools und MUSST sie nutzen.';
+    let systemContent: string;
+    if (thinking) {
+      systemContent =
+        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Gehe bei jeder Anfrage strukturiert vor:\n' +
+        '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
+        '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
+        '3. AUSFÜHRUNG: Führe alle Schritte systematisch aus.\n' +
+        '4. SYNTHESE: Gib eine vollständige, destillierte Antwort.';
+      if (tools.length > 0) {
+        systemContent +=
+          '\nDu hast Zugriff auf web_search und fetch_url.' +
+          ' Nutze diese Tools SYSTEMATISCH für jeden Schritt deines Plans.' +
+          ' Höre NICHT auf zu suchen, bis du ALLE benötigten Informationen gefunden hast.' +
+          ' Sage dem Benutzer NIEMALS, dass er selbst nachschauen soll.' +
+          ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
+      }
+    } else {
+      systemContent =
+        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.';
+      if (tools.length > 0) {
+        systemContent +=
+          ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
+          ' WICHTIG: Wenn der Benutzer nach aktuellen Nachrichten, Ereignissen, Preisen, Wetter' +
+          ' oder anderen Informationen fragt, die sich seit deinem Training geändert haben könnten,' +
+          ' MUSST du sofort das web_search Tool aufrufen.' +
+          ' Nach einer Suche MUSST du mit fetch_url die relevantesten Seiten aufrufen um den genauen Inhalt zu lesen.' +
+          ' Du kannst und sollst mehrere fetch_url Aufrufe nacheinander machen um Informationen von verschiedenen Quellen zu sammeln.' +
+          ' Erst wenn du genug Informationen aus den Webseiten gesammelt hast, antworte dem Benutzer mit einer umfassenden Antwort.' +
+          ' Sage NIEMALS, dass du keinen Internetzugriff hast – du hast die Tools und MUSST sie nutzen.';
+      }
     }
     currentMessages.unshift({ role: 'system', content: systemContent });
   }
@@ -235,69 +318,62 @@ async function runAgentLoop(
     actualMessages: currentMessages,
     tools,
     options: OLLAMA_OPTIONS,
+    thinking,
   };
+
+  // === Phase 1 (thinking mode only): Analysis & Planning ===
+  // Ask the model to analyse the question and create a step-by-step plan before
+  // executing any tool calls.  This mirrors a "think before you act" approach.
+  if (thinking) {
+    setJobActivity(job, 'KI analysiert die Frage und erstellt einen Plan…');
+
+    const analysisSystemMsg: OllamaMessage = {
+      role: 'system',
+      content:
+        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Analysiere die folgende Frage und erstelle einen detaillierten Schritt-für-Schritt-Plan:\n' +
+        '- Was genau möchte der Benutzer wissen?\n' +
+        '- Welche konkreten Informationen werden benötigt?\n' +
+        '- Welche Schritte sind notwendig, um alle Informationen zu beschaffen?\n' +
+        'Gib NUR die Analyse und den Plan aus, noch KEINE endgültige Antwort.',
+    };
+
+    const { content: analysisContent } = await streamOllamaCall(
+      [analysisSystemMsg, ...messages],
+      model,
+      job,
+    );
+
+    // Inject the plan into the execution context so the model follows it.
+    const executionPrompt =
+      tools.length > 0
+        ? 'Führe nun den Plan systematisch aus. Nutze alle verfügbaren Tools für jeden Schritt.'
+        : 'Führe nun den Plan systematisch aus und beantworte die Frage vollständig.';
+    currentMessages.push(
+      { role: 'assistant', content: analysisContent },
+      { role: 'user', content: executionPrompt },
+    );
+
+    job.partialContent = '';
+    job.currentActivity = undefined;
+  }
+
+  // === Phase 2 / Main: Execution loop ===
+  let toolsWereUsed = false;
 
   for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration++) {
     job.status = 'running';
 
-    const ollamaBody: Record<string, unknown> = {
+    const { content: accumulatedContent, toolCalls } = await streamOllamaCall(
+      currentMessages,
       model,
-      messages: currentMessages,
-      stream: true,
-      options: OLLAMA_OPTIONS,
-    };
-    if (tools.length > 0) {
-      ollamaBody.tools = tools;
-    }
-
-    const ollamaResponse = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ollamaBody),
-      signal: AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS),
-    });
-
-    if (!ollamaResponse.ok) {
-      const text = await ollamaResponse.text();
-      throw new Error(`Ollama returned ${ollamaResponse.status}: ${text}`);
-    }
-
-    if (!ollamaResponse.body) throw new Error('No response body from Ollama');
-
-    // Read streaming response; update partialContent so pollers see live output
-    const reader = ollamaResponse.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let accumulatedContent = '';
-    let toolCalls: Array<{ function: { name: string; arguments: Record<string, unknown> } }> | undefined;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const chunk = JSON.parse(trimmed) as OllamaChatChunk;
-          if (chunk.message?.content) {
-            accumulatedContent += chunk.message.content;
-            job.partialContent = accumulatedContent;
-          }
-          if (chunk.message?.tool_calls) {
-            toolCalls = chunk.message.tool_calls;
-          }
-        } catch {
-          // ignore malformed chunk
-        }
-      }
-    }
+      job,
+      tools,
+    );
 
     // If the model requested tool calls, execute them and continue the loop
     if (toolCalls && toolCalls.length > 0 && tools.length > 0) {
+      toolsWereUsed = true;
       currentMessages.push({ role: 'assistant', content: accumulatedContent || null, tool_calls: toolCalls });
 
       for (const toolCall of toolCalls) {
@@ -326,12 +402,39 @@ async function runAgentLoop(
       // Reset partial content so the poller sees fresh output for the next iteration
       job.partialContent = '';
       job.currentActivity = undefined;
-      toolCalls = undefined;
       continue;
+    }
+
+    // No tool calls – in thinking mode with prior tool use, proceed to synthesis.
+    // When no tools were used (e.g. allowInternet=false), the model's response is
+    // already complete so we return it directly without a separate synthesis step.
+    if (thinking && toolsWereUsed) {
+      currentMessages.push({ role: 'assistant', content: accumulatedContent || null });
+      break;
     }
 
     // No tool calls – this is the final answer
     job.message = { role: 'assistant', content: accumulatedContent };
+    job.status = 'done';
+    return;
+  }
+
+  // === Phase 3 (thinking mode only): Synthesis ===
+  // Distil all gathered information into one complete, well-structured answer.
+  if (thinking && toolsWereUsed) {
+    setJobActivity(job, 'KI formuliert die finale Antwort…');
+    job.partialContent = '';
+
+    currentMessages.push({
+      role: 'user',
+      content:
+        'Fasse nun alle gesammelten Informationen zu einer vollständigen, präzisen und gut strukturierten Antwort zusammen. ' +
+        'Stelle sicher, dass alle relevanten Details enthalten sind und die Antwort vollständig ist.',
+    });
+
+    const { content: synthesisContent } = await streamOllamaCall(currentMessages, model, job);
+
+    job.message = { role: 'assistant', content: synthesisContent };
     job.status = 'done';
     return;
   }
@@ -390,11 +493,12 @@ export default defineEndpoint({
 
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
-      const { messages, model, tools, allowInternet = true } = req.body as {
+      const { messages, model, tools, allowInternet = true, thinking = false } = req.body as {
         messages?: Array<{ role: string; content: string }>;
         model?: string;
         tools?: unknown[];
         allowInternet?: boolean;
+        thinking?: boolean;
       };
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -420,13 +524,14 @@ export default defineEndpoint({
           model: model ?? DEFAULT_MODEL,
           messages,
           allowInternet,
+          thinking,
           effectiveTools,
         },
       };
       jobs.set(jobId, job);
 
       // Start inference in the background – do NOT await
-      runAgentLoop(messages as OllamaMessage[], model ?? DEFAULT_MODEL, effectiveTools, job).catch((err) => {
+      runAgentLoop(messages as OllamaMessage[], model ?? DEFAULT_MODEL, effectiveTools, job, thinking).catch((err) => {
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);
       });
