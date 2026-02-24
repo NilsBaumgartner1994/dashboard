@@ -23,6 +23,9 @@ import EditIcon from '@mui/icons-material/Edit'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import PsychologyIcon from '@mui/icons-material/Psychology'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorIcon from '@mui/icons-material/Error'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -31,6 +34,29 @@ import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
 const POLL_INTERVAL_MS = 2000
+const BACKEND_CHECK_INTERVAL_MS = 60_000
+
+type BackendStatus = 'online' | 'offline' | 'checking' | 'unknown'
+
+const BACKEND_STATUS_LABEL: Record<BackendStatus, string> = {
+  online: 'Online',
+  offline: 'Offline',
+  checking: 'Prüfe…',
+  unknown: 'Unbekannt',
+}
+
+const BACKEND_STATUS_COLOR: Record<BackendStatus, 'success' | 'error' | 'default'> = {
+  online: 'success',
+  offline: 'error',
+  checking: 'default',
+  unknown: 'default',
+}
+
+function BackendStatusIcon({ status }: { status: BackendStatus }) {
+  if (status === 'online') return <CheckCircleIcon />
+  if (status === 'offline') return <ErrorIcon />
+  return <HelpOutlineIcon />
+}
 
 function uniqueUrls(sources: string[]): string[] {
   return [...new Set(sources)]
@@ -514,6 +540,29 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
 
+  // Backend reachability status
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>('unknown')
+  const backendCheckTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const checkBackend = useCallback(async () => {
+    if (!backendUrl) return
+    setBackendStatus('checking')
+    try {
+      await fetch(backendUrl, { method: 'HEAD', mode: 'no-cors', signal: AbortSignal.timeout(5000) })
+      setBackendStatus('online')
+    } catch {
+      setBackendStatus('offline')
+    }
+  }, [backendUrl])
+
+  useEffect(() => {
+    checkBackend()
+    backendCheckTimerRef.current = setInterval(checkBackend, BACKEND_CHECK_INTERVAL_MS)
+    return () => {
+      if (backendCheckTimerRef.current) clearInterval(backendCheckTimerRef.current)
+    }
+  }, [checkBackend])
+
   // Chat ID – persisted in localStorage per tile so conversations survive page reloads.
   const [chatId, setChatId] = useState<string>(() => {
     try {
@@ -673,6 +722,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             <Typography variant="subtitle2" fontWeight="bold" sx={{ flex: 1 }}>
               {tileTitle}
             </Typography>
+            <Chip
+              size="small"
+              label={BACKEND_STATUS_LABEL[backendStatus]}
+              color={BACKEND_STATUS_COLOR[backendStatus]}
+              icon={<BackendStatusIcon status={backendStatus} />}
+              sx={{ fontSize: '0.65rem' }}
+            />
             <Chip label={model} size="small" variant="outlined" sx={{ fontSize: '0.65rem' }} />
             {allowInternet && (
               <Tooltip title="Internet-Zugriff aktiv">
