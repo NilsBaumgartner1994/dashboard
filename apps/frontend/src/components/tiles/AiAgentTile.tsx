@@ -12,6 +12,12 @@ import {
   FormControlLabel,
   Button,
   Checkbox,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  List,
+  ListItem,
+  ListItemText,
 } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
@@ -34,9 +40,17 @@ import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
 const POLL_INTERVAL_MS = 2000
-const BACKEND_CHECK_INTERVAL_MS = 60_000
+const DEFAULT_BACKEND_CHECK_INTERVAL_S = 60
+const MAX_STATUS_LOG_ENTRIES = 50
 
 type BackendStatus = 'online' | 'offline' | 'checking' | 'unknown'
+
+interface BackendStatusLogEntry {
+  timestamp: Date
+  url: string
+  result: 'online' | 'offline'
+  detail?: string
+}
 
 const BACKEND_STATUS_LABEL: Record<BackendStatus, string> = {
   online: 'Online',
@@ -56,6 +70,16 @@ function BackendStatusIcon({ status }: { status: BackendStatus }) {
   if (status === 'online') return <CheckCircleIcon />
   if (status === 'offline') return <ErrorIcon />
   return <HelpOutlineIcon />
+}
+
+function formatStatusDate(date: Date): string {
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mon = String(date.getMonth() + 1).padStart(2, '0')
+  const yyyy = String(date.getFullYear())
+  return `${hh}:${mm}:${ss} ${dd}.${mon}.${yyyy}`
 }
 
 function uniqueUrls(sources: string[]): string[] {
@@ -542,26 +566,36 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
 
   // Backend reachability status
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('unknown')
+  const [backendStatusLog, setBackendStatusLog] = useState<BackendStatusLogEntry[]>([])
+  const [statusLogOpen, setStatusLogOpen] = useState(false)
   const backendCheckTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const backendCheckIntervalS: number =
+    typeof tile.config?.backendCheckInterval === 'number' && tile.config.backendCheckInterval >= 10
+      ? (tile.config.backendCheckInterval as number)
+      : DEFAULT_BACKEND_CHECK_INTERVAL_S
 
   const checkBackend = useCallback(async () => {
     if (!backendUrl) return
     setBackendStatus('checking')
+    const now = new Date()
     try {
       await fetch(backendUrl, { method: 'HEAD', mode: 'no-cors', signal: AbortSignal.timeout(5000) })
       setBackendStatus('online')
-    } catch {
+      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'online' }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
+    } catch (err) {
       setBackendStatus('offline')
+      setBackendStatusLog((prev) => [{ timestamp: now, url: backendUrl, result: 'offline', detail: String(err) }, ...prev].slice(0, MAX_STATUS_LOG_ENTRIES))
     }
   }, [backendUrl])
 
   useEffect(() => {
     checkBackend()
-    backendCheckTimerRef.current = setInterval(checkBackend, BACKEND_CHECK_INTERVAL_MS)
+    backendCheckTimerRef.current = setInterval(checkBackend, backendCheckIntervalS * 1000)
     return () => {
       if (backendCheckTimerRef.current) clearInterval(backendCheckTimerRef.current)
     }
-  }, [checkBackend])
+  }, [checkBackend, backendCheckIntervalS])
 
   // Chat ID – persisted in localStorage per tile so conversations survive page reloads.
   const [chatId, setChatId] = useState<string>(() => {
@@ -643,6 +677,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [debugModeInput, setDebugModeInput] = useState(
     tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false,
   )
+  const [checkIntervalInput, setCheckIntervalInput] = useState(String(backendCheckIntervalS))
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
@@ -660,6 +695,11 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
+          setCheckIntervalInput(String(
+            typeof tile.config?.backendCheckInterval === 'number' && tile.config.backendCheckInterval >= 10
+              ? tile.config.backendCheckInterval
+              : DEFAULT_BACKEND_CHECK_INTERVAL_S
+          ))
         }}
         settingsChildren={
           <Box>
@@ -712,9 +752,19 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 <Typography variant="body2">Debug-Modus (zeige Ollama-Anfrage)</Typography>
               }
             />
+            <Divider sx={{ my: 2 }}>Server-Statusprüfung</Divider>
+            <TextField
+              fullWidth
+              label="Prüfintervall (Sekunden)"
+              type="number"
+              inputProps={{ min: 10 }}
+              value={checkIntervalInput}
+              onChange={(e) => setCheckIntervalInput(e.target.value)}
+              sx={{ mb: 2 }}
+            />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -727,7 +777,8 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               label={BACKEND_STATUS_LABEL[backendStatus]}
               color={BACKEND_STATUS_COLOR[backendStatus]}
               icon={<BackendStatusIcon status={backendStatus} />}
-              sx={{ fontSize: '0.65rem' }}
+              sx={{ fontSize: '0.65rem', cursor: 'pointer' }}
+              onClick={(e) => { e.stopPropagation(); setStatusLogOpen(true) }}
             />
             <Chip label={model} size="small" variant="outlined" sx={{ fontSize: '0.65rem' }} />
             {allowInternet && (
@@ -817,6 +868,54 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           </Box>
         </Box>
       </LargeModal>
+
+      {/* Backend status log modal */}
+      <Dialog open={statusLogOpen} onClose={() => setStatusLogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
+          <Box sx={{ flex: 1 }}>Backend-Status Log</Box>
+          <IconButton size="small" onClick={() => setStatusLogOpen(false)}>
+            <CloseIcon fontSize="inherit" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {backendStatusLog.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">Noch keine Prüfungen durchgeführt.</Typography>
+          ) : (
+            <List dense disablePadding>
+              {backendStatusLog.map((entry, i) => (
+                <ListItem key={i} disableGutters divider>
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Chip
+                          size="small"
+                          label={entry.result === 'online' ? 'Online' : 'Offline'}
+                          color={entry.result === 'online' ? 'success' : 'error'}
+                        />
+                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                          {formatStatusDate(entry.timestamp)}
+                        </Typography>
+                      </Box>
+                    }
+                    secondary={
+                      <>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          URL: {entry.url}
+                        </Typography>
+                        {entry.detail && (
+                          <Typography variant="caption" color="error" sx={{ display: 'block', wordBreak: 'break-all' }}>
+                            {entry.detail}
+                          </Typography>
+                        )}
+                      </>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
