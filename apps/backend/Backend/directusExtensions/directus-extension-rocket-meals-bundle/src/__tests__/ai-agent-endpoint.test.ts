@@ -389,6 +389,7 @@ describe('AI Agent Endpoint', () => {
       // headings so the model uses native tool calls instead of writing them as text.
       const execSystemContent =
         'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        ' Übernimm Eigennamen GENAU so wie vom Benutzer angegeben – keine automatische Rechtschreibkorrektur.' +
         ' Du hast Zugriff auf aktuelle Internet-Tools: web_search und fetch_url.' +
         ' WICHTIG: Rufe diese Tools direkt auf – schreibe Tool-Aufrufe NICHT als Text in deine Antwort.' +
         ' Sage NIEMALS, dass du keinen Internetzugriff hast.';
@@ -397,9 +398,57 @@ describe('AI Agent Endpoint', () => {
       expect(execSystemContent).not.toContain('SYNTHESE');
       expect(execSystemContent).toContain('web_search');
       expect(execSystemContent).toContain('NICHT als Text');
+      expect(execSystemContent).toContain('Eigennamen GENAU');
     });
   });
 
+  describe('Input trust instructions', () => {
+    it('should instruct the model to use user-provided names exactly as written', () => {
+      const inputTrustInstructions =
+        ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
+        ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+        ' Informelle Ausdrücke: "auf?" / "hat auf" / "offen?" bei einem Geschäft oder Ort bedeutet immer' +
+        ' "geöffnet?" bzw. "Öffnungszeiten".';
+      expect(inputTrustInstructions).toContain('GENAU so wie der Benutzer sie schreibt');
+      expect(inputTrustInstructions).toContain('korrigiere die Schreibweise von Eigennamen NICHT');
+      expect(inputTrustInstructions).toContain('"auf?"');
+      expect(inputTrustInstructions).toContain('Öffnungszeiten');
+    });
+
+    it('should include input trust instructions in the standard system prompt', () => {
+      const standardPrompt =
+        'Du bist ein hilfreicher KI-Assistent. Antworte IMMER auf Deutsch.' +
+        ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
+        ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+        ' Informelle Ausdrücke: "auf?" / "hat auf" / "offen?" bei einem Geschäft oder Ort bedeutet immer' +
+        ' "geöffnet?" bzw. "Öffnungszeiten".';
+      expect(standardPrompt).toContain('GENAU so wie der Benutzer');
+      expect(standardPrompt).toContain('Eigennamen NICHT');
+      expect(standardPrompt).toContain('Öffnungszeiten');
+    });
+
+    it('should include input trust instructions in the thinking mode system prompt', () => {
+      const thinkingPrompt =
+        'Du bist ein analytischer KI-Assistent. Antworte IMMER auf Deutsch.\n' +
+        'Gehe bei jeder Anfrage strukturiert vor:\n' +
+        '1. ANALYSE: Was möchte der Benutzer genau wissen? Welche Informationen werden benötigt?\n' +
+        '2. PLAN: Welche konkreten Schritte sind nötig um alle Informationen zu beschaffen?\n' +
+        '3. AUSFÜHRUNG: Führe alle Schritte systematisch aus.\n' +
+        '4. SYNTHESE: Gib eine vollständige, destillierte Antwort.' +
+        ' Wichtig: Übernimm Namen, Orte und Suchbegriffe GENAU so wie der Benutzer sie schreibt –' +
+        ' korrigiere die Schreibweise von Eigennamen NICHT.' +
+        ' Informelle Ausdrücke: "auf?" / "hat auf" / "offen?" bei einem Geschäft oder Ort bedeutet immer' +
+        ' "geöffnet?" bzw. "Öffnungszeiten".';
+      expect(thinkingPrompt).toContain('GENAU so wie der Benutzer');
+      expect(thinkingPrompt).toContain('Eigennamen NICHT');
+    });
+
+    it('should include exact-name instruction in the analysis phase prompt', () => {
+      const analysisBullet = '- Übernimm Namen und Suchbegriffe GENAU so wie der Benutzer sie nennt (keine Rechtschreibkorrektur bei Eigennamen).';
+      expect(analysisBullet).toContain('GENAU so wie der Benutzer sie nennt');
+      expect(analysisBullet).toContain('keine Rechtschreibkorrektur bei Eigennamen');
+    });
+  });
 
   describe('Error handling', () => {
     it('should handle Ollama returning a non-200 status', () => {

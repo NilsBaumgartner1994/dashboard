@@ -116,10 +116,16 @@ interface AiChatProps {
   debugMode: boolean
   messages: Message[]
   onMessages: (msgs: Message[]) => void
+  /** Job ID of an in-progress request from a previous session, so polling can resume after reload. */
+  initialJobId?: string
+  /** Called with the job ID when a new polling job starts, so the caller can persist it. */
+  onJobStarted?: (jobId: string) => void
+  /** Called when the current job finishes (success or error), so the caller can clear the persisted job ID. */
+  onJobDone?: () => void
   compact?: boolean
 }
 
-function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -141,6 +147,18 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     return () => {
       if (pollTimerRef.current !== null) clearTimeout(pollTimerRef.current)
     }
+  }, [])
+
+  // Resume polling for an in-progress job from a previous session (e.g. after page reload).
+  // This runs only once on mount; subsequent job IDs are handled by submitMessages directly.
+  const didResumeRef = useRef(false)
+  useEffect(() => {
+    if (!initialJobId || didResumeRef.current) return
+    didResumeRef.current = true
+    setLoading(true)
+    pollJob(initialJobId, messages, Date.now())
+    // Intentionally run once on mount – pollJob/messages captured from initial render are correct
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const pollJob = useCallback(
@@ -189,12 +207,14 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setPlannedSteps([])
             if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
+            onJobDone?.()
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
             setPartialContent('')
             setCurrentActivity('')
             setPlannedSteps([])
             setLoading(false)
+            onJobDone?.()
           } else {
             // Still running – poll again after interval
             pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS)
@@ -206,11 +226,12 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           setCurrentActivity('')
           setPlannedSteps([])
           setLoading(false)
+          onJobDone?.()
         }
       }
       pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS)
     },
-    [backendUrl, onMessages, debugMode],
+    [backendUrl, onMessages, onJobDone, debugMode],
   )
 
   /** Submit a pre-built messages array to the backend and start polling. */
@@ -231,14 +252,16 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
         }
         const data = (await res.json()) as { jobId?: string; error?: string }
         if (!data.jobId) throw new Error('Kein jobId in der Antwort')
+        onJobStarted?.(data.jobId)
         pollJob(data.jobId, newMessages, startTime)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         setError(msg)
         setLoading(false)
+        onJobDone?.()
       }
     },
-    [backendUrl, model, allowInternet, thinking, onMessages, pollJob],
+    [backendUrl, model, allowInternet, thinking, onMessages, onJobStarted, onJobDone, pollJob],
   )
 
   const send = async () => {
@@ -642,14 +665,47 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     [chatId],
   )
 
+  // Active job ID – persisted in localStorage so polling can resume after a page reload
+  // (backend keeps jobs alive for 10 minutes, so short reloads reconnect automatically).
+  // storedChatId mirrors the `chatId` state but is read independently here since React
+  // does not allow one useState lazy initializer to read another's value.
+  const [activeJobId, setActiveJobId] = useState<string | undefined>(() => {
+    try {
+      const storedChatId = localStorage.getItem(`ai-chat-id-${tile.id}`) ?? ''
+      if (!storedChatId) return undefined
+      return localStorage.getItem(`ai-chat-job-${storedChatId}`) ?? undefined
+    } catch {
+      return undefined
+    }
+  })
+
+  const handleJobStarted = useCallback(
+    (jobId: string) => {
+      setActiveJobId(jobId)
+      try {
+        localStorage.setItem(`ai-chat-job-${chatId}`, jobId)
+      } catch { /* ignore */ }
+    },
+    [chatId],
+  )
+
+  const handleJobDone = useCallback(() => {
+    setActiveJobId(undefined)
+    try {
+      localStorage.removeItem(`ai-chat-job-${chatId}`)
+    } catch { /* ignore */ }
+  }, [chatId])
+
   // Start a new chat: generate fresh ID, clear messages.
   const handleNewChat = () => {
     const newId = `chat-${crypto.randomUUID()}`
     setChatId(newId)
     setMessages([])
+    setActiveJobId(undefined)
     try {
       localStorage.setItem(`ai-chat-id-${tile.id}`, newId)
       localStorage.removeItem(`ai-chat-messages-${newId}`)
+      localStorage.removeItem(`ai-chat-job-${chatId}`)
     } catch { /* ignore */ }
   }
 
@@ -870,6 +926,9 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               debugMode={debugMode}
               messages={messages}
               onMessages={handleSetMessages}
+              initialJobId={activeJobId}
+              onJobStarted={handleJobStarted}
+              onJobDone={handleJobDone}
             />
           </Box>
         </Box>
