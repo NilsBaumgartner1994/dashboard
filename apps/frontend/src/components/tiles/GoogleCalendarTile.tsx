@@ -35,6 +35,7 @@ import ReloadIntervalBar from './ReloadIntervalBar'
 import ReloadIntervalSettings from './ReloadIntervalSettings'
 import type { CalendarEventData } from './CalendarEventItem'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -901,9 +902,17 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <EventIcon fontSize="small" color="primary" />
-        <Typography variant="subtitle2" fontWeight="bold">
+        <Typography variant="subtitle2" fontWeight="bold" sx={{ flex: 1 }}>
           {(tile.config?.name as string) || 'Google Kalender'}
         </Typography>
+        <Tooltip title="Monatsansicht öffnen">
+          <IconButton
+            size="small"
+            onClick={() => window.open('https://calendar.google.com/calendar/u/0/r', '_blank', 'noopener,noreferrer')}
+          >
+            <CalendarMonthIcon fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
       </Box>
 
       {/* Body */}
