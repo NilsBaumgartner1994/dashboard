@@ -33,6 +33,7 @@ import PsychologyIcon from '@mui/icons-material/Psychology'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import ImageIcon from '@mui/icons-material/Image'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
@@ -97,6 +98,8 @@ async function abortAgentJob(backendUrl: string, jobId: string): Promise<void> {
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  /** Base64 data URLs of images attached to a user message. */
+  images?: string[]
   /** Time (ms) from send to final reply – only on assistant messages. */
   responseTimeMs?: number
   /** URLs visited while generating this reply – only on assistant messages. */
@@ -143,6 +146,8 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   const [debugPayload, setDebugPayload] = useState<Record<string, unknown> | null>(null)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editingContent, setEditingContent] = useState('')
+  const [pendingImages, setPendingImages] = useState<string[]>([])
+  const imageInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
@@ -287,14 +292,17 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
 
   const send = async () => {
     const trimmed = input.trim()
-    if (!trimmed || loading) return
+    if ((!trimmed && pendingImages.length === 0) || loading) return
     setInput('')
     setError(null)
     setPartialContent('')
     setCurrentActivity('')
     setPlannedSteps([])
     setDebugPayload(null)
-    const newMessages: Message[] = [...messages, { role: 'user', content: trimmed }]
+    const userMessage: Message = { role: 'user', content: trimmed }
+    if (pendingImages.length > 0) userMessage.images = [...pendingImages]
+    setPendingImages([])
+    const newMessages: Message[] = [...messages, userMessage]
     await submitMessages(newMessages)
   }
 
@@ -321,7 +329,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      send()
+      if (input.trim() || pendingImages.length > 0) send()
     }
   }
 
@@ -336,6 +344,22 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     setCurrentActivity('')
     setPlannedSteps([])
     onJobDone?.()
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    files.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        setPendingImages((prev) => [...prev, reader.result as string])
+      }
+      reader.readAsDataURL(file)
+    })
+    e.target.value = ''
+  }
+
+  const removePendingImage = (idx: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== idx))
   }
 
   return (
@@ -440,6 +464,20 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             ) : (
               /* Normal user message display */
               <>
+                {/* Image thumbnails attached to user message */}
+                {msg.images && msg.images.length > 0 && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 0.5 }}>
+                    {msg.images.map((src, imgIdx) => (
+                      <Box
+                        key={imgIdx}
+                        component="img"
+                        src={src}
+                        alt={`Bild ${imgIdx + 1}`}
+                        sx={{ maxWidth: 120, maxHeight: 120, borderRadius: 1, objectFit: 'cover' }}
+                      />
+                    ))}
+                  </Box>
+                )}
                 {debugMode && msg.debugSentPayload ? (
                   <Box
                     component="pre"
@@ -585,8 +623,53 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
 
       <Divider />
 
+      {/* Pending image thumbnails above input */}
+      {pendingImages.length > 0 && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, px: 0.5, flexShrink: 0 }}>
+          {pendingImages.map((src, idx) => (
+            <Box key={idx} sx={{ position: 'relative', display: 'inline-flex' }}>
+              <Box
+                component="img"
+                src={src}
+                alt={`Anhang ${idx + 1}`}
+                sx={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 1 }}
+              />
+              <IconButton
+                size="small"
+                onClick={() => removePendingImage(idx)}
+                sx={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  bgcolor: 'background.paper',
+                  p: 0.25,
+                  '&:hover': { bgcolor: 'error.main', color: 'white' },
+                }}
+              >
+                <CloseIcon sx={{ fontSize: '0.7rem' }} />
+              </IconButton>
+            </Box>
+          ))}
+        </Box>
+      )}
+
       {/* Input row */}
       <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleImageSelect}
+        />
+        <Tooltip title="Bild anhängen">
+          <span>
+            <IconButton size="small" onClick={() => imageInputRef.current?.click()} disabled={loading}>
+              <ImageIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
         <TextField
           size="small"
           fullWidth
@@ -611,7 +694,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
               <IconButton
                 color="primary"
                 onClick={send}
-                disabled={!input.trim() || loading}
+                disabled={(!input.trim() && pendingImages.length === 0) || loading}
                 size="small"
               >
                 <SendIcon fontSize="small" />

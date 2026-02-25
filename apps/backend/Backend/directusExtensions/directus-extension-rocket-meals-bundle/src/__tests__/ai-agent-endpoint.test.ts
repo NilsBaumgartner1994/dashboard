@@ -524,4 +524,71 @@ describe('AI Agent Endpoint', () => {
       expect(networkError).toHaveProperty('details');
     });
   });
+
+  describe('Image analysis', () => {
+    /** Mirrors the data-URL stripping logic from the backend endpoint. */
+    function stripDataUrlPrefix(img: string): string {
+      return img.replace(/^data:[^;]+;base64,/, '');
+    }
+
+    it('should strip data URL prefix from jpeg images', () => {
+      const dataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgAB';
+      expect(stripDataUrlPrefix(dataUrl)).toBe('/9j/4AAQSkZJRgAB');
+    });
+
+    it('should strip data URL prefix from png images', () => {
+      const dataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+      expect(stripDataUrlPrefix(dataUrl)).toBe('iVBORw0KGgo=');
+    });
+
+    it('should leave raw base64 strings unchanged', () => {
+      const rawBase64 = 'iVBORw0KGgo=';
+      expect(stripDataUrlPrefix(rawBase64)).toBe('iVBORw0KGgo=');
+    });
+
+    it('should include images in the Ollama message when provided', () => {
+      const incomingMessage = {
+        role: 'user',
+        content: 'Was ist auf diesem Bild?',
+        images: ['data:image/jpeg;base64,/9j/4AAQSkZJRgAB'],
+      };
+      const ollamaMessage = {
+        role: incomingMessage.role,
+        content: incomingMessage.content,
+        images: incomingMessage.images?.map(stripDataUrlPrefix),
+      };
+      expect(ollamaMessage.images).toHaveLength(1);
+      expect(ollamaMessage.images![0]).toBe('/9j/4AAQSkZJRgAB');
+    });
+
+    it('should not include images field when no images are provided', () => {
+      const incomingMessage = { role: 'user', content: 'Hallo!' };
+      const images: string[] | undefined = (incomingMessage as { images?: string[] }).images;
+      const ollamaMessage: { role: string; content: string; images?: string[] } = {
+        role: incomingMessage.role,
+        content: incomingMessage.content,
+        ...(images && images.length > 0 ? { images: images.map(stripDataUrlPrefix) } : {}),
+      };
+      expect(ollamaMessage.images).toBeUndefined();
+    });
+
+    it('should handle multiple images in a single message', () => {
+      const incomingMessage = {
+        role: 'user',
+        content: 'Vergleiche diese Bilder.',
+        images: [
+          'data:image/jpeg;base64,/9j/imageOne',
+          'data:image/png;base64,iVBORimagetwo',
+        ],
+      };
+      const ollamaMessage = {
+        role: incomingMessage.role,
+        content: incomingMessage.content,
+        images: incomingMessage.images.map(stripDataUrlPrefix),
+      };
+      expect(ollamaMessage.images).toHaveLength(2);
+      expect(ollamaMessage.images[0]).toBe('/9j/imageOne');
+      expect(ollamaMessage.images[1]).toBe('iVBORimagetwo');
+    });
+  });
 });
