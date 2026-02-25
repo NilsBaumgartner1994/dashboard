@@ -159,6 +159,11 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [voice, setVoice] = useState('Ryan')
   const [voiceDescription, setVoiceDescription] = useState('')
   const [modelSize, setModelSize] = useState('1.7B')
+  const [voices, setVoices] = useState<Array<{ name: string; has_reference_audio: boolean; has_training_data: boolean }>>([])
+  const [selectedVoice, setSelectedVoice] = useState<string | null>(null)
+  const [refAudioFile, setRefAudioFile] = useState<File | null>(null)
+  const [newVoiceName, setNewVoiceName] = useState('')
+  const [showCreateVoice, setShowCreateVoice] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
@@ -166,6 +171,25 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [playing, setPlaying] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioBlobUrlRef = useRef<string | null>(null)
+
+  // Load voices on mount
+  useEffect(() => {
+    const loadVoices = async () => {
+      try {
+        const res = await fetch(`${ttsUrl}/voices`)
+        if (res.ok) {
+          const data = await res.json()
+          setVoices(data.voices)
+          if (data.voices.length > 0 && !selectedVoice) {
+            setSelectedVoice(data.voices[0].name)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load voices:', err)
+      }
+    }
+    loadVoices()
+  }, [ttsUrl, selectedVoice])
 
   // Get available model sizes based on mode
   const getAvailableModelSizes = (): string[] => {
@@ -185,6 +209,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const handleGenerate = async () => {
     if (!textInput.trim()) return
     if (ttsMode === 'voice_design' && !voiceDescription.trim()) return
+    if (ttsMode === 'voice_clone' && !selectedVoice) return
 
     setLoading(true)
     setError(null)
@@ -198,27 +223,40 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
     const start = Date.now()
     try {
-      const requestBody =
-        ttsMode === 'voice_design'
-          ? {
-              text: textInput,
-              mode: 'voice_design',
-              language: language,
-              voice: voiceDescription, // Voice description for the model to generate voice
-              model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-VoiceDesign`,
-            }
-          : {
-              text: textInput,
-              mode: 'voice_clone',
-              model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-Base`,
-            }
+      let res
 
-      const res = await fetch(`${ttsUrl}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(120_000),
-      })
+      if (ttsMode === 'voice_design') {
+        const requestBody = {
+          text: textInput,
+          mode: 'voice_design',
+          language: language,
+          voice: voiceDescription,
+          model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-VoiceDesign`,
+        }
+
+        res = await fetch(`${ttsUrl}/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(120_000),
+        })
+      } else if (ttsMode === 'voice_clone') {
+        // Voice Clone using saved voice profile
+        const formData = new FormData()
+        formData.append('voice_name', selectedVoice || '')
+        formData.append('text', textInput)
+        formData.append('language', language)
+        formData.append('model_size', modelSize)
+
+        res = await fetch(`${ttsUrl}/voices/clone`, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(120_000),
+        })
+      } else {
+        throw new Error('Invalid TTS mode')
+      }
+
       if (!res.ok) {
         const body = await res.text().catch(() => '')
         throw new Error(`HTTP ${res.status}: ${body}`)
@@ -231,6 +269,76 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       const url = URL.createObjectURL(blob)
       audioBlobUrlRef.current = url
       setAudioUrl(url)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreateVoice = async () => {
+    if (!newVoiceName.trim()) {
+      setError('Voice name cannot be empty')
+      return
+    }
+    if (!refAudioFile) {
+      setError('Please select an audio file')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('voice_name', newVoiceName)
+      formData.append('reference_audio', refAudioFile)
+
+      const res = await fetch(`${ttsUrl}/voices/create`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const errorBody = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${errorBody}`)
+      }
+
+      const data = await res.json()
+      setVoices([...voices, data.voice])
+      setSelectedVoice(data.voice.name)
+      setNewVoiceName('')
+      setRefAudioFile(null)
+      setShowCreateVoice(false)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteVoice = async (voiceName: string) => {
+    if (!confirm(`Are you sure you want to delete voice "${voiceName}"?`)) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('voice_name', voiceName)
+
+      const res = await fetch(`${ttsUrl}/voices/delete`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const errorBody = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${errorBody}`)
+      }
+
+      setVoices(voices.filter((v) => v.name !== voiceName))
+      if (selectedVoice === voiceName) {
+        setSelectedVoice(voices.length > 1 ? voices[0].name : null)
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -324,7 +432,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             sx={{ borderBottom: 1, borderColor: 'divider' }}
           >
             <Tab label="Voice Design" value="voice_design" />
-            <Tab label="Voice Clone" value="voice_clone" disabled />
+            <Tab label="Voice Clone" value="voice_clone" />
           </Tabs>
 
           {/* Voice Design Mode */}
@@ -418,12 +526,114 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           {/* Voice Clone Mode */}
           {ttsMode === 'voice_clone' && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {/* Saved Voices Selection */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Saved Voice</InputLabel>
+                <Select
+                  value={selectedVoice || ''}
+                  label="Saved Voice"
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  disabled={loading}
+                >
+                  {voices.map((v) => (
+                    <MenuItem key={v.name} value={v.name}>
+                      {v.name} {v.has_reference_audio ? '✓' : '⚠'}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {/* Create New Voice */}
+              {!showCreateVoice && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setShowCreateVoice(true)}
+                  disabled={loading}
+                >
+                  + Create New Voice
+                </Button>
+              )}
+
+              {/* Create Voice Form */}
+              {showCreateVoice && (
+                <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
+                  <Typography variant="caption" fontWeight="bold" sx={{ mb: 1, display: 'block' }}>
+                    Create New Voice Profile
+                  </Typography>
+
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Voice Name"
+                    placeholder="e.g., My Voice, Sarah"
+                    value={newVoiceName}
+                    onChange={(e) => setNewVoiceName(e.target.value)}
+                    disabled={loading}
+                    sx={{ mb: 1 }}
+                  />
+
+                  <Box sx={{ mb: 1 }}>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={(e) => setRefAudioFile(e.target.files?.[0] || null)}
+                      disabled={loading}
+                      style={{ fontSize: '12px' }}
+                    />
+                    {refAudioFile && (
+                      <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
+                        ✓ {refAudioFile.name}
+                      </Typography>
+                    )}
+                  </Box>
+
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={handleCreateVoice}
+                      disabled={loading || !newVoiceName.trim() || !refAudioFile}
+                    >
+                      Create
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        setShowCreateVoice(false)
+                        setNewVoiceName('')
+                        setRefAudioFile(null)
+                      }}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+
+              {/* Delete Voice */}
+              {selectedVoice && !showCreateVoice && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  onClick={() => handleDeleteVoice(selectedVoice)}
+                  disabled={loading}
+                >
+                  Delete "{selectedVoice}" Voice
+                </Button>
+              )}
+
+              {/* Text to Synthesize */}
               <TextField
                 multiline
                 minRows={2}
                 maxRows={3}
                 fullWidth
                 size="small"
+                label="Text to Synthesize"
                 placeholder="Text eingeben…"
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
@@ -432,6 +642,23 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   if (e.key === 'Enter' && e.ctrlKey) handleGenerate()
                 }}
               />
+
+              {/* Language Dropdown */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Language</InputLabel>
+                <Select
+                  value={language}
+                  label="Language"
+                  onChange={(e) => setLanguage(e.target.value)}
+                  disabled={loading}
+                >
+                  {LANGUAGES.map((lang) => (
+                    <MenuItem key={lang} value={lang}>
+                      {lang}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
               {/* Model Size Dropdown */}
               <FormControl fullWidth size="small">
@@ -461,7 +688,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
               disabled={
                 loading ||
                 !textInput.trim() ||
-                (ttsMode === 'voice_design' && !voiceDescription.trim())
+                (ttsMode === 'voice_design' && !voiceDescription.trim()) ||
+                (ttsMode === 'voice_clone' && !selectedVoice)
               }
               startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <RecordVoiceOverIcon fontSize="small" />}
               sx={{ flex: 1 }}

@@ -30,6 +30,13 @@ hf_cache_dir.mkdir(parents=True, exist_ok=True)
 os.environ["HF_HOME"] = str(hf_cache_dir)
 print(f"HuggingFace cache directory: {hf_cache_dir}")
 
+# ============================================================================
+# CONFIGURE VOICES DIRECTORY FOR VOICE CLONE TRAINING
+# ============================================================================
+voices_dir = project_root / "data" / "tts-voices"
+voices_dir.mkdir(parents=True, exist_ok=True)
+print(f"TTS Voices directory: {voices_dir}")
+
 # HF_TOKEN = os.environ.get('HF_TOKEN')
 # login(token=HF_TOKEN)
 
@@ -92,6 +99,75 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def get_voice_path(voice_name: str) -> Path:
+    """Get the directory path for a specific voice."""
+    return voices_dir / voice_name
+
+def voice_exists(voice_name: str) -> bool:
+    """Check if a voice profile exists."""
+    voice_path = get_voice_path(voice_name)
+    return voice_path.exists() and voice_path.is_dir()
+
+def get_reference_audio_path(voice_name: str) -> Path:
+    """Get the path for the reference audio file."""
+    return get_voice_path(voice_name) / "reference_audio.wav"
+
+def get_training_data_path(voice_name: str) -> Path:
+    """Get the path for the training data/embeddings file."""
+    return get_voice_path(voice_name) / "training_data.pt"
+
+def list_voices() -> list:
+    """List all available voice profiles."""
+    voices = []
+    if voices_dir.exists():
+        for voice_dir in voices_dir.iterdir():
+            if voice_dir.is_dir():
+                voices.append({
+                    "name": voice_dir.name,
+                    "has_reference_audio": get_reference_audio_path(voice_dir.name).exists(),
+                    "has_training_data": get_training_data_path(voice_dir.name).exists(),
+                })
+    return sorted(voices, key=lambda v: v["name"])
+
+def create_voice(voice_name: str, ref_audio_bytes: bytes, ref_audio_sr: int) -> dict:
+    """Create a new voice profile with reference audio."""
+    # Validate voice name
+    if not voice_name or not voice_name.strip():
+        raise ValueError("Voice name cannot be empty")
+
+    voice_name = voice_name.strip()
+    if voice_exists(voice_name):
+        raise ValueError(f"Voice '{voice_name}' already exists")
+
+    voice_path = get_voice_path(voice_name)
+    voice_path.mkdir(parents=True, exist_ok=True)
+
+    # Save reference audio
+    ref_audio_path = get_reference_audio_path(voice_name)
+    with open(ref_audio_path, "wb") as f:
+        f.write(ref_audio_bytes)
+
+    print(f"[INFO] Created voice '{voice_name}' with reference audio at {ref_audio_path}")
+
+    return {
+        "name": voice_name,
+        "has_reference_audio": True,
+        "has_training_data": False,
+    }
+
+def delete_voice(voice_name: str) -> bool:
+    """Delete a voice profile."""
+    voice_path = get_voice_path(voice_name)
+    if not voice_path.exists():
+        raise ValueError(f"Voice '{voice_name}' does not exist")
+
+    # Delete all files in the voice directory
+    import shutil
+    shutil.rmtree(voice_path)
+    print(f"[INFO] Deleted voice '{voice_name}'")
+    return True
 
 
 def get_model_path(model_type: str, model_size: str) -> str:
@@ -308,10 +384,14 @@ async def get_available_models():
         "languages": LANGUAGES,
         "models_loaded": model_state.models_loaded,
         "loading": model_state.loading,
+        "voices": list_voices(),
         "endpoints": {
             "voice_design": "/voice-design",
             "voice_clone": "/voice-clone",
-            "custom_voice": "/custom-voice"
+            "custom_voice": "/custom-voice",
+            "voices": "/voices",
+            "voices_create": "/voices/create",
+            "voices_delete": "/voices/delete",
         }
     }
 
@@ -800,6 +880,146 @@ async def custom_voice_base64_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
 
+
+# ============================================================================
+# VOICE MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@app.get("/voices")
+async def list_all_voices():
+    """Get list of all available voice profiles."""
+    return {
+        "voices": list_voices()
+    }
+
+
+@app.post("/voices/create")
+async def create_voice_endpoint(
+    voice_name: str = Form(...),
+    reference_audio: UploadFile = File(...),
+):
+    """
+    Create a new voice profile with reference audio for voice cloning.
+
+    Parameters:
+    - voice_name: Name of the new voice (must be unique)
+    - reference_audio: Audio file to use as reference for voice cloning
+    """
+    try:
+        # Read reference audio
+        audio_content = await reference_audio.read()
+        audio_buffer = io.BytesIO(audio_content)
+        wav, sr = sf.read(audio_buffer)
+        wav = _normalize_audio(wav)
+
+        # Create voice profile
+        voice_info = create_voice(voice_name, audio_content, sr)
+
+        print(f"[INFO] Voice '{voice_name}' created successfully", file=sys.stderr)
+        return {
+            "success": True,
+            "voice": voice_info
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"[ERROR] Failed to create voice: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
+
+@app.post("/voices/delete")
+async def delete_voice_endpoint(voice_name: str = Form(...)):
+    """
+    Delete a voice profile and all its associated data.
+
+    Parameters:
+    - voice_name: Name of the voice to delete
+    """
+    try:
+        delete_voice(voice_name)
+        print(f"[INFO] Voice '{voice_name}' deleted successfully", file=sys.stderr)
+        return {
+            "success": True,
+            "message": f"Voice '{voice_name}' deleted"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"[ERROR] Failed to delete voice: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
+
+@app.post("/voices/clone")
+async def clone_voice_with_training(
+    voice_name: str = Form(...),
+    text: str = Form(...),
+    language: str = Form("Auto"),
+    model_size: str = Form("1.7B"),
+):
+    """
+    Clone a voice using a saved voice profile for voice cloning.
+
+    Parameters:
+    - voice_name: Name of the saved voice to use
+    - text: Text to synthesize
+    - language: Language (default: Auto)
+    - model_size: Model size ("0.6B" or "1.7B", default: "1.7B")
+    """
+    check_models_loaded()
+
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    if not voice_exists(voice_name):
+        raise HTTPException(status_code=404, detail=f"Voice '{voice_name}' not found")
+
+    if not get_reference_audio_path(voice_name).exists():
+        raise HTTPException(status_code=400, detail=f"Voice '{voice_name}' has no reference audio")
+
+    if model_size not in MODEL_SIZES:
+        raise HTTPException(status_code=400, detail=f"Model size must be one of {MODEL_SIZES}")
+
+    try:
+        print(f"[INFO] Cloning voice: voice_name={voice_name}, text='{text[:50]}...', model_size={model_size}", file=sys.stderr)
+
+        # Load reference audio
+        ref_audio_path = get_reference_audio_path(voice_name)
+        wav, sr = sf.read(ref_audio_path)
+        wav = _normalize_audio(wav)
+        audio_tuple = (wav, int(sr))
+
+        # Use Base model for voice cloning
+        tts = model_state.BASE_MODELS[model_size]
+
+        # Generate speech using voice clone
+        wavs, sr = tts.generate_voice_clone(
+            text=text.strip(),
+            language=language,
+            ref_audio=audio_tuple,
+            ref_text=None,  # Use x_vector_only mode
+            x_vector_only_mode=True,
+            max_new_tokens=2048,
+        )
+
+        if wavs is None:
+            raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+        print(f"[INFO] Voice cloning completed for '{voice_name}'", file=sys.stderr)
+        wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+
+        return StreamingResponse(
+            iter([wav_bytes]),
+            media_type="audio/wav",
+            headers={"Content-Disposition": f"attachment; filename=voice-clone-{voice_name}.wav"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Voice cloning failed: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
 
 if __name__ == "__main__":
     import uvicorn
