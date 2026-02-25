@@ -23,6 +23,11 @@ import {
   InputLabel,
   Checkbox,
   FormControlLabel,
+  Card,
+  CardActionArea,
+  CardContent,
+  CardMedia,
+  InputAdornment,
 } from '@mui/material'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
@@ -34,6 +39,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import CloseIcon from '@mui/icons-material/Close'
 import MicIcon from '@mui/icons-material/Mic'
 import DownloadIcon from '@mui/icons-material/Download'
+import SearchIcon from '@mui/icons-material/Search'
+import PersonIcon from '@mui/icons-material/Person'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -56,6 +63,96 @@ interface Voice {
   name: string
   has_reference_audio: boolean
   has_training_data: boolean
+  has_image?: boolean
+}
+
+interface VoiceCardItem {
+  name: string
+  imageUrl?: string
+  subtitle?: string
+}
+
+interface VoiceCardModalProps {
+  open: boolean
+  onClose: () => void
+  title: string
+  items: VoiceCardItem[]
+  selected: string | null
+  onSelect: (name: string) => void
+}
+
+function VoiceCardModal({ open, onClose, title, items, selected, onSelect }: VoiceCardModalProps) {
+  const [search, setSearch] = useState('')
+  const filtered = items.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
+        <Box sx={{ flex: 1 }}>{title}</Box>
+        <IconButton size="small" onClick={onClose}><CloseIcon fontSize="inherit" /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Suchen…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          sx={{ mb: 2 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+          {filtered.length === 0 && (
+            <Typography variant="body2" color="text.secondary">Keine Stimmen gefunden.</Typography>
+          )}
+          {filtered.map((item) => (
+            <Card
+              key={item.name}
+              variant="outlined"
+              sx={{
+                width: 130,
+                cursor: 'pointer',
+                border: selected === item.name ? '2px solid' : '1px solid',
+                borderColor: selected === item.name ? 'primary.main' : 'divider',
+                flexShrink: 0,
+              }}
+            >
+              <CardActionArea onClick={() => { onSelect(item.name); onClose() }}>
+                {item.imageUrl ? (
+                  <CardMedia
+                    component="img"
+                    height="100"
+                    image={item.imageUrl}
+                    alt={item.name}
+                    sx={{ objectFit: 'cover' }}
+                  />
+                ) : (
+                  <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                    <PersonIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+                  </Box>
+                )}
+                <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
+                  <Typography variant="caption" fontWeight="bold" sx={{ display: 'block', textAlign: 'center', wordBreak: 'break-word' }}>
+                    {item.name}
+                  </Typography>
+                  {item.subtitle && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+                      {item.subtitle}
+                    </Typography>
+                  )}
+                </CardContent>
+              </CardActionArea>
+            </Card>
+          ))}
+        </Box>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 const STATUS_LABEL: Record<ServerStatus, string> = {
@@ -184,6 +281,11 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [voiceCloneDescription, setVoiceCloneDescription] = useState('')
   const [transcribing, setTranscribing] = useState(false)
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
+  const [newVoiceImageFile, setNewVoiceImageFile] = useState<File | null>(null)
+
+  // Modal state
+  const [voiceSelectModalOpen, setVoiceSelectModalOpen] = useState(false)
+  const [speakerSelectModalOpen, setSpeakerSelectModalOpen] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -476,6 +578,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       const formData = new FormData()
       formData.append('voice_name', newVoiceName)
       formData.append('reference_audio', refAudioFile)
+      if (newVoiceImageFile) formData.append('voice_image', newVoiceImageFile)
 
       const res = await fetch(`${ttsUrl}/voices/create`, {
         method: 'POST',
@@ -494,6 +597,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       setNewVoiceName('')
       setRefAudioFile(null)
       setRefText('')
+      setNewVoiceImageFile(null)
     } catch (err) {
       setError(String(err))
     } finally {
@@ -635,12 +739,29 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               {voiceCloneSubMode === 'select' ? (
                 <>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Saved Voice</InputLabel>
-                    <Select value={selectedVoice || ''} label="Saved Voice" onChange={(e) => setSelectedVoice(e.target.value)} disabled={loading}>
-                      {voices.map((v) => (<MenuItem key={v.name} value={v.name}>{v.name} {v.has_reference_audio ? '✓' : '⚠'}</MenuItem>))}
-                    </Select>
-                  </FormControl>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth
+                      onClick={() => setVoiceSelectModalOpen(true)}
+                      disabled={loading}
+                      startIcon={
+                        selectedVoice && voices.find((v) => v.name === selectedVoice)?.has_image ? (
+                          <Box
+                            component="img"
+                            src={`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`}
+                            alt={selectedVoice}
+                            sx={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <PersonIcon fontSize="small" />
+                        )
+                      }
+                    >
+                      {selectedVoice || 'Stimme auswählen…'}
+                    </Button>
+                  </Box>
                   <Button size="small" variant="outlined" onClick={() => setVoiceCloneSubMode('create')} disabled={loading}>
                     + Create New Voice
                   </Button>
@@ -656,6 +777,13 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     Create New Voice Profile
                   </Typography>
                   <TextField fullWidth size="small" label="Voice Name" placeholder="e.g., Sarah" value={newVoiceName} onChange={(e) => setNewVoiceName(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
+                  <Box sx={{ mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Profilbild (optional)</Typography>
+                    <input type="file" accept="image/*" onChange={(e) => setNewVoiceImageFile(e.target.files?.[0] || null)} disabled={loading} style={{ fontSize: '12px' }} />
+                    {newVoiceImageFile && (
+                      <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {newVoiceImageFile.name}</Typography>
+                    )}
+                  </Box>
                   <Box sx={{ mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                       <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
@@ -717,7 +845,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || transcribing || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
                       Create & Continue
                     </Button>
-                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); }} disabled={loading || transcribing}>
+                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); setNewVoiceImageFile(null) }} disabled={loading || transcribing}>
                       Cancel
                     </Button>
                   </Box>
@@ -754,12 +882,16 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   {LANGUAGES.map((lang) => (<MenuItem key={lang} value={lang}>{lang}</MenuItem>))}
                 </Select>
               </FormControl>
-              <FormControl fullWidth size="small">
-                <InputLabel>Speaker</InputLabel>
-                <Select value={speaker} label="Speaker" onChange={(e) => setSpeaker(e.target.value)} disabled={loading}>
-                  {SPEAKERS.map((s) => (<MenuItem key={s} value={s}>{s}</MenuItem>))}
-                </Select>
-              </FormControl>
+              <Button
+                size="small"
+                variant="outlined"
+                fullWidth
+                onClick={() => setSpeakerSelectModalOpen(true)}
+                disabled={loading}
+                startIcon={<PersonIcon fontSize="small" />}
+              >
+                {speaker || 'Speaker auswählen…'}
+              </Button>
               <TextField fullWidth size="small" label="Style Instruction" placeholder="e.g., speak slowly, cheerful tone" value={styleInstruction} onChange={(e) => setStyleInstruction(e.target.value)} disabled={loading} />
               <FormControl fullWidth size="small">
                 <InputLabel>Model Size</InputLabel>
@@ -882,6 +1014,30 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Voice Clone selection modal */}
+      <VoiceCardModal
+        open={voiceSelectModalOpen}
+        onClose={() => setVoiceSelectModalOpen(false)}
+        title="Stimme auswählen"
+        items={voices.map((v) => ({
+          name: v.name,
+          imageUrl: v.has_image ? `${ttsUrl}/voices/${encodeURIComponent(v.name)}/image` : undefined,
+          subtitle: v.has_reference_audio ? undefined : '⚠ kein Audio',
+        }))}
+        selected={selectedVoice}
+        onSelect={setSelectedVoice}
+      />
+
+      {/* Custom Voice speaker selection modal */}
+      <VoiceCardModal
+        open={speakerSelectModalOpen}
+        onClose={() => setSpeakerSelectModalOpen(false)}
+        title="Speaker auswählen"
+        items={SPEAKERS.map((s) => ({ name: s }))}
+        selected={speaker}
+        onSelect={setSpeaker}
+      />
     </>
   )
 }
