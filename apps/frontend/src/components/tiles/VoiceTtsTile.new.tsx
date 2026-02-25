@@ -31,6 +31,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import CloseIcon from '@mui/icons-material/Close'
+import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -156,6 +157,9 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [refText, setRefText] = useState('')
   const [useXVectorOnly, setUseXVectorOnly] = useState(false)
   const [newVoiceName, setNewVoiceName] = useState('')
+  const [voiceCloneDescription, setVoiceCloneDescription] = useState('')
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcribeError, setTranscribeError] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -190,6 +194,24 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current)
     }
   }, [])
+
+  const handleTranscribe = useCallback(async () => {
+    if (!refAudioFile) return
+    setTranscribing(true)
+    setTranscribeError(null)
+    try {
+      const { pipeline } = await import('@xenova/transformers')
+      const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small')
+      const objectUrl = URL.createObjectURL(refAudioFile)
+      const result = await transcriber(objectUrl) as { text: string }
+      URL.revokeObjectURL(objectUrl)
+      setRefText(result.text.trim())
+    } catch (err) {
+      setTranscribeError(String(err))
+    } finally {
+      setTranscribing(false)
+    }
+  }, [refAudioFile])
 
   const getAvailableModelSizes = (): string[] => {
     if (ttsMode === 'voice_design') return ['1.7B']
@@ -239,6 +261,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           formData.append('text', textInput)
           formData.append('language', language)
           formData.append('model_size', modelSize)
+          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
           res = await fetch(`${ttsUrl}/voices/clone`, {
             method: 'POST',
             body: formData,
@@ -253,6 +276,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           formData.append('language', language)
           formData.append('use_xvector_only', String(useXVectorOnly))
           formData.append('model_size', modelSize)
+          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
           res = await fetch(`${ttsUrl}/voice-clone`, {
             method: 'POST',
             body: formData,
@@ -488,19 +512,32 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   </Typography>
                   <TextField fullWidth size="small" label="Voice Name" placeholder="e.g., Sarah" value={newVoiceName} onChange={(e) => setNewVoiceName(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
                   <Box sx={{ mb: 1 }}>
-                    <input type="file" accept="audio/*" onChange={(e) => setRefAudioFile(e.target.files?.[0] || null)} disabled={loading} style={{ fontSize: '12px' }} />
+                    <input type="file" accept="audio/*" onChange={(e) => setRefAudioFile(e.target.files?.[0] || null)} disabled={loading || transcribing} style={{ fontSize: '12px' }} />
                     {refAudioFile && (<Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {refAudioFile.name}</Typography>)}
+                    {refAudioFile && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={transcribing ? <CircularProgress size={12} color="inherit" /> : <GraphicEqIcon fontSize="small" />}
+                        onClick={handleTranscribe}
+                        disabled={loading || transcribing}
+                        sx={{ mt: 0.5, fontSize: '0.7rem' }}
+                      >
+                        {transcribing ? 'Transkribiere…' : 'Transkribieren'}
+                      </Button>
+                    )}
+                    {transcribeError && (<Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{transcribeError}</Typography>)}
                   </Box>
-                  <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
+                  <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
                   <FormControlLabel
-                    control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || !!refText} />}
+                    control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || transcribing || !!refText} />}
                     label="Use x-vector only (no reference text needed, lower quality)"
                   />
                   <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                    <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
+                    <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || transcribing || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
                       Create & Continue
                     </Button>
-                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); }} disabled={loading}>
+                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); }} disabled={loading || transcribing}>
                       Cancel
                     </Button>
                   </Box>
@@ -509,6 +546,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
               {voices.length > 0 && (
                 <>
                   <TextField multiline minRows={2} maxRows={3} fullWidth size="small" label="Text to Synthesize" placeholder="Text eingeben…" value={textInput} onChange={(e) => setTextInput(e.target.value)} disabled={loading} onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) handleGenerate() }} />
+                  <TextField fullWidth size="small" label="Voice Description (optional)" placeholder="z.B. überrascht, fröhlich, traurig…" value={voiceCloneDescription} onChange={(e) => setVoiceCloneDescription(e.target.value)} disabled={loading} helperText="Beschreibe den gewünschten Sprachstil oder Emotionen" />
                   <FormControl fullWidth size="small">
                     <InputLabel>Language</InputLabel>
                     <Select value={language} label="Language" onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
