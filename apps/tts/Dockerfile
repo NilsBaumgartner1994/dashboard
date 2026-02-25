@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir \
 # Install all requirements from requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY qwen_tts/ ./qwen_tts/
 COPY start.py .
 
 ENV TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-Base

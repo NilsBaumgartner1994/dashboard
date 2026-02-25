@@ -12,4 +12,6 @@ onnxruntime
 spaces
 numpy
 kernels
-qwen_tts @ git+https://github.com/QwenLM/Qwen3-TTS.git
+fastapi
+uvicorn[standard]
+huggingface_hub
