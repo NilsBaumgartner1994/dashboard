@@ -71,6 +71,8 @@ class ModelState:
         self.models_loaded = False
         self.loading = False
         self.error = None
+        # Time estimation table: stores (char_count, word_count, duration_seconds)
+        self.time_estimation_data = []
 
     @property
     def BASE_MODELS(self):
@@ -85,6 +87,35 @@ class ModelState:
             "0.6B": self.custom_voice_model_0_6b,
             "1.7B": self.custom_voice_model_1_7b,
         }
+
+    def add_estimation_data(self, char_count: int, word_count: int, duration: float):
+        """Add a generation record for time estimation."""
+        self.time_estimation_data.append({
+            'char_count': char_count,
+            'word_count': word_count,
+            'duration': duration,
+        })
+
+    def estimate_generation_time(self, char_count: int, word_count: int) -> float:
+        """Estimate generation time based on historical data."""
+        if not self.time_estimation_data:
+            # No data yet, return a default estimate (e.g., 0.1s per character)
+            return char_count * 0.1
+
+        # Calculate average duration per character and per word
+        total_chars = sum(d['char_count'] for d in self.time_estimation_data)
+        total_words = sum(d['word_count'] for d in self.time_estimation_data)
+        total_duration = sum(d['duration'] for d in self.time_estimation_data)
+
+        avg_per_char = total_duration / total_chars if total_chars > 0 else 0.1
+        avg_per_word = total_duration / total_words if total_words > 0 else 0.5
+
+        # Use both metrics and average them
+        estimate_by_chars = char_count * avg_per_char
+        estimate_by_words = word_count * avg_per_word
+
+        # Weighted average: prefer character-based for now
+        return (estimate_by_chars * 0.7 + estimate_by_words * 0.3)
 
 model_state = ModelState()
 
@@ -176,130 +207,152 @@ def get_model_path(model_type: str, model_size: str) -> str:
 
 
 # ============================================================================
-# BACKGROUND MODEL LOADING
+# BACKGROUND MODEL LOADING WITH RETRY
 # ============================================================================
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 5
+
+def load_single_model(model_name: str, model_type: str, model_size: str, max_retries: int = MAX_RETRIES):
+    """
+    Load a single model with retry logic.
+
+    Returns:
+        The loaded model if successful, None otherwise
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                print(f"  ↻ Retry {attempt}/{max_retries} for {model_name}...")
+                import time
+                time.sleep(RETRY_DELAY_SECONDS)
+
+            print(f"  → Downloading model path...")
+            model_path = get_model_path(model_type, model_size)
+            print(f"  → Model path: {model_path}")
+            print(f"  → Creating model from pretrained...")
+
+            model = Qwen3TTSModel.from_pretrained(
+                model_path,
+                device_map="cpu",
+                dtype=torch.float32,
+                attn_implementation="eager",
+            )
+
+            print(f"✓ {model_name} loaded successfully")
+            return model
+
+        except Exception as e:
+            print(f"✗ Error loading {model_name} (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+
+            if attempt == max_retries:
+                print(f"⚠ Failed to load {model_name} after {max_retries} attempts. Continuing without this model.", file=sys.stderr)
+                return None
+
+    return None
+
+
 def load_models_background():
-    """Load all models in background thread."""
-    try:
-        model_state.loading = True
-        print("Loading all models in background...")
+    """Load all models sequentially in background thread with retry logic."""
+    model_state.loading = True
+    print("Loading all models sequentially with retry on failure...")
+    print(f"Configuration: Max retries per model: {MAX_RETRIES}, Retry delay: {RETRY_DELAY_SECONDS}s\n")
 
-        # Voice Design model (1.7B only)
-        if LOAD_VOICE_DESIGN:
-            print("Loading VoiceDesign 1.7B model...")
-            print("  → Downloading model path...")
-            try:
-                model_path = get_model_path("VoiceDesign", "1.7B")
-                print(f"  → Model path: {model_path}")
-                print("  → Creating model from pretrained...")
-                model_state.voice_design_model = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map="cpu",
-                    dtype=torch.float32,
-                    attn_implementation="eager",
-                )
-                print("✓ VoiceDesign 1.7B loaded successfully")
-            except Exception as e:
-                print(f"✗ Error loading VoiceDesign 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                raise
-        else:
-            print("⊘ Skipping VoiceDesign 1.7B (disabled)")
+    # Voice Design model (1.7B only)
+    if LOAD_VOICE_DESIGN:
+        print("=" * 60)
+        print("Loading VoiceDesign 1.7B model...")
+        print("=" * 60)
+        model_state.voice_design_model = load_single_model(
+            "VoiceDesign 1.7B",
+            "VoiceDesign",
+            "1.7B"
+        )
+    else:
+        print("⊘ Skipping VoiceDesign 1.7B (disabled)")
 
-        # Base (Voice Clone) models - both sizes
-        if LOAD_BASE_MODELS:
-            print("Loading Base 0.6B model...")
-            try:
-                print("  → Downloading model path...")
-                model_path = get_model_path("Base", "0.6B")
-                print(f"  → Model path: {model_path}")
-                print("  → Creating model from pretrained...")
-                model_state.base_model_0_6b = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map="cpu",
-                    dtype=torch.float32,
-                    attn_implementation="eager",
-                )
-                print("✓ Base 0.6B loaded successfully")
-            except Exception as e:
-                print(f"✗ Error loading Base 0.6B: {type(e).__name__}: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                raise
+    # Base (Voice Clone) models
+    if LOAD_BASE_MODELS:
+        # Load 0.6B model
+        print("\n" + "=" * 60)
+        print("Loading Base 0.6B model...")
+        print("=" * 60)
+        model_state.base_model_0_6b = load_single_model(
+            "Base 0.6B",
+            "Base",
+            "0.6B"
+        )
 
-            print("Loading Base 1.7B model...")
-            try:
-                print("  → Downloading model path...")
-                model_path = get_model_path("Base", "1.7B")
-                print(f"  → Model path: {model_path}")
-                print("  → Creating model from pretrained...")
-                model_state.base_model_1_7b = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map="cpu",
-                    dtype=torch.float32,
-                    attn_implementation="eager",
-                )
-                print("✓ Base 1.7B loaded successfully")
-            except Exception as e:
-                print(f"✗ Error loading Base 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                raise
-        else:
-            print("⊘ Skipping Base models (disabled)")
+        # Load 1.7B model
+        print("\n" + "=" * 60)
+        print("Loading Base 1.7B model...")
+        print("=" * 60)
+        model_state.base_model_1_7b = load_single_model(
+            "Base 1.7B",
+            "Base",
+            "1.7B"
+        )
+    else:
+        print("⊘ Skipping Base models (disabled)")
 
-        # CustomVoice models - both sizes
-        if LOAD_CUSTOM_VOICE_MODELS:
-            print("Loading CustomVoice 0.6B model...")
-            try:
-                print("  → Downloading model path...")
-                model_path = get_model_path("CustomVoice", "0.6B")
-                print(f"  → Model path: {model_path}")
-                print("  → Creating model from pretrained...")
-                model_state.custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map="cpu",
-                    dtype=torch.float32,
-                    attn_implementation="eager",
-                )
-                print("✓ CustomVoice 0.6B loaded successfully")
-            except Exception as e:
-                print(f"✗ Error loading CustomVoice 0.6B: {type(e).__name__}: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                raise
+    # CustomVoice models
+    if LOAD_CUSTOM_VOICE_MODELS:
+        # Load 0.6B model
+        print("\n" + "=" * 60)
+        print("Loading CustomVoice 0.6B model...")
+        print("=" * 60)
+        model_state.custom_voice_model_0_6b = load_single_model(
+            "CustomVoice 0.6B",
+            "CustomVoice",
+            "0.6B"
+        )
 
-            print("Loading CustomVoice 1.7B model...")
-            try:
-                print("  → Downloading model path...")
-                model_path = get_model_path("CustomVoice", "1.7B")
-                print(f"  → Model path: {model_path}")
-                print("  → Creating model from pretrained...")
-                model_state.custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
-                    model_path,
-                    device_map="cpu",
-                    dtype=torch.float32,
-                    attn_implementation="eager",
-                )
-                print("✓ CustomVoice 1.7B loaded successfully")
-            except Exception as e:
-                print(f"✗ Error loading CustomVoice 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                raise
-        else:
-            print("⊘ Skipping CustomVoice models (disabled)")
+        # Load 1.7B model
+        print("\n" + "=" * 60)
+        print("Loading CustomVoice 1.7B model...")
+        print("=" * 60)
+        model_state.custom_voice_model_1_7b = load_single_model(
+            "CustomVoice 1.7B",
+            "CustomVoice",
+            "1.7B"
+        )
+    else:
+        print("⊘ Skipping CustomVoice models (disabled)")
 
-        print("\n" + "="*60)
-        print("✓ All configured models loaded successfully!")
-        print("="*60 + "\n")
-        model_state.models_loaded = True
-        model_state.loading = False
-    except Exception as e:
-        print(f"\n{'='*60}", file=sys.stderr)
-        print(f"✗ FATAL ERROR: Failed to load models", file=sys.stderr)
-        print(f"{'='*60}", file=sys.stderr)
-        print(f"Error type: {type(e).__name__}", file=sys.stderr)
-        print(f"Error message: {e}", file=sys.stderr)
-        print(f"{'='*60}\n", file=sys.stderr)
-        model_state.error = str(e)
-        model_state.loading = False
+    # Summary
+    print("\n" + "=" * 60)
+    print("✓ Model loading process completed!")
+    print("=" * 60)
+
+    loaded_models = []
+    if model_state.voice_design_model:
+        loaded_models.append("VoiceDesign 1.7B")
+    if model_state.base_model_0_6b:
+        loaded_models.append("Base 0.6B")
+    if model_state.base_model_1_7b:
+        loaded_models.append("Base 1.7B")
+    if model_state.custom_voice_model_0_6b:
+        loaded_models.append("CustomVoice 0.6B")
+    if model_state.custom_voice_model_1_7b:
+        loaded_models.append("CustomVoice 1.7B")
+
+    if loaded_models:
+        print("Successfully loaded models:")
+        for model_name in loaded_models:
+            print(f"  ✓ {model_name}")
+    else:
+        print("⚠ No models were successfully loaded!")
+
+    print(f"Total: {len(loaded_models)} model(s) loaded")
+    print("=" * 60 + "\n")
+
+    # Mark as loaded even if some models failed
+    # This allows the API to be partially functional
+    model_state.models_loaded = len(loaded_models) > 0
+    model_state.loading = False
+
+    if not model_state.models_loaded:
+        model_state.error = "Failed to load any models after multiple retries"
 
 
 # Start background loading thread
@@ -392,7 +445,41 @@ async def get_available_models():
             "voices": "/voices",
             "voices_create": "/voices/create",
             "voices_delete": "/voices/delete",
+            "estimate_time": "/estimate-time",
         }
+    }
+
+
+@app.post("/estimate-time")
+async def estimate_generation_time(request_body: dict = Body(...)):
+    """
+    Estimate generation time for a given text.
+
+    Request body:
+    {
+        "text": "Text to estimate generation time for"
+    }
+
+    Returns:
+    {
+        "estimated_seconds": float,
+        "char_count": int,
+        "word_count": int
+    }
+    """
+    text = request_body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text field is required")
+
+    char_count = len(text)
+    word_count = len(text.split())
+
+    estimated_time = model_state.estimate_generation_time(char_count, word_count)
+
+    return {
+        "estimated_seconds": round(estimated_time, 2),
+        "char_count": char_count,
+        "word_count": word_count,
     }
 
 
@@ -420,6 +507,9 @@ async def voice_design_endpoint(
     if not voice_description or not voice_description.strip():
         raise HTTPException(status_code=400, detail="Voice description is required.")
 
+    import time
+    start_time = time.time()
+
     try:
         wavs, sr = model_state.voice_design_model.generate_voice_design(
             text=text.strip(),
@@ -431,10 +521,19 @@ async def voice_design_endpoint(
 
         wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
 
+        # Track generation time
+        generation_time = time.time() - start_time
+        char_count = len(text.strip())
+        word_count = len(text.strip().split())
+        model_state.add_estimation_data(char_count, word_count, generation_time)
+
         return StreamingResponse(
             iter([wav_bytes]),
             media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=voice_design.wav"}
+            headers={
+                "Content-Disposition": "attachment; filename=voice_design.wav",
+                "X-Generation-Time-Ms": str(int(generation_time * 1000))
+            }
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
@@ -694,6 +793,9 @@ async def voice_clone_endpoint(
     if not use_xvector_only and (not ref_text or not ref_text.strip()):
         raise HTTPException(status_code=400, detail="Reference text is required when 'Use x-vector only' is not enabled.")
 
+    import time
+    start_time = time.time()
+
     try:
         # Read the uploaded audio file
         audio_content = await ref_audio.read()
@@ -714,10 +816,19 @@ async def voice_clone_endpoint(
 
         wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
 
+        # Track generation time
+        generation_time = time.time() - start_time
+        char_count = len(target_text.strip())
+        word_count = len(target_text.strip().split())
+        model_state.add_estimation_data(char_count, word_count, generation_time)
+
         return StreamingResponse(
             iter([wav_bytes]),
             media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=voice_clone.wav"}
+            headers={
+                "Content-Disposition": "attachment; filename=voice_clone.wav",
+                "X-Generation-Time-Ms": str(int(generation_time * 1000))
+            }
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
@@ -811,6 +922,9 @@ async def custom_voice_endpoint(
     if model_size not in MODEL_SIZES:
         raise HTTPException(status_code=400, detail=f"Model size must be one of {MODEL_SIZES}")
 
+    import time
+    start_time = time.time()
+
     try:
         tts = model_state.CUSTOM_VOICE_MODELS[model_size]
         wavs, sr = tts.generate_custom_voice(
@@ -824,10 +938,19 @@ async def custom_voice_endpoint(
 
         wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
 
+        # Track generation time
+        generation_time = time.time() - start_time
+        char_count = len(text.strip())
+        word_count = len(text.strip().split())
+        model_state.add_estimation_data(char_count, word_count, generation_time)
+
         return StreamingResponse(
             iter([wav_bytes]),
             media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=custom_voice.wav"}
+            headers={
+                "Content-Disposition": "attachment; filename=custom_voice.wav",
+                "X-Generation-Time-Ms": str(int(generation_time * 1000))
+            }
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
@@ -981,12 +1104,50 @@ async def clone_voice_with_training(
     if model_size not in MODEL_SIZES:
         raise HTTPException(status_code=400, detail=f"Model size must be one of {MODEL_SIZES}")
 
+    import time
+    start_time = time.time()
+
     try:
         print(f"[INFO] Cloning voice: voice_name={voice_name}, text='{text[:50]}...', model_size={model_size}", file=sys.stderr)
 
         # Load reference audio
         ref_audio_path = get_reference_audio_path(voice_name)
         wav, sr = sf.read(ref_audio_path)
+        wav = _normalize_audio(wav)
+        audio_tuple = (wav, int(sr))
+
+        # Use Base model for voice cloning
+        tts = model_state.BASE_MODELS[model_size]
+        # Generate speech using voice clone
+        wavs, sr = tts.generate_voice_clone(
+            text=text.strip(),
+            language=language,
+            ref_audio=audio_tuple,
+            ref_text=None,  # Use x_vector_only mode
+            x_vector_only_mode=True,
+            max_new_tokens=2048,
+        )
+
+        if wavs is None:
+            raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+        print(f"[INFO] Voice cloning completed for '{voice_name}'", file=sys.stderr)
+        wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+
+        # Track generation time
+        generation_time = time.time() - start_time
+        char_count = len(text.strip())
+        word_count = len(text.strip().split())
+        model_state.add_estimation_data(char_count, word_count, generation_time)
+
+        return StreamingResponse(
+            iter([wav_bytes]),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"attachment; filename=voice-clone-{voice_name}.wav",
+                "X-Generation-Time-Ms": str(int(generation_time * 1000))
+            }
+        )
         wav = _normalize_audio(wav)
         audio_tuple = (wav, int(sr))
 
