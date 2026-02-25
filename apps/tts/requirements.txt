@@ -1,11 +1,15 @@
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
-torch==2.6.0+cpu
-torchaudio==2.6.0+cpu
-# Qwen3-TTS requires the latest architecture mapping (qwen3_tts),
-# which is currently only guaranteed on the transformers main branch.
-transformers @ git+https://github.com/huggingface/transformers.git
-huggingface_hub==1.4.1
-soundfile==0.12.1
-numpy==2.0.2
-scipy==1.14.1
+# Qwen3-TTS Dependencies for HuggingFace Spaces
+torch==2.8.0
+transformers==4.57.3
+accelerate==1.12.0
+einops
+gradio
+librosa
+torchaudio
+soundfile
+sox
+onnxruntime
+spaces
+torch
+numpy
+kernels

@@ -1,208 +1,389 @@
-"""
-Qwen3-TTS FastAPI server (CPU-only).
-
-Endpoints:
-  GET  /health           → {"status": "ok", "default_model": "...", "loaded_models": [...]}
-  POST /tts/generate     → audio/wav binary
-"""
-
-from __future__ import annotations
-
-import io
-import logging
+# coding=utf-8
+# Qwen3-TTS Gradio Demo for HuggingFace Spaces with Zero GPU
+# Supports: Voice Design, Voice Clone (Base), TTS (CustomVoice)
+#import subprocess
+#subprocess.run('pip install flash-attn==2.7.4.post1', shell=True)
 import os
-import time
-from contextlib import asynccontextmanager
-from typing import Any, Optional
-
+import spaces
+import gradio as gr
 import numpy as np
-import soundfile as sf
 import torch
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
-from transformers import AutoModel, AutoProcessor
+from huggingface_hub import snapshot_download, login
+from qwen_tts import Qwen3TTSModel
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("tts-api")
+# HF_TOKEN = os.environ.get('HF_TOKEN')
+# login(token=HF_TOKEN)
 
-DEFAULT_MODELS = [
-    "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-    "Qwen/Qwen3-TTS-1.7B-Base",
+# Model size options
+MODEL_SIZES = ["0.6B", "1.7B"]
+
+# Speaker and language choices for CustomVoice model
+SPEAKERS = [
+    "Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"
 ]
-DEVICE = "cpu"
-HF_TOKEN = os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Portuguese", "Russian"]
 
 
-def _parse_models() -> list[str]:
-    model_ids = os.environ.get("TTS_MODEL_IDS", "").strip()
-    if model_ids:
-        parsed = [m.strip() for m in model_ids.split(",") if m.strip()]
-    else:
-        single = os.environ.get("TTS_MODEL_ID", "").strip()
-        parsed = [single] if single else DEFAULT_MODELS.copy()
-
-    for default_model in DEFAULT_MODELS:
-        if default_model not in parsed:
-            parsed.append(default_model)
-    return parsed
+def get_model_path(model_type: str, model_size: str) -> str:
+    """Get model path based on type and size."""
+    return snapshot_download(f"Qwen/Qwen3-TTS-12Hz-{model_size}-{model_type}")
 
 
-SUPPORTED_MODEL_IDS = _parse_models()
-DEFAULT_MODEL_ID = os.environ.get("TTS_DEFAULT_MODEL_ID", SUPPORTED_MODEL_IDS[0])
-if DEFAULT_MODEL_ID not in SUPPORTED_MODEL_IDS:
-    SUPPORTED_MODEL_IDS.insert(0, DEFAULT_MODEL_ID)
+# ============================================================================
+# GLOBAL MODEL LOADING - Load all models at startup
+# ============================================================================
+print("Loading all models to CUDA...")
 
-_processors: dict[str, Any] = {}
-_models: dict[str, Any] = {}
-
-
-class TtsRequest(BaseModel):
-    text: str
-    voice: Optional[str] = None
-    model_id: Optional[str] = None
-    mode: str = Field(default="voice_design")
-    # For forward compatibility (voice cloning):
-    reference_audio_base64: Optional[str] = None
-    reference_text: Optional[str] = None
-
-
-def _load_model(model_id: str) -> None:
-    logger.info("Loading TTS model %s on %s …", model_id, DEVICE)
-    start = time.time()
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True, token=HF_TOKEN)
-    model = AutoModel.from_pretrained(
-        model_id,
-        trust_remote_code=True,
-        torch_dtype=torch.float32,
-        token=HF_TOKEN,
-    )
-    model.to(DEVICE)
-    model.eval()
-    _processors[model_id] = processor
-    _models[model_id] = model
-    logger.info("Model %s loaded in %.1f s", model_id, time.time() - start)
-
-
-def _load_models() -> None:
-    for model_id in SUPPORTED_MODEL_IDS:
-        _load_model(model_id)
-
-
-def _resolve_model(model_id: Optional[str]) -> tuple[str, Any, Any]:
-    selected_model = model_id or DEFAULT_MODEL_ID
-    if selected_model not in _models or selected_model not in _processors:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported model_id '{selected_model}'. Supported: {SUPPORTED_MODEL_IDS}",
-        )
-    return selected_model, _processors[selected_model], _models[selected_model]
-
-
-def _to_audio_array(output: Any, processor: Any) -> np.ndarray:
-    audio = output
-    if isinstance(audio, torch.Tensor):
-        audio = audio.detach().cpu().numpy()
-    elif isinstance(audio, (list, tuple)):
-        audio = audio[0]
-        if isinstance(audio, torch.Tensor):
-            audio = audio.detach().cpu().numpy()
-
-    if not isinstance(audio, np.ndarray):
-        decoded = processor.batch_decode(output, skip_special_tokens=True)
-        audio = decoded[0] if isinstance(decoded, (list, tuple)) else decoded
-
-    if isinstance(audio, torch.Tensor):
-        audio = audio.detach().cpu().numpy()
-
-    if not isinstance(audio, np.ndarray):
-        audio = np.array(audio, dtype=np.float32)
-
-    return audio.flatten().astype(np.float32)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    _load_models()
-    yield
-
-
-app = FastAPI(title="Qwen3-TTS API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Voice Design model (1.7B only)
+print("Loading VoiceDesign 1.7B model...")
+voice_design_model = Qwen3TTSModel.from_pretrained(
+    get_model_path("VoiceDesign", "1.7B"),
+    device_map="cuda",
+    dtype=torch.bfloat16,
+    # token=HF_TOKEN,
+    attn_implementation="kernels-community/flash-attn3",
 )
 
+# Base (Voice Clone) models - both sizes
+print("Loading Base 0.6B model...")
+base_model_0_6b = Qwen3TTSModel.from_pretrained(
+    get_model_path("Base", "0.6B"),
+    device_map="cuda",
+    dtype=torch.bfloat16,
+    # token=HF_TOKEN,
+    attn_implementation="kernels-community/flash-attn3",
+)
 
-@app.get("/health")
-async def health():
-    loaded = len(_models) > 0 and len(_models) == len(_processors)
-    return JSONResponse(
-        status_code=200 if loaded else 503,
-        content={
-            "status": "ok" if loaded else "loading",
-            "default_model": DEFAULT_MODEL_ID,
-            "loaded_models": list(_models.keys()),
-            "supported_models": SUPPORTED_MODEL_IDS,
-        },
-    )
+print("Loading Base 1.7B model...")
+base_model_1_7b = Qwen3TTSModel.from_pretrained(
+    get_model_path("Base", "1.7B"),
+    device_map="cuda",
+    dtype=torch.bfloat16,
+    # token=HF_TOKEN,
+    attn_implementation="kernels-community/flash-attn3",
+)
+
+# CustomVoice models - both sizes
+print("Loading CustomVoice 0.6B model...")
+custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
+    get_model_path("CustomVoice", "0.6B"),
+    device_map="cuda",
+    dtype=torch.bfloat16,
+    # token=HF_TOKEN,
+    attn_implementation="kernels-community/flash-attn3",
+)
+
+print("Loading CustomVoice 1.7B model...")
+custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
+    get_model_path("CustomVoice", "1.7B"),
+    device_map="cuda",
+    dtype=torch.bfloat16,
+    # token=HF_TOKEN,
+    attn_implementation="kernels-community/flash-attn3",
+)
+
+print("All models loaded successfully!")
+
+# Model lookup dictionaries for easy access
+BASE_MODELS = {
+    "0.6B": base_model_0_6b,
+    "1.7B": base_model_1_7b,
+}
+
+CUSTOM_VOICE_MODELS = {
+    "0.6B": custom_voice_model_0_6b,
+    "1.7B": custom_voice_model_1_7b,
+}
+
+# ============================================================================
 
 
-@app.post("/tts/generate")
-async def generate_tts(req: TtsRequest):
-    if req.mode != "voice_design":
-        raise HTTPException(status_code=400, detail="Only mode='voice_design' is currently supported")
-    if not req.text or not req.text.strip():
-        raise HTTPException(status_code=400, detail="text must not be empty")
+def _normalize_audio(wav, eps=1e-12, clip=True):
+    """Normalize audio to float32 in [-1, 1] range."""
+    x = np.asarray(wav)
 
-    model_id, processor, model = _resolve_model(req.model_id)
+    if np.issubdtype(x.dtype, np.integer):
+        info = np.iinfo(x.dtype)
+        if info.min < 0:
+            y = x.astype(np.float32) / max(abs(info.min), info.max)
+        else:
+            mid = (info.max + 1) / 2.0
+            y = (x.astype(np.float32) - mid) / mid
+    elif np.issubdtype(x.dtype, np.floating):
+        y = x.astype(np.float32)
+        m = np.max(np.abs(y)) if y.size else 0.0
+        if m > 1.0 + 1e-6:
+            y = y / (m + eps)
+    else:
+        raise TypeError(f"Unsupported dtype: {x.dtype}")
 
-    logger.info("Generating TTS for %d chars with %s …", len(req.text), model_id)
-    start = time.time()
+    if clip:
+        y = np.clip(y, -1.0, 1.0)
+
+    if y.ndim > 1:
+        y = np.mean(y, axis=-1).astype(np.float32)
+
+    return y
+
+
+def _audio_to_tuple(audio):
+    """Convert Gradio audio input to (wav, sr) tuple."""
+    if audio is None:
+        return None
+
+    if isinstance(audio, tuple) and len(audio) == 2 and isinstance(audio[0], int):
+        sr, wav = audio
+        wav = _normalize_audio(wav)
+        return wav, int(sr)
+
+    if isinstance(audio, dict) and "sampling_rate" in audio and "data" in audio:
+        sr = int(audio["sampling_rate"])
+        wav = _normalize_audio(audio["data"])
+        return wav, sr
+
+    return None
+
+
+@spaces.GPU(duration=60)
+def generate_voice_design(text, language, voice_description, progress=gr.Progress(track_tqdm=True)):
+    """Generate speech using Voice Design model (1.7B only)."""
+    if not text or not text.strip():
+        return None, "Error: Text is required."
+    if not voice_description or not voice_description.strip():
+        return None, "Error: Voice description is required."
 
     try:
-        processor_kwargs: dict[str, Any] = {"text": req.text, "return_tensors": "pt"}
-        if req.voice:
-            processor_kwargs["voice"] = req.voice
+        wavs, sr = voice_design_model.generate_voice_design(
+            text=text.strip(),
+            language=language,
+            instruct=voice_description.strip(),
+            non_streaming_mode=True,
+            max_new_tokens=2048,
+        )
+        return (sr, wavs[0]), "Voice design generation completed successfully!"
+    except Exception as e:
+        return None, f"Error: {type(e).__name__}: {e}"
 
-        inputs = processor(**processor_kwargs)
-        if hasattr(inputs, "to"):
-            inputs = inputs.to(DEVICE)
 
-        with torch.no_grad():
-            if hasattr(model, "generate_speech"):
-                output = model.generate_speech(**inputs)
-            elif hasattr(model, "generate_audio"):
-                output = model.generate_audio(**inputs)
-            else:
-                output = model.generate(
-                    **inputs,
-                    do_sample=True,
-                    temperature=0.7,
-                    max_new_tokens=2048,
+@spaces.GPU(duration=60)
+def generate_voice_clone(ref_audio, ref_text, target_text, language, use_xvector_only, model_size, progress=gr.Progress(track_tqdm=True)):
+    """Generate speech using Base (Voice Clone) model."""
+    if not target_text or not target_text.strip():
+        return None, "Error: Target text is required."
+
+    audio_tuple = _audio_to_tuple(ref_audio)
+    if audio_tuple is None:
+        return None, "Error: Reference audio is required."
+
+    if not use_xvector_only and (not ref_text or not ref_text.strip()):
+        return None, "Error: Reference text is required when 'Use x-vector only' is not enabled."
+
+    try:
+        tts = BASE_MODELS[model_size]
+        wavs, sr = tts.generate_voice_clone(
+            text=target_text.strip(),
+            language=language,
+            ref_audio=audio_tuple,
+            ref_text=ref_text.strip() if ref_text else None,
+            x_vector_only_mode=use_xvector_only,
+            max_new_tokens=2048,
+        )
+        return (sr, wavs[0]), "Voice clone generation completed successfully!"
+    except Exception as e:
+        return None, f"Error: {type(e).__name__}: {e}"
+
+
+@spaces.GPU(duration=60)
+def generate_custom_voice(text, language, speaker, instruct, model_size, progress=gr.Progress(track_tqdm=True)):
+    """Generate speech using CustomVoice model."""
+    if not text or not text.strip():
+        return None, "Error: Text is required."
+    if not speaker:
+        return None, "Error: Speaker is required."
+
+    try:
+        tts = CUSTOM_VOICE_MODELS[model_size]
+        wavs, sr = tts.generate_custom_voice(
+            text=text.strip(),
+            language=language,
+            speaker=speaker.lower().replace(" ", "_"),
+            instruct=instruct.strip() if instruct else None,
+            non_streaming_mode=True,
+            max_new_tokens=2048,
+        )
+        return (sr, wavs[0]), "Generation completed successfully!"
+    except Exception as e:
+        return None, f"Error: {type(e).__name__}: {e}"
+
+
+# Build Gradio UI
+def build_ui():
+    theme = gr.themes.Soft(
+        font=[gr.themes.GoogleFont("Source Sans Pro"), "Arial", "sans-serif"],
+    )
+
+    css = """
+    .gradio-container {max-width: none !important;}
+    .tab-content {padding: 20px;}
+    """
+
+    with gr.Blocks(theme=theme, css=css, title="Qwen3-TTS Demo") as demo:
+        gr.Markdown(
+            """
+# Qwen3-TTS Demo
+A unified Text-to-Speech demo featuring three powerful modes:
+- **Voice Design**: Create custom voices using natural language descriptions
+- **Voice Clone (Base)**: Clone any voice from a reference audio
+- **TTS (CustomVoice)**: Generate speech with predefined speakers and optional style instructions
+Built with [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) by Alibaba Qwen Team.
+"""
+        )
+
+        with gr.Tabs():
+            # Tab 1: Voice Design (Default, 1.7B only)
+            with gr.Tab("Voice Design"):
+                gr.Markdown("### Create Custom Voice with Natural Language")
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        design_text = gr.Textbox(
+                            label="Text to Synthesize",
+                            lines=4,
+                            placeholder="Enter the text you want to convert to speech...",
+                            value="It's in the top drawer... wait, it's empty? No way, that's impossible! I'm sure I put it there!"
+                        )
+                        design_language = gr.Dropdown(
+                            label="Language",
+                            choices=LANGUAGES,
+                            value="Auto",
+                            interactive=True,
+                        )
+                        design_instruct = gr.Textbox(
+                            label="Voice Description",
+                            lines=3,
+                            placeholder="Describe the voice characteristics you want...",
+                            value="Speak in an incredulous tone, but with a hint of panic beginning to creep into your voice."
+                        )
+                        design_btn = gr.Button("Generate with Custom Voice", variant="primary")
+
+                    with gr.Column(scale=2):
+                        design_audio_out = gr.Audio(label="Generated Audio", type="numpy")
+                        design_status = gr.Textbox(label="Status", lines=2, interactive=False)
+
+                design_btn.click(
+                    generate_voice_design,
+                    inputs=[design_text, design_language, design_instruct],
+                    outputs=[design_audio_out, design_status],
                 )
 
-        audio = _to_audio_array(output, processor)
-        sample_rate = getattr(processor, "sampling_rate", 24000)
-        elapsed = time.time() - start
-        logger.info("Generated %.2f s of audio in %.2f s", len(audio) / sample_rate, elapsed)
-    except Exception as exc:
-        logger.exception("TTS generation failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+            # Tab 2: Voice Clone (Base)
+            with gr.Tab("Voice Clone (Base)"):
+                gr.Markdown("### Clone Voice from Reference Audio")
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        clone_ref_audio = gr.Audio(
+                            label="Reference Audio (Upload a voice sample to clone)",
+                            type="numpy",
+                        )
+                        clone_ref_text = gr.Textbox(
+                            label="Reference Text (Transcript of the reference audio)",
+                            lines=2,
+                            placeholder="Enter the exact text spoken in the reference audio...",
+                        )
+                        clone_xvector = gr.Checkbox(
+                            label="Use x-vector only (No reference text needed, but lower quality)",
+                            value=False,
+                        )
 
-    buf = io.BytesIO()
-    sf.write(buf, audio, samplerate=sample_rate, format="WAV")
-    buf.seek(0)
+                    with gr.Column(scale=2):
+                        clone_target_text = gr.Textbox(
+                            label="Target Text (Text to synthesize with cloned voice)",
+                            lines=4,
+                            placeholder="Enter the text you want the cloned voice to speak...",
+                        )
+                        with gr.Row():
+                            clone_language = gr.Dropdown(
+                                label="Language",
+                                choices=LANGUAGES,
+                                value="Auto",
+                                interactive=True,
+                            )
+                            clone_model_size = gr.Dropdown(
+                                label="Model Size",
+                                choices=MODEL_SIZES,
+                                value="1.7B",
+                                interactive=True,
+                            )
+                        clone_btn = gr.Button("Clone & Generate", variant="primary")
 
-    return Response(
-        content=buf.read(),
-        media_type="audio/wav",
-        headers={
-            "X-Generation-Time-Ms": str(int(elapsed * 1000)),
-            "X-TTS-Model": model_id,
-        },
-    )
+                with gr.Row():
+                    clone_audio_out = gr.Audio(label="Generated Audio", type="numpy")
+                    clone_status = gr.Textbox(label="Status", lines=2, interactive=False)
+
+                clone_btn.click(
+                    generate_voice_clone,
+                    inputs=[clone_ref_audio, clone_ref_text, clone_target_text, clone_language, clone_xvector, clone_model_size],
+                    outputs=[clone_audio_out, clone_status],
+                )
+
+            # Tab 3: TTS (CustomVoice)
+            with gr.Tab("TTS (CustomVoice)"):
+                gr.Markdown("### Text-to-Speech with Predefined Speakers")
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        tts_text = gr.Textbox(
+                            label="Text to Synthesize",
+                            lines=4,
+                            placeholder="Enter the text you want to convert to speech...",
+                            value="Hello! Welcome to Text-to-Speech system. This is a demo of our TTS capabilities."
+                        )
+                        with gr.Row():
+                            tts_language = gr.Dropdown(
+                                label="Language",
+                                choices=LANGUAGES,
+                                value="English",
+                                interactive=True,
+                            )
+                            tts_speaker = gr.Dropdown(
+                                label="Speaker",
+                                choices=SPEAKERS,
+                                value="Ryan",
+                                interactive=True,
+                            )
+                        with gr.Row():
+                            tts_instruct = gr.Textbox(
+                                label="Style Instruction (Optional)",
+                                lines=2,
+                                placeholder="e.g., Speak in a cheerful and energetic tone",
+                            )
+                            tts_model_size = gr.Dropdown(
+                                label="Model Size",
+                                choices=MODEL_SIZES,
+                                value="1.7B",
+                                interactive=True,
+                            )
+                        tts_btn = gr.Button("Generate Speech", variant="primary")
+
+                    with gr.Column(scale=2):
+                        tts_audio_out = gr.Audio(label="Generated Audio", type="numpy")
+                        tts_status = gr.Textbox(label="Status", lines=2, interactive=False)
+
+                tts_btn.click(
+                    generate_custom_voice,
+                    inputs=[tts_text, tts_language, tts_speaker, tts_instruct, tts_model_size],
+                    outputs=[tts_audio_out, tts_status],
+                )
+
+        gr.Markdown(
+            """
+---
+**Note**: This demo uses HuggingFace Spaces Zero GPU. Each generation has a time limit.
+For longer texts, please split them into smaller segments.
+"""
+        )
+
+    return demo
+
+
+if __name__ == "__main__":
+    demo = build_ui()
+    demo.launch()

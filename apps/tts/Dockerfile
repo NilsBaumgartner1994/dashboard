@@ -29,11 +29,11 @@ RUN pip install --no-cache-dir \
     "numpy==2.0.2" \
     scipy==1.14.1
 
-COPY app.py .
+COPY start.py .
 
 ENV TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-Base
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8880
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8880"]
+CMD ["uvicorn", "start:app", "--host", "0.0.0.0", "--port", "8880"]
