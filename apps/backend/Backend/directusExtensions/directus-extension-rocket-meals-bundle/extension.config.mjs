@@ -25,25 +25,9 @@ console.error = message => {
   originalConsoleError(message); // Log other errors normally
 };
 
-// Plugin to inject __dirname/__filename shims for bundled CommonJS code that
-// references these CJS globals (e.g. ffmpeg-static) in an ESM output bundle.
-const injectDirnameShim = {
-  name: 'inject-dirname-shim',
-  renderChunk(code) {
-    if (!code.includes('__dirname') && !code.includes('__filename')) return null;
-    const shim = [
-      `import { fileURLToPath as _shim_fileURLToPath } from 'url';`,
-      `import { dirname as _shim_dirname } from 'path';`,
-      `const __filename = _shim_fileURLToPath(import.meta.url);`,
-      `const __dirname = _shim_dirname(__filename);`,
-    ].join('\n') + '\n';
-    return { code: shim + code, map: null };
-  },
-};
-
 export default {
   plugins: [
-    injectDirnameShim,
+    // Your plugins here
   ],
   onwarn(warning, warn) {
     if (warning.code === 'THIS_IS_UNDEFINED' && warning.loc?.file && (warning.loc.file.includes('puppeteer-core') || warning.loc.file.includes('yargs'))) {

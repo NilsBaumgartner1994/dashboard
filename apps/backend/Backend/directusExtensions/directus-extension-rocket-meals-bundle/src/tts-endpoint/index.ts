@@ -1,21 +1,11 @@
 import { defineEndpoint } from '@directus/extensions-sdk';
 import type { Request, Response } from 'express';
-import ytdl from '@distube/ytdl-core';
-import ffmpeg from 'fluent-ffmpeg';
-import ffmpegPath from 'ffmpeg-static';
-
-// Configure ffmpeg binary path from ffmpeg-static if available
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
 
 // TTS endpoint – universal proxy to TTS model container.
 // All requests to /tts/* are forwarded directly to the TTS container.
 //
 // This allows the TTS container to define all its own routes without
 // needing to update this Directus extension for every new endpoint.
-// Special routes handled locally:
-//   POST /youtube-audio – download audio from a YouTube URL (with optional start/end trim)
 
 const TTS_URL = process.env.TTS_URL ?? 'http://localhost:8880';
 const TTS_TIMEOUT_MS = 600_000; // 10 minutes for long-running TTS operations
@@ -23,57 +13,6 @@ const TTS_TIMEOUT_MS = 600_000; // 10 minutes for long-running TTS operations
 export default defineEndpoint({
   id: 'tts',
   handler: (router) => {
-    // YouTube audio download route
-    router.post('/youtube-audio', async (req: Request, res: Response) => {
-      const { url, start, end } = req.body as { url?: string; start?: string | number; end?: string | number };
-      if (!url || typeof url !== 'string') {
-        res.status(400).json({ error: 'Missing required parameter: url' });
-        return;
-      }
-      if (!ytdl.validateURL(url)) {
-        res.status(400).json({ error: 'Ungültige YouTube-URL. Bitte gib eine gültige YouTube-URL ein.' });
-        return;
-      }
-      const startSec = start !== undefined ? parseFloat(String(start)) : NaN;
-      const endSec = end !== undefined ? parseFloat(String(end)) : NaN;
-
-      try {
-        const info = await ytdl.getInfo(url);
-        const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
-        const audioStream = ytdl.downloadFromInfo(info, { format: audioFormat });
-
-        // If time range requested, use ffmpeg to trim; otherwise stream directly
-        const hasTrim = !isNaN(startSec) || !isNaN(endSec);
-
-        if (hasTrim) {
-          res.setHeader('Content-Type', 'audio/wav');
-          res.setHeader('Content-Disposition', 'attachment; filename="youtube_audio.wav"');
-          let cmd = ffmpeg(audioStream).format('wav').audioCodec('pcm_s16le');
-          if (!isNaN(startSec)) cmd = cmd.setStartTime(startSec);
-          if (!isNaN(endSec) && !isNaN(startSec)) cmd = cmd.duration(endSec - startSec);
-          else if (!isNaN(endSec)) cmd = cmd.duration(endSec);
-          (cmd as any).pipe(res, { end: true });
-          cmd.on('error', (err: Error) => {
-            if (!res.headersSent) res.status(500).json({ error: `ffmpeg-Fehler: ${err.message}` });
-          });
-        } else {
-          res.setHeader('Content-Type', 'audio/webm');
-          res.setHeader('Content-Disposition', 'attachment; filename="youtube_audio.webm"');
-          audioStream.pipe(res);
-          audioStream.on('error', (err: Error) => {
-            if (!res.headersSent) res.status(500).json({ error: `Download-Fehler: ${err.message}` });
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!res.headersSent) {
-          res.status(500).json({
-            error: `YouTube-Audio konnte nicht heruntergeladen werden: ${message}`
-          });
-        }
-      }
-    });
-
     // Catch-all proxy: forwards all requests to the TTS container
     router.all('/*', async (req: Request, res: Response) => {
       try {
