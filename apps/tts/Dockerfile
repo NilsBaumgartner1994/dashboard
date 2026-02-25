@@ -25,6 +25,9 @@ RUN pip install --no-cache-dir \
 # Install all requirements from requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create data directory for HuggingFace models (will be mounted via volume)
+RUN mkdir -p /app/data/tts-models
+
 COPY qwen_tts/ ./qwen_tts/
 COPY start.py .
 

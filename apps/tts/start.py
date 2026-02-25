@@ -9,12 +9,26 @@ import numpy as np
 import torch
 import asyncio
 import threading
+import sys
+import traceback
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import snapshot_download, login
 from qwen_tts import Qwen3TTSModel
 import soundfile as sf
+
+# ============================================================================
+# CONFIGURE HUGGINGFACE CACHE LOCATION
+# ============================================================================
+# Set HuggingFace cache to /data/tts-models instead of ~/.cache
+project_root = Path(__file__).parent.parent.parent  # Goes up to /dashboard
+hf_cache_dir = project_root / "data" / "tts-models"
+hf_cache_dir.mkdir(parents=True, exist_ok=True)
+
+os.environ["HF_HOME"] = str(hf_cache_dir)
+print(f"HuggingFace cache directory: {hf_cache_dir}")
 
 # HF_TOKEN = os.environ.get('HF_TOKEN')
 # login(token=HF_TOKEN)
@@ -27,6 +41,17 @@ SPEAKERS = [
     "Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"
 ]
 LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Portuguese", "Russian"]
+
+# Optional: Configure which models to load via environment variables
+# Default: load all models
+LOAD_VOICE_DESIGN = os.environ.get("LOAD_VOICE_DESIGN", "true").lower() == "true"
+LOAD_BASE_MODELS = os.environ.get("LOAD_BASE_MODELS", "true").lower() == "true"
+LOAD_CUSTOM_VOICE_MODELS = os.environ.get("LOAD_CUSTOM_VOICE_MODELS", "true").lower() == "true"
+
+print(f"Model loading configuration:")
+print(f"  LOAD_VOICE_DESIGN: {LOAD_VOICE_DESIGN}")
+print(f"  LOAD_BASE_MODELS: {LOAD_BASE_MODELS}")
+print(f"  LOAD_CUSTOM_VOICE_MODELS: {LOAD_CUSTOM_VOICE_MODELS}")
 
 # Global model state
 class ModelState:
@@ -84,58 +109,94 @@ def load_models_background():
         print("Loading all models in background...")
 
         # Voice Design model (1.7B only)
-        print("Loading VoiceDesign 1.7B model...")
-        model_state.voice_design_model = Qwen3TTSModel.from_pretrained(
-            get_model_path("VoiceDesign", "1.7B"),
-            device_map="cpu",
-            dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        print("✓ VoiceDesign 1.7B loaded")
+        if LOAD_VOICE_DESIGN:
+            print("Loading VoiceDesign 1.7B model...")
+            try:
+                model_state.voice_design_model = Qwen3TTSModel.from_pretrained(
+                    get_model_path("VoiceDesign", "1.7B"),
+                    device_map="cpu",
+                    dtype=torch.float32,
+                    attn_implementation="eager",
+                )
+                print("✓ VoiceDesign 1.7B loaded")
+            except Exception as e:
+                print(f"✗ Error loading VoiceDesign 1.7B: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                raise
+        else:
+            print("⊘ Skipping VoiceDesign 1.7B (disabled)")
 
         # Base (Voice Clone) models - both sizes
-        print("Loading Base 0.6B model...")
-        model_state.base_model_0_6b = Qwen3TTSModel.from_pretrained(
-            get_model_path("Base", "0.6B"),
-            device_map="cpu",
-            dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        print("✓ Base 0.6B loaded")
+        if LOAD_BASE_MODELS:
+            print("Loading Base 0.6B model...")
+            try:
+                model_state.base_model_0_6b = Qwen3TTSModel.from_pretrained(
+                    get_model_path("Base", "0.6B"),
+                    device_map="cpu",
+                    dtype=torch.float32,
+                    attn_implementation="eager",
+                )
+                print("✓ Base 0.6B loaded")
+            except Exception as e:
+                print(f"✗ Error loading Base 0.6B: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                raise
 
-        print("Loading Base 1.7B model...")
-        model_state.base_model_1_7b = Qwen3TTSModel.from_pretrained(
-            get_model_path("Base", "1.7B"),
-            device_map="cpu",
-            dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        print("✓ Base 1.7B loaded")
+            print("Loading Base 1.7B model...")
+            try:
+                model_state.base_model_1_7b = Qwen3TTSModel.from_pretrained(
+                    get_model_path("Base", "1.7B"),
+                    device_map="cpu",
+                    dtype=torch.float32,
+                    attn_implementation="eager",
+                )
+                print("✓ Base 1.7B loaded")
+            except Exception as e:
+                print(f"✗ Error loading Base 1.7B: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                raise
+        else:
+            print("⊘ Skipping Base models (disabled)")
 
         # CustomVoice models - both sizes
-        print("Loading CustomVoice 0.6B model...")
-        model_state.custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
-            get_model_path("CustomVoice", "0.6B"),
-            device_map="cpu",
-            dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        print("✓ CustomVoice 0.6B loaded")
+        if LOAD_CUSTOM_VOICE_MODELS:
+            print("Loading CustomVoice 0.6B model...")
+            try:
+                model_state.custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
+                    get_model_path("CustomVoice", "0.6B"),
+                    device_map="cpu",
+                    dtype=torch.float32,
+                    attn_implementation="eager",
+                )
+                print("✓ CustomVoice 0.6B loaded")
+            except Exception as e:
+                print(f"✗ Error loading CustomVoice 0.6B: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                raise
 
-        print("Loading CustomVoice 1.7B model...")
-        model_state.custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
-            get_model_path("CustomVoice", "1.7B"),
-            device_map="cpu",
-            dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        print("✓ CustomVoice 1.7B loaded")
+            print("Loading CustomVoice 1.7B model...")
+            try:
+                model_state.custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
+                    get_model_path("CustomVoice", "1.7B"),
+                    device_map="cpu",
+                    dtype=torch.float32,
+                    attn_implementation="eager",
+                )
+                print("✓ CustomVoice 1.7B loaded")
+            except Exception as e:
+                print(f"✗ Error loading CustomVoice 1.7B: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                raise
+        else:
+            print("⊘ Skipping CustomVoice models (disabled)")
 
-        print("All models loaded successfully!")
+        print("All configured models loaded successfully!")
         model_state.models_loaded = True
         model_state.loading = False
     except Exception as e:
-        print(f"Error loading models: {e}")
+        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"FATAL ERROR: Failed to load all models: {e}", file=sys.stderr)
+        print(f"{'='*60}\n", file=sys.stderr)
         model_state.error = str(e)
         model_state.loading = False
 

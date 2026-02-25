@@ -10,7 +10,7 @@ services:
     ports:
       - "8880:8880"
     volumes:
-      - ./data/tts-models:/root/.cache/huggingface
+      - ./data:/data
     environment:
       TTS_MODEL_ID: "${TTS_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
       TTS_MODEL_IDS: "${TTS_MODEL_IDS:-Qwen/Qwen3-TTS-12Hz-0.6B-Base,Qwen/Qwen3-TTS-1.7B-Base}"
@@ -18,7 +18,11 @@ services:
       # Optional: set HUGGING_FACE_HUB_TOKEN in .env for private/gated models.
       # Not required for the default public model.
       HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
-    mem_limit: ${TTS_MEMORY:-4g}
+      # Optional: Control which models to load (saves memory if disabled)
+      # LOAD_VOICE_DESIGN: "${LOAD_VOICE_DESIGN:-true}"
+      # LOAD_BASE_MODELS: "${LOAD_BASE_MODELS:-true}"
+      # LOAD_CUSTOM_VOICE_MODELS: "${LOAD_CUSTOM_VOICE_MODELS:-true}"
+    mem_limit: ${TTS_MEMORY:-8g}
 
   my-dashboard-ai:
     image: ollama/ollama:latest
