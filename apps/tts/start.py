@@ -13,7 +13,7 @@ import sys
 import traceback
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import snapshot_download, login
 from qwen_tts import Qwen3TTSModel
@@ -145,6 +145,14 @@ def get_reference_audio_path(voice_name: str) -> Path:
     """Get the path for the reference audio file."""
     return get_voice_path(voice_name) / "reference_audio.wav"
 
+def get_voice_image_path(voice_name: str) -> Path | None:
+    """Get the path for the voice image file if it exists."""
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        p = get_voice_path(voice_name) / f"image.{ext}"
+        if p.exists():
+            return p
+    return None
+
 def get_training_data_path(voice_name: str) -> Path:
     """Get the path for the training data/embeddings file."""
     return get_voice_path(voice_name) / "training_data.pt"
@@ -155,10 +163,12 @@ def list_voices() -> list:
     if voices_dir.exists():
         for voice_dir in voices_dir.iterdir():
             if voice_dir.is_dir():
+                image_path = get_voice_image_path(voice_dir.name)
                 voices.append({
                     "name": voice_dir.name,
                     "has_reference_audio": get_reference_audio_path(voice_dir.name).exists(),
                     "has_training_data": get_training_data_path(voice_dir.name).exists(),
+                    "has_image": image_path is not None,
                 })
     return sorted(voices, key=lambda v: v["name"])
 
@@ -186,6 +196,7 @@ def create_voice(voice_name: str, ref_audio_bytes: bytes, ref_audio_sr: int) -> 
         "name": voice_name,
         "has_reference_audio": True,
         "has_training_data": False,
+        "has_image": False,
     }
 
 def delete_voice(voice_name: str) -> bool:
@@ -1032,6 +1043,7 @@ async def list_all_voices():
 async def create_voice_endpoint(
     voice_name: str = Form(...),
     reference_audio: UploadFile = File(...),
+    voice_image: UploadFile = File(None),
 ):
     """
     Create a new voice profile with reference audio for voice cloning.
@@ -1039,6 +1051,7 @@ async def create_voice_endpoint(
     Parameters:
     - voice_name: Name of the new voice (must be unique)
     - reference_audio: Audio file to use as reference for voice cloning
+    - voice_image: (optional) Image file for the voice profile
     """
     try:
         # Read reference audio
@@ -1049,6 +1062,22 @@ async def create_voice_endpoint(
 
         # Create voice profile
         voice_info = create_voice(voice_name, audio_content, sr)
+
+        # Save optional image
+        if voice_image is not None:
+            ct = voice_image.content_type or ""
+            ext = "jpg"
+            if "png" in ct or (voice_image.filename or "").endswith(".png"):
+                ext = "png"
+            elif "webp" in ct or (voice_image.filename or "").endswith(".webp"):
+                ext = "webp"
+            elif "gif" in ct or (voice_image.filename or "").endswith(".gif"):
+                ext = "gif"
+            dest = get_voice_path(voice_name) / f"image.{ext}"
+            img_content = await voice_image.read()
+            with open(dest, "wb") as f:
+                f.write(img_content)
+            voice_info["has_image"] = True
 
         print(f"[INFO] Voice '{voice_name}' created successfully", file=sys.stderr)
         return {
@@ -1084,6 +1113,44 @@ async def delete_voice_endpoint(voice_name: str = Form(...)):
         print(f"[ERROR] Failed to delete voice: {type(e).__name__}: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
+
+@app.get("/voices/{voice_name}/image")
+async def get_voice_image(voice_name: str):
+    """Serve the image for a voice profile."""
+    if not voice_exists(voice_name):
+        raise HTTPException(status_code=404, detail=f"Voice '{voice_name}' not found")
+    image_path = get_voice_image_path(voice_name)
+    if image_path is None:
+        raise HTTPException(status_code=404, detail="No image for this voice")
+    return FileResponse(str(image_path))
+
+
+@app.post("/voices/{voice_name}/image")
+async def upload_voice_image(voice_name: str, image: UploadFile = File(...)):
+    """Upload or replace the image for a voice profile."""
+    if not voice_exists(voice_name):
+        raise HTTPException(status_code=404, detail=f"Voice '{voice_name}' not found")
+    # Remove any existing image
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        old = get_voice_path(voice_name) / f"image.{ext}"
+        if old.exists():
+            old.unlink()
+    # Determine extension from content type or filename
+    ct = image.content_type or ""
+    ext = "jpg"
+    if "png" in ct or (image.filename or "").endswith(".png"):
+        ext = "png"
+    elif "webp" in ct or (image.filename or "").endswith(".webp"):
+        ext = "webp"
+    elif "gif" in ct or (image.filename or "").endswith(".gif"):
+        ext = "gif"
+    dest = get_voice_path(voice_name) / f"image.{ext}"
+    content = await image.read()
+    with open(dest, "wb") as f:
+        f.write(content)
+    print(f"[INFO] Uploaded image for voice '{voice_name}' at {dest}", file=sys.stderr)
+    return {"success": True, "has_image": True}
 
 
 @app.post("/voices/clone")
