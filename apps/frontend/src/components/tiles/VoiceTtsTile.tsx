@@ -41,6 +41,8 @@ import MicIcon from '@mui/icons-material/Mic'
 import DownloadIcon from '@mui/icons-material/Download'
 import SearchIcon from '@mui/icons-material/Search'
 import PersonIcon from '@mui/icons-material/Person'
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
+import DeleteIcon from '@mui/icons-material/Delete'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -79,13 +81,54 @@ interface VoiceCardModalProps {
   items: VoiceCardItem[]
   selected: string | null
   onSelect: (name: string) => void
+  ttsUrl?: string
+  manageImages?: boolean
+  onImagesChanged?: () => void
 }
 
-function VoiceCardModal({ open, onClose, title, items, selected, onSelect }: VoiceCardModalProps) {
+function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUrl, manageImages, onImagesChanged }: VoiceCardModalProps) {
   const [search, setSearch] = useState('')
+  const [imageUploading, setImageUploading] = useState<string | null>(null)
+  const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const filtered = items.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()))
+
+  const handleImageUpload = async (name: string, file: File) => {
+    if (!ttsUrl) return
+    setImageUploading(name)
+    try {
+      const formData = new FormData()
+      formData.append('voice_image', file)
+      const res = await fetch(`${ttsUrl}/voices/${encodeURIComponent(name)}/image`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      onImagesChanged?.()
+    } catch (err) {
+      console.error('Image upload failed:', err)
+    } finally {
+      setImageUploading(null)
+    }
+  }
+
+  const handleImageDelete = async (name: string) => {
+    if (!ttsUrl) return
+    setImageUploading(name)
+    try {
+      const res = await fetch(`${ttsUrl}/voices/${encodeURIComponent(name)}/image`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      onImagesChanged?.()
+    } catch (err) {
+      console.error('Image delete failed:', err)
+    } finally {
+      setImageUploading(null)
+    }
+  }
+
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
         <Box sx={{ flex: 1 }}>{title}</Box>
         <IconButton size="small" onClick={onClose}><CloseIcon fontSize="inherit" /></IconButton>
@@ -123,19 +166,26 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect }: Voi
               }}
             >
               <CardActionArea onClick={() => { onSelect(item.name); onClose() }}>
-                {item.imageUrl ? (
-                  <CardMedia
-                    component="img"
-                    height="100"
-                    image={item.imageUrl}
-                    alt={item.name}
-                    sx={{ objectFit: 'cover' }}
-                  />
-                ) : (
-                  <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
-                    <PersonIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
-                  </Box>
-                )}
+                <Box sx={{ position: 'relative' }}>
+                  {item.imageUrl ? (
+                    <CardMedia
+                      component="img"
+                      height="100"
+                      image={item.imageUrl}
+                      alt={item.name}
+                      sx={{ objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                      <PersonIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+                    </Box>
+                  )}
+                  {imageUploading === item.name && (
+                    <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(0,0,0,0.4)' }}>
+                      <CircularProgress size={24} sx={{ color: 'white' }} />
+                    </Box>
+                  )}
+                </Box>
                 <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                   <Typography variant="caption" fontWeight="bold" sx={{ display: 'block', textAlign: 'center', wordBreak: 'break-word' }}>
                     {item.name}
@@ -147,6 +197,46 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect }: Voi
                   )}
                 </CardContent>
               </CardActionArea>
+              {manageImages && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, px: 0.5, pb: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                  <input
+                    ref={(el) => { imageInputRefs.current[item.name] = el }}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) handleImageUpload(item.name, file)
+                      e.target.value = ''
+                    }}
+                  />
+                  <Tooltip title="Bild hochladen">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => imageInputRefs.current[item.name]?.click()}
+                        disabled={imageUploading === item.name}
+                      >
+                        <AddPhotoAlternateIcon fontSize="inherit" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  {item.imageUrl && (
+                    <Tooltip title="Bild löschen">
+                      <span>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleImageDelete(item.name)}
+                          disabled={imageUploading === item.name}
+                        >
+                          <DeleteIcon fontSize="inherit" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Box>
+              )}
             </Card>
           ))}
         </Box>
@@ -282,6 +372,10 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [transcribing, setTranscribing] = useState(false)
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
   const [newVoiceImageFile, setNewVoiceImageFile] = useState<File | null>(null)
+  const [newVoiceImagePreview, setNewVoiceImagePreview] = useState<string | null>(null)
+  const newVoiceImageInputRef = useRef<HTMLInputElement | null>(null)
+  const newVoiceImagePreviewRef = useRef<string | null>(null)
+  const [voicesRefreshKey, setVoicesRefreshKey] = useState(0)
 
   // Modal state
   const [voiceSelectModalOpen, setVoiceSelectModalOpen] = useState(false)
@@ -326,7 +420,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       }
     }
     loadVoices()
-  }, [ttsUrl, selectedVoice])
+  }, [ttsUrl, selectedVoice, voicesRefreshKey])
 
   const getAvailableModelSizes = (): string[] => {
     if (ttsMode === 'voice_design') return ['1.7B']
@@ -338,6 +432,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     return () => {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current)
       if (recordedBlobUrlRef.current) URL.revokeObjectURL(recordedBlobUrlRef.current)
+      if (newVoiceImagePreviewRef.current) URL.revokeObjectURL(newVoiceImagePreviewRef.current)
       if (recordingStreamRef.current) recordingStreamRef.current.getTracks().forEach((t) => t.stop())
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
     }
@@ -777,13 +872,9 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     Create New Voice Profile
                   </Typography>
                   <TextField fullWidth size="small" label="Voice Name" placeholder="e.g., Sarah" value={newVoiceName} onChange={(e) => setNewVoiceName(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
-                  <Box sx={{ mb: 1 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Profilbild (optional)</Typography>
-                    <input type="file" accept="image/*" onChange={(e) => setNewVoiceImageFile(e.target.files?.[0] || null)} disabled={loading} style={{ fontSize: '12px' }} />
-                    {newVoiceImageFile && (
-                      <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {newVoiceImageFile.name}</Typography>
-                    )}
-                  </Box>
+                  <Divider sx={{ my: 1 }}>
+                    <Typography variant="caption" color="text.secondary">Voiceline</Typography>
+                  </Divider>
                   <Box sx={{ mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                       <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
@@ -841,11 +932,55 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || transcribing || !!refText} />}
                     label="Use x-vector only (no reference text needed, lower quality)"
                   />
+                  <Divider sx={{ my: 1 }}>
+                    <Typography variant="caption" color="text.secondary">Profilbild (optional)</Typography>
+                  </Divider>
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1 }}>
+                    <Card variant="outlined" sx={{ width: 90, flexShrink: 0, cursor: 'pointer' }} onClick={() => newVoiceImageInputRef.current?.click()}>
+                      {newVoiceImagePreview ? (
+                        <CardMedia component="img" height="90" image={newVoiceImagePreview} alt="Profilbild Vorschau" sx={{ objectFit: 'cover' }} />
+                      ) : (
+                        <Box sx={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                          <PersonIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
+                        </Box>
+                      )}
+                      <CardContent sx={{ p: 0.5, '&:last-child': { pb: 0.5 } }}>
+                        <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', fontSize: '0.6rem', color: 'text.secondary' }}>
+                          {newVoiceImageFile ? newVoiceImageFile.name.substring(0, 12) + (newVoiceImageFile.name.length > 12 ? '…' : '') : 'Kein Bild'}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <input
+                        ref={newVoiceImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        disabled={loading}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null
+                          setNewVoiceImageFile(file)
+                          if (newVoiceImagePreviewRef.current) URL.revokeObjectURL(newVoiceImagePreviewRef.current)
+                          const url = file ? URL.createObjectURL(file) : null
+                          newVoiceImagePreviewRef.current = url
+                          setNewVoiceImagePreview(url)
+                        }}
+                      />
+                      <Button size="small" variant="outlined" onClick={() => newVoiceImageInputRef.current?.click()} disabled={loading} startIcon={<AddPhotoAlternateIcon fontSize="small" />}>
+                        Hochladen
+                      </Button>
+                      {newVoiceImageFile && (
+                        <Button size="small" color="error" variant="outlined" onClick={() => { setNewVoiceImageFile(null); if (newVoiceImagePreviewRef.current) { URL.revokeObjectURL(newVoiceImagePreviewRef.current); newVoiceImagePreviewRef.current = null } setNewVoiceImagePreview(null) }} disabled={loading} startIcon={<DeleteIcon fontSize="small" />}>
+                          Entfernen
+                        </Button>
+                      )}
+                    </Box>
+                  </Box>
                   <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                     <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || transcribing || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
                       Create & Continue
                     </Button>
-                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); setNewVoiceImageFile(null) }} disabled={loading || transcribing}>
+                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); setNewVoiceImageFile(null); if (newVoiceImagePreviewRef.current) { URL.revokeObjectURL(newVoiceImagePreviewRef.current); newVoiceImagePreviewRef.current = null } setNewVoiceImagePreview(null) }} disabled={loading || transcribing}>
                       Cancel
                     </Button>
                   </Box>
@@ -1027,6 +1162,9 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
         }))}
         selected={selectedVoice}
         onSelect={setSelectedVoice}
+        ttsUrl={ttsUrl}
+        manageImages
+        onImagesChanged={() => setVoicesRefreshKey((k) => k + 1)}
       />
 
       {/* Custom Voice speaker selection modal */}
