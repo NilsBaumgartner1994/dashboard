@@ -12,7 +12,7 @@ import threading
 import sys
 import traceback
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import snapshot_download, login
@@ -374,6 +374,135 @@ async def voice_design_base64_endpoint(
             "sample_rate": sr,
             "message": "Voice design generation completed successfully!"
         })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
+
+# ============================================================================
+# UNIFIED GENERATE ENDPOINT (for Directus integration)
+# ============================================================================
+@app.post("/generate")
+@app.post("/tts/generate")
+async def generate_endpoint(request_body: dict = Body(...)):
+    """
+    Unified TTS generation endpoint for Directus integration.
+
+    Request body can contain:
+    {
+        "text": "Text to synthesize (required)",
+        "voice": "Speaker name (optional, default: Ryan)",
+        "model_id": "Model ID (optional)",
+        "mode": "voice_design|voice_clone|custom_voice (optional, default: custom_voice)",
+        "language": "Language (optional, default: English)",
+        "reference_audio_base64": "Base64 audio for voice clone (optional)",
+        "reference_text": "Text for voice clone reference (optional)"
+    }
+
+    Returns: audio/wav binary
+    """
+    check_models_loaded()
+
+    text = request_body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text field is required and must not be empty")
+
+    mode = request_body.get("mode", "custom_voice").lower()
+    voice = request_body.get("voice", "Ryan")
+    language = request_body.get("language", "English")
+    model_size = request_body.get("model_id", "1.7B").split("-")[-1]  # Extract size from model ID
+
+    # Validate model size
+    if model_size not in MODEL_SIZES:
+        model_size = "1.7B"
+
+    try:
+        wavs = None
+        sr = None
+
+        if mode == "voice_clone" and model_state.base_model_1_7b:
+            # Voice Clone mode
+            ref_audio_b64 = request_body.get("reference_audio_base64")
+            ref_text = request_body.get("reference_text", "")
+
+            if not ref_audio_b64:
+                raise HTTPException(status_code=400, detail="voice_clone mode requires reference_audio_base64")
+
+            # Decode base64 audio
+            try:
+                audio_bytes = base64.b64decode(ref_audio_b64)
+                audio_buffer = io.BytesIO(audio_bytes)
+                wav, sr = sf.read(audio_buffer)
+                wav = _normalize_audio(wav)
+                audio_tuple = (wav, int(sr))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to decode reference audio: {e}")
+
+            tts = model_state.BASE_MODELS[model_size]
+            wavs, sr = tts.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=audio_tuple,
+                ref_text=ref_text.strip() if ref_text else None,
+                x_vector_only_mode=not ref_text,
+                max_new_tokens=2048,
+            )
+
+        elif mode == "voice_design" and model_state.voice_design_model:
+            # Voice Design mode
+            voice_description = request_body.get("voice", "A natural, clear voice")
+            wavs, sr = model_state.voice_design_model.generate_voice_design(
+                text=text,
+                language=language,
+                instruct=voice_description,
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
+
+        else:
+            # Custom Voice mode (default) or fallback
+            if model_state.custom_voice_model_1_7b:
+                # Use CustomVoice if available
+                tts = model_state.CUSTOM_VOICE_MODELS[model_size]
+
+                # Validate speaker
+                if voice not in SPEAKERS:
+                    voice = "Ryan"  # Default speaker
+
+                wavs, sr = tts.generate_custom_voice(
+                    text=text,
+                    language=language,
+                    speaker=voice.lower().replace(" ", "_"),
+                    instruct=request_body.get("instruction", ""),
+                    non_streaming_mode=True,
+                    max_new_tokens=2048,
+                )
+            elif model_state.base_model_1_7b:
+                # Fallback to Base model for simple TTS if CustomVoice not available
+                tts = model_state.base_model_1_7b
+
+                wavs, sr = tts.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    ref_audio=None,  # No reference audio for simple generation
+                    ref_text=None,
+                    x_vector_only_mode=True,  # Use x-vector only mode for simple generation
+                    max_new_tokens=2048,
+                )
+            else:
+                raise HTTPException(status_code=503, detail="No TTS models available")
+
+        if wavs is None or sr is None:
+            raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+        wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+
+        return StreamingResponse(
+            iter([wav_bytes]),
+            media_type="audio/wav",
+            headers={"Content-Disposition": "attachment; filename=generated.wav"}
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
 
