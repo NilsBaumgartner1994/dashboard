@@ -7,6 +7,8 @@ import io
 import base64
 import numpy as np
 import torch
+import asyncio
+import threading
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +27,34 @@ SPEAKERS = [
     "Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"
 ]
 LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Portuguese", "Russian"]
+
+# Global model state
+class ModelState:
+    def __init__(self):
+        self.voice_design_model = None
+        self.base_model_0_6b = None
+        self.base_model_1_7b = None
+        self.custom_voice_model_0_6b = None
+        self.custom_voice_model_1_7b = None
+        self.models_loaded = False
+        self.loading = False
+        self.error = None
+
+    @property
+    def BASE_MODELS(self):
+        return {
+            "0.6B": self.base_model_0_6b,
+            "1.7B": self.base_model_1_7b,
+        }
+
+    @property
+    def CUSTOM_VOICE_MODELS(self):
+        return {
+            "0.6B": self.custom_voice_model_0_6b,
+            "1.7B": self.custom_voice_model_1_7b,
+        }
+
+model_state = ModelState()
 
 # FastAPI app
 app = FastAPI(title="Qwen3-TTS API", version="1.0.0")
@@ -45,70 +75,75 @@ def get_model_path(model_type: str, model_size: str) -> str:
 
 
 # ============================================================================
-# GLOBAL MODEL LOADING - Load all models at startup
+# BACKGROUND MODEL LOADING
 # ============================================================================
-print("Loading all models to CUDA...")
+def load_models_background():
+    """Load all models in background thread."""
+    try:
+        model_state.loading = True
+        print("Loading all models in background...")
 
-# Voice Design model (1.7B only)
-print("Loading VoiceDesign 1.7B model...")
-voice_design_model = Qwen3TTSModel.from_pretrained(
-    get_model_path("VoiceDesign", "1.7B"),
-    device_map="cpu",
-    dtype=torch.float32,
-    # token=HF_TOKEN,
-    attn_implementation="eager",
-)
+        # Voice Design model (1.7B only)
+        print("Loading VoiceDesign 1.7B model...")
+        model_state.voice_design_model = Qwen3TTSModel.from_pretrained(
+            get_model_path("VoiceDesign", "1.7B"),
+            device_map="cpu",
+            dtype=torch.float32,
+            attn_implementation="eager",
+        )
+        print("✓ VoiceDesign 1.7B loaded")
 
-# Base (Voice Clone) models - both sizes
-print("Loading Base 0.6B model...")
-base_model_0_6b = Qwen3TTSModel.from_pretrained(
-    get_model_path("Base", "0.6B"),
-    device_map="cpu",
-    dtype=torch.float32,
-    # token=HF_TOKEN,
-    attn_implementation="eager",
-)
+        # Base (Voice Clone) models - both sizes
+        print("Loading Base 0.6B model...")
+        model_state.base_model_0_6b = Qwen3TTSModel.from_pretrained(
+            get_model_path("Base", "0.6B"),
+            device_map="cpu",
+            dtype=torch.float32,
+            attn_implementation="eager",
+        )
+        print("✓ Base 0.6B loaded")
 
-print("Loading Base 1.7B model...")
-base_model_1_7b = Qwen3TTSModel.from_pretrained(
-    get_model_path("Base", "1.7B"),
-    device_map="cpu",
-    dtype=torch.float32,
-    # token=HF_TOKEN,
-    attn_implementation="eager",
-)
+        print("Loading Base 1.7B model...")
+        model_state.base_model_1_7b = Qwen3TTSModel.from_pretrained(
+            get_model_path("Base", "1.7B"),
+            device_map="cpu",
+            dtype=torch.float32,
+            attn_implementation="eager",
+        )
+        print("✓ Base 1.7B loaded")
 
-# CustomVoice models - both sizes
-print("Loading CustomVoice 0.6B model...")
-custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
-    get_model_path("CustomVoice", "0.6B"),
-    device_map="cpu",
-    dtype=torch.float32,
-    # token=HF_TOKEN,
-    attn_implementation="eager",
-)
+        # CustomVoice models - both sizes
+        print("Loading CustomVoice 0.6B model...")
+        model_state.custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
+            get_model_path("CustomVoice", "0.6B"),
+            device_map="cpu",
+            dtype=torch.float32,
+            attn_implementation="eager",
+        )
+        print("✓ CustomVoice 0.6B loaded")
 
-print("Loading CustomVoice 1.7B model...")
-custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
-    get_model_path("CustomVoice", "1.7B"),
-    device_map="cpu",
-    dtype=torch.float32,
-    # token=HF_TOKEN,
-    attn_implementation="eager",
-)
+        print("Loading CustomVoice 1.7B model...")
+        model_state.custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
+            get_model_path("CustomVoice", "1.7B"),
+            device_map="cpu",
+            dtype=torch.float32,
+            attn_implementation="eager",
+        )
+        print("✓ CustomVoice 1.7B loaded")
 
-print("All models loaded successfully!")
+        print("All models loaded successfully!")
+        model_state.models_loaded = True
+        model_state.loading = False
+    except Exception as e:
+        print(f"Error loading models: {e}")
+        model_state.error = str(e)
+        model_state.loading = False
 
-# Model lookup dictionaries for easy access
-BASE_MODELS = {
-    "0.6B": base_model_0_6b,
-    "1.7B": base_model_1_7b,
-}
 
-CUSTOM_VOICE_MODELS = {
-    "0.6B": custom_voice_model_0_6b,
-    "1.7B": custom_voice_model_1_7b,
-}
+# Start background loading thread
+print("Starting model loading in background thread...")
+model_loading_thread = threading.Thread(target=load_models_background, daemon=True)
+model_loading_thread.start()
 
 # ============================================================================
 
@@ -155,7 +190,27 @@ def _audio_to_wav_bytes(wav, sr):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "ok", "message": "Qwen3-TTS API is running"}
+    if model_state.error:
+        return {
+            "status": "error",
+            "message": f"Error loading models: {model_state.error}",
+            "models_loaded": False,
+            "loading": model_state.loading
+        }
+    return {
+        "status": "ok",
+        "message": "Qwen3-TTS API is running",
+        "models_loaded": model_state.models_loaded,
+        "loading": model_state.loading
+    }
+
+
+def check_models_loaded():
+    """Check if models are loaded, raise HTTPException if not."""
+    if model_state.error:
+        raise HTTPException(status_code=503, detail=f"Models failed to load: {model_state.error}")
+    if not model_state.models_loaded:
+        raise HTTPException(status_code=503, detail="Models are still loading. Please try again in a moment.")
 
 
 @app.get("/models")
@@ -165,6 +220,8 @@ async def get_available_models():
         "model_sizes": MODEL_SIZES,
         "speakers": SPEAKERS,
         "languages": LANGUAGES,
+        "models_loaded": model_state.models_loaded,
+        "loading": model_state.loading,
         "endpoints": {
             "voice_design": "/voice-design",
             "voice_clone": "/voice-clone",
@@ -190,13 +247,15 @@ async def voice_design_endpoint(
     - language: Language (default: Auto)
     - voice_description: Description of the desired voice characteristics
     """
+    check_models_loaded()
+
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text is required.")
     if not voice_description or not voice_description.strip():
         raise HTTPException(status_code=400, detail="Voice description is required.")
 
     try:
-        wavs, sr = voice_design_model.generate_voice_design(
+        wavs, sr = model_state.voice_design_model.generate_voice_design(
             text=text.strip(),
             language=language,
             instruct=voice_description.strip(),
@@ -229,13 +288,15 @@ async def voice_design_base64_endpoint(
     - language: Language (default: Auto)
     - voice_description: Description of the desired voice characteristics
     """
+    check_models_loaded()
+
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text is required.")
     if not voice_description or not voice_description.strip():
         raise HTTPException(status_code=400, detail="Voice description is required.")
 
     try:
-        wavs, sr = voice_design_model.generate_voice_design(
+        wavs, sr = model_state.voice_design_model.generate_voice_design(
             text=text.strip(),
             language=language,
             instruct=voice_description.strip(),
@@ -279,6 +340,8 @@ async def voice_clone_endpoint(
     - use_xvector_only: Use x-vector only mode (lower quality, no ref_text needed)
     - model_size: Model size ("0.6B" or "1.7B", default: "1.7B")
     """
+    check_models_loaded()
+
     if not target_text or not target_text.strip():
         raise HTTPException(status_code=400, detail="Target text is required.")
 
@@ -296,7 +359,7 @@ async def voice_clone_endpoint(
         wav = _normalize_audio(wav)
         audio_tuple = (wav, int(sr))
 
-        tts = BASE_MODELS[model_size]
+        tts = model_state.BASE_MODELS[model_size]
         wavs, sr = tts.generate_voice_clone(
             text=target_text.strip(),
             language=language,
@@ -329,6 +392,8 @@ async def voice_clone_base64_endpoint(
     """
     Generate speech using Voice Clone (Base) model and return as base64.
     """
+    check_models_loaded()
+
     if not target_text or not target_text.strip():
         raise HTTPException(status_code=400, detail="Target text is required.")
 
@@ -346,7 +411,7 @@ async def voice_clone_base64_endpoint(
         wav = _normalize_audio(wav)
         audio_tuple = (wav, int(sr))
 
-        tts = BASE_MODELS[model_size]
+        tts = model_state.BASE_MODELS[model_size]
         wavs, sr = tts.generate_voice_clone(
             text=target_text.strip(),
             language=language,
@@ -390,6 +455,8 @@ async def custom_voice_endpoint(
     - instruct: Style instruction (optional)
     - model_size: Model size ("0.6B" or "1.7B", default: "1.7B")
     """
+    check_models_loaded()
+
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text is required.")
     if not speaker:
@@ -402,7 +469,7 @@ async def custom_voice_endpoint(
         raise HTTPException(status_code=400, detail=f"Model size must be one of {MODEL_SIZES}")
 
     try:
-        tts = CUSTOM_VOICE_MODELS[model_size]
+        tts = model_state.CUSTOM_VOICE_MODELS[model_size]
         wavs, sr = tts.generate_custom_voice(
             text=text.strip(),
             language=language,
@@ -434,6 +501,8 @@ async def custom_voice_base64_endpoint(
     """
     Generate speech using CustomVoice model and return as base64.
     """
+    check_models_loaded()
+
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text is required.")
     if not speaker:
@@ -446,7 +515,7 @@ async def custom_voice_base64_endpoint(
         raise HTTPException(status_code=400, detail=f"Model size must be one of {MODEL_SIZES}")
 
     try:
-        tts = CUSTOM_VOICE_MODELS[model_size]
+        tts = model_state.CUSTOM_VOICE_MODELS[model_size]
         wavs, sr = tts.generate_custom_voice(
             text=text.strip(),
             language=language,
