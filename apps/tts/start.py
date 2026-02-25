@@ -44,7 +44,7 @@ LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "Germ
 
 # Optional: Configure which models to load via environment variables
 # Default: load all models
-LOAD_VOICE_DESIGN = os.environ.get("LOAD_VOICE_DESIGN", "false").lower() == "true"
+LOAD_VOICE_DESIGN = os.environ.get("LOAD_VOICE_DESIGN", "true").lower() == "true"
 LOAD_BASE_MODELS = os.environ.get("LOAD_BASE_MODELS", "true").lower() == "true"
 LOAD_CUSTOM_VOICE_MODELS = os.environ.get("LOAD_CUSTOM_VOICE_MODELS", "false").lower() == "true"
 
@@ -111,16 +111,20 @@ def load_models_background():
         # Voice Design model (1.7B only)
         if LOAD_VOICE_DESIGN:
             print("Loading VoiceDesign 1.7B model...")
+            print("  → Downloading model path...")
             try:
+                model_path = get_model_path("VoiceDesign", "1.7B")
+                print(f"  → Model path: {model_path}")
+                print("  → Creating model from pretrained...")
                 model_state.voice_design_model = Qwen3TTSModel.from_pretrained(
-                    get_model_path("VoiceDesign", "1.7B"),
+                    model_path,
                     device_map="cpu",
                     dtype=torch.float32,
                     attn_implementation="eager",
                 )
-                print("✓ VoiceDesign 1.7B loaded")
+                print("✓ VoiceDesign 1.7B loaded successfully")
             except Exception as e:
-                print(f"✗ Error loading VoiceDesign 1.7B: {e}", file=sys.stderr)
+                print(f"✗ Error loading VoiceDesign 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 raise
         else:
@@ -130,29 +134,37 @@ def load_models_background():
         if LOAD_BASE_MODELS:
             print("Loading Base 0.6B model...")
             try:
+                print("  → Downloading model path...")
+                model_path = get_model_path("Base", "0.6B")
+                print(f"  → Model path: {model_path}")
+                print("  → Creating model from pretrained...")
                 model_state.base_model_0_6b = Qwen3TTSModel.from_pretrained(
-                    get_model_path("Base", "0.6B"),
+                    model_path,
                     device_map="cpu",
                     dtype=torch.float32,
                     attn_implementation="eager",
                 )
-                print("✓ Base 0.6B loaded")
+                print("✓ Base 0.6B loaded successfully")
             except Exception as e:
-                print(f"✗ Error loading Base 0.6B: {e}", file=sys.stderr)
+                print(f"✗ Error loading Base 0.6B: {type(e).__name__}: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 raise
 
             print("Loading Base 1.7B model...")
             try:
+                print("  → Downloading model path...")
+                model_path = get_model_path("Base", "1.7B")
+                print(f"  → Model path: {model_path}")
+                print("  → Creating model from pretrained...")
                 model_state.base_model_1_7b = Qwen3TTSModel.from_pretrained(
-                    get_model_path("Base", "1.7B"),
+                    model_path,
                     device_map="cpu",
                     dtype=torch.float32,
                     attn_implementation="eager",
                 )
-                print("✓ Base 1.7B loaded")
+                print("✓ Base 1.7B loaded successfully")
             except Exception as e:
-                print(f"✗ Error loading Base 1.7B: {e}", file=sys.stderr)
+                print(f"✗ Error loading Base 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 raise
         else:
@@ -162,40 +174,53 @@ def load_models_background():
         if LOAD_CUSTOM_VOICE_MODELS:
             print("Loading CustomVoice 0.6B model...")
             try:
+                print("  → Downloading model path...")
+                model_path = get_model_path("CustomVoice", "0.6B")
+                print(f"  → Model path: {model_path}")
+                print("  → Creating model from pretrained...")
                 model_state.custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
-                    get_model_path("CustomVoice", "0.6B"),
+                    model_path,
                     device_map="cpu",
                     dtype=torch.float32,
                     attn_implementation="eager",
                 )
-                print("✓ CustomVoice 0.6B loaded")
+                print("✓ CustomVoice 0.6B loaded successfully")
             except Exception as e:
-                print(f"✗ Error loading CustomVoice 0.6B: {e}", file=sys.stderr)
+                print(f"✗ Error loading CustomVoice 0.6B: {type(e).__name__}: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 raise
 
             print("Loading CustomVoice 1.7B model...")
             try:
+                print("  → Downloading model path...")
+                model_path = get_model_path("CustomVoice", "1.7B")
+                print(f"  → Model path: {model_path}")
+                print("  → Creating model from pretrained...")
                 model_state.custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
-                    get_model_path("CustomVoice", "1.7B"),
+                    model_path,
                     device_map="cpu",
                     dtype=torch.float32,
                     attn_implementation="eager",
                 )
-                print("✓ CustomVoice 1.7B loaded")
+                print("✓ CustomVoice 1.7B loaded successfully")
             except Exception as e:
-                print(f"✗ Error loading CustomVoice 1.7B: {e}", file=sys.stderr)
+                print(f"✗ Error loading CustomVoice 1.7B: {type(e).__name__}: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 raise
         else:
             print("⊘ Skipping CustomVoice models (disabled)")
 
-        print("All configured models loaded successfully!")
+        print("\n" + "="*60)
+        print("✓ All configured models loaded successfully!")
+        print("="*60 + "\n")
         model_state.models_loaded = True
         model_state.loading = False
     except Exception as e:
         print(f"\n{'='*60}", file=sys.stderr)
-        print(f"FATAL ERROR: Failed to load all models: {e}", file=sys.stderr)
+        print(f"✗ FATAL ERROR: Failed to load models", file=sys.stderr)
+        print(f"{'='*60}", file=sys.stderr)
+        print(f"Error type: {type(e).__name__}", file=sys.stderr)
+        print(f"Error message: {e}", file=sys.stderr)
         print(f"{'='*60}\n", file=sys.stderr)
         model_state.error = str(e)
         model_state.loading = False
@@ -402,112 +427,146 @@ async def generate_endpoint(request_body: dict = Body(...)):
     """
     check_models_loaded()
 
-    text = request_body.get("text", "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text field is required and must not be empty")
-
-    mode = request_body.get("mode", "custom_voice").lower()
-    voice = request_body.get("voice", "Ryan")
-    language = request_body.get("language", "English")
-    model_size = request_body.get("model_id", "1.7B").split("-")[-1]  # Extract size from model ID
-
-    # Validate model size
-    if model_size not in MODEL_SIZES:
-        model_size = "1.7B"
-
     try:
-        wavs = None
-        sr = None
+        # Debug: Log the request body type and content
+        print(f"[DEBUG] Request body type: {type(request_body)}", file=sys.stderr)
+        print(f"[DEBUG] Request body: {request_body}", file=sys.stderr)
 
-        if mode == "voice_clone" and model_state.base_model_1_7b:
-            # Voice Clone mode
-            ref_audio_b64 = request_body.get("reference_audio_base64")
-            ref_text = request_body.get("reference_text", "")
+        # Ensure request_body is a dict
+        if not isinstance(request_body, dict):
+            print(f"[ERROR] Expected dict, got {type(request_body).__name__}", file=sys.stderr)
+            raise HTTPException(status_code=400, detail=f"Invalid request body type: {type(request_body).__name__}, expected dict")
 
-            if not ref_audio_b64:
-                raise HTTPException(status_code=400, detail="voice_clone mode requires reference_audio_base64")
+        text = request_body.get("text", "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text field is required and must not be empty")
 
-            # Decode base64 audio
-            try:
-                audio_bytes = base64.b64decode(ref_audio_b64)
-                audio_buffer = io.BytesIO(audio_bytes)
-                wav, sr = sf.read(audio_buffer)
-                wav = _normalize_audio(wav)
-                audio_tuple = (wav, int(sr))
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to decode reference audio: {e}")
+        mode = request_body.get("mode", "custom_voice").lower()
+        voice = request_body.get("voice", "Ryan")
+        language = request_body.get("language", "English")
+        model_id_str = request_body.get("model_id", "1.7B")
 
-            tts = model_state.BASE_MODELS[model_size]
-            wavs, sr = tts.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=audio_tuple,
-                ref_text=ref_text.strip() if ref_text else None,
-                x_vector_only_mode=not ref_text,
-                max_new_tokens=2048,
-            )
+        # Safely extract model size
+        try:
+            model_size = str(model_id_str).split("-")[-1]
+        except Exception as e:
+            print(f"[WARNING] Failed to parse model_id: {model_id_str}, using default 1.7B", file=sys.stderr)
+            model_size = "1.7B"
 
-        elif mode == "voice_design" and model_state.voice_design_model:
-            # Voice Design mode
-            voice_description = request_body.get("voice", "A natural, clear voice")
-            wavs, sr = model_state.voice_design_model.generate_voice_design(
-                text=text,
-                language=language,
-                instruct=voice_description,
-                non_streaming_mode=True,
-                max_new_tokens=2048,
-            )
+        # Validate model size
+        if model_size not in MODEL_SIZES:
+            model_size = "1.7B"
 
-        else:
-            # Custom Voice mode (default) or fallback
-            if model_state.custom_voice_model_1_7b:
-                # Use CustomVoice if available
-                tts = model_state.CUSTOM_VOICE_MODELS[model_size]
+        print(f"[INFO] TTS Request: text_len={len(text)}, mode={mode}, voice={voice}, language={language}, model_size={model_size}", file=sys.stderr)
 
-                # Validate speaker
-                if voice not in SPEAKERS:
-                    voice = "Ryan"  # Default speaker
+        try:
+            wavs = None
+            sr = None
 
-                wavs, sr = tts.generate_custom_voice(
-                    text=text,
-                    language=language,
-                    speaker=voice.lower().replace(" ", "_"),
-                    instruct=request_body.get("instruction", ""),
-                    non_streaming_mode=True,
-                    max_new_tokens=2048,
-                )
-            elif model_state.base_model_1_7b:
-                # Fallback to Base model for simple TTS if CustomVoice not available
-                # Base model requires either voice_clone_prompt or ref_audio for voice_clone
-                # For simple TTS without cloning, we need to use voice_clone_prompt
-                tts = model_state.base_model_1_7b
+            if mode == "voice_clone" and model_state.base_model_1_7b:
+                # Voice Clone mode
+                ref_audio_b64 = request_body.get("reference_audio_base64")
+                ref_text = request_body.get("reference_text", "")
 
-                # Create a simple voice clone prompt with a default description
-                voice_clone_prompt = f"A clear and natural {voice.lower()} voice"
+                if not ref_audio_b64:
+                    raise HTTPException(status_code=400, detail="voice_clone mode requires reference_audio_base64")
 
+                # Decode base64 audio
+                try:
+                    audio_bytes = base64.b64decode(ref_audio_b64)
+                    audio_buffer = io.BytesIO(audio_bytes)
+                    wav, sr = sf.read(audio_buffer)
+                    wav = _normalize_audio(wav)
+                    audio_tuple = (wav, int(sr))
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"Failed to decode reference audio: {e}")
+
+                tts = model_state.BASE_MODELS[model_size]
                 wavs, sr = tts.generate_voice_clone(
                     text=text,
                     language=language,
-                    voice_clone_prompt=voice_clone_prompt,
+                    ref_audio=audio_tuple,
+                    ref_text=ref_text.strip() if ref_text else None,
+                    x_vector_only_mode=not ref_text,
                     max_new_tokens=2048,
                 )
+
+            elif mode == "voice_design" and model_state.voice_design_model:
+                # Voice Design mode
+                voice_description = request_body.get("voice", "A natural, clear voice")
+                print(f"[INFO] Generating VoiceDesign: '{text[:50]}...' with description: '{voice_description}'", file=sys.stderr)
+                wavs, sr = model_state.voice_design_model.generate_voice_design(
+                    text=text,
+                    language=language,
+                    instruct=voice_description,
+                    non_streaming_mode=True,
+                    max_new_tokens=2048,
+                )
+                print(f"[INFO] VoiceDesign generation completed", file=sys.stderr)
+
             else:
-                raise HTTPException(status_code=503, detail="No TTS models available")
+                # Custom Voice mode (default) or fallback
+                if model_state.custom_voice_model_1_7b:
+                    # Use CustomVoice if available
+                    tts = model_state.CUSTOM_VOICE_MODELS[model_size]
 
-        if wavs is None or sr is None:
-            raise HTTPException(status_code=500, detail="Failed to generate audio")
+                    # Validate speaker
+                    if voice not in SPEAKERS:
+                        print(f"[WARNING] Speaker '{voice}' not in SPEAKERS, using 'Ryan'", file=sys.stderr)
+                        voice = "Ryan"  # Default speaker
 
-        wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+                    print(f"[INFO] Generating CustomVoice: speaker={voice}, text='{text[:50]}...'", file=sys.stderr)
+                    wavs, sr = tts.generate_custom_voice(
+                        text=text,
+                        language=language,
+                        speaker=voice.lower().replace(" ", "_"),
+                        instruct=request_body.get("instruction", ""),
+                        non_streaming_mode=True,
+                        max_new_tokens=2048,
+                    )
+                    print(f"[INFO] CustomVoice generation completed", file=sys.stderr)
+                elif model_state.base_model_1_7b:
+                    # Fallback to Base model for simple TTS if CustomVoice not available
+                    tts = model_state.base_model_1_7b
 
-        return StreamingResponse(
-            iter([wav_bytes]),
-            media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=generated.wav"}
-        )
+                    # Create a simple voice clone prompt with a default description
+                    voice_clone_prompt = f"A clear and natural {voice.lower()} voice"
+                    print(f"[INFO] Generating with Base model (fallback): text='{text[:50]}...', prompt='{voice_clone_prompt}'", file=sys.stderr)
+
+                    wavs, sr = tts.generate_voice_clone(
+                        text=text,
+                        language=language,
+                        voice_clone_prompt=voice_clone_prompt,
+                        max_new_tokens=2048,
+                    )
+                    print(f"[INFO] Base model generation completed", file=sys.stderr)
+                else:
+                    raise HTTPException(status_code=503, detail="No TTS models available")
+
+            if wavs is None or sr is None:
+                raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+            print(f"[INFO] Audio generated successfully: sr={sr}, shape={wavs.shape if hasattr(wavs, 'shape') else 'N/A'}", file=sys.stderr)
+            wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+
+            return StreamingResponse(
+                iter([wav_bytes]),
+                media_type="audio/wav",
+                headers={"Content-Disposition": "attachment; filename=generated.wav"}
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[ERROR] Generation failed: {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+        print(f"[FATAL ERROR] Unexpected error in /generate endpoint: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {type(e).__name__}: {e}")
 
 
 # ============================================================================
