@@ -202,6 +202,13 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const recordedBlobUrlRef = useRef<string | null>(null)
   const recordingPlaybackRef = useRef<HTMLAudioElement | null>(null)
 
+  // YouTube audio import state
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeStartTime, setYoutubeStartTime] = useState('')
+  const [youtubeEndTime, setYoutubeEndTime] = useState('')
+  const [youtubeLoading, setYoutubeLoading] = useState(false)
+  const [youtubeError, setYoutubeError] = useState<string | null>(null)
+
   // Generation time estimation state
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -246,18 +253,38 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setTranscribing(true)
     setTranscribeError(null)
     try {
-      const { pipeline } = await import('@xenova/transformers')
-      const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small')
-      const objectUrl = URL.createObjectURL(refAudioFile)
-      const result = await transcriber(objectUrl) as { text: string }
-      URL.revokeObjectURL(objectUrl)
-      setRefText(result.text.trim())
+      const formData = new FormData()
+      formData.append('audio', refAudioFile)
+      const res = await fetch(`${ttsUrl}/transcribe`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        if (res.status === 404) {
+          throw new Error(
+            'Der TTS-Server unterstützt keine Transkription (/transcribe-Endpunkt nicht gefunden). ' +
+            'Bitte gib den Referenztext manuell ein.'
+          )
+        }
+        throw new Error(`Transkription fehlgeschlagen (HTTP ${res.status}): ${body}`)
+      }
+      const data = await res.json()
+      setRefText((data.text || data.transcription || '').trim())
     } catch (err) {
-      setTranscribeError(String(err))
+      const msg = String(err)
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
+        setTranscribeError('Verbindung zum TTS-Server fehlgeschlagen. Bitte prüfe die Server-URL.')
+      } else if (msg.includes('AbortError') || msg.includes('timeout')) {
+        setTranscribeError('Transkription hat zu lange gedauert (Timeout). Bitte versuche es erneut.')
+      } else {
+        setTranscribeError(msg)
+      }
     } finally {
       setTranscribing(false)
     }
-  }, [refAudioFile])
+  }, [refAudioFile, ttsUrl])
 
   // Browser audio recording handlers
   const handleStartRecording = useCallback(async () => {
@@ -326,6 +353,53 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setRecordedAudioUrl(null)
     setRefAudioFile(null)
   }, [])
+
+  const handleYoutubeImport = useCallback(async () => {
+    if (!youtubeUrl.trim()) return
+    setYoutubeLoading(true)
+    setYoutubeError(null)
+    try {
+      const params: Record<string, string> = { url: youtubeUrl.trim() }
+      if (youtubeStartTime.trim()) params.start = youtubeStartTime.trim()
+      if (youtubeEndTime.trim()) params.end = youtubeEndTime.trim()
+      const res = await fetch(`${ttsUrl}/youtube-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(120_000),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        if (res.status === 404) {
+          throw new Error('Der TTS-Server unterstützt keinen YouTube-Import (/youtube-audio-Endpunkt nicht gefunden).')
+        }
+        throw new Error(`YouTube-Import fehlgeschlagen (HTTP ${res.status}): ${body}`)
+      }
+      const blob = await res.blob()
+      const filename = `youtube_audio.${blob.type.includes('wav') ? 'wav' : blob.type.includes('mp3') ? 'mp3' : 'webm'}`
+      const file = new File([blob], filename, { type: blob.type })
+      if (recordedBlobUrlRef.current) {
+        URL.revokeObjectURL(recordedBlobUrlRef.current)
+        recordedBlobUrlRef.current = null
+      }
+      const url = URL.createObjectURL(blob)
+      recordedBlobUrlRef.current = url
+      setRefAudioFile(file)
+      setRecordedAudioUrl(url)
+      setYoutubeUrl('')
+    } catch (err) {
+      const msg = String(err)
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        setYoutubeError('Verbindung zum TTS-Server fehlgeschlagen. Bitte prüfe die Server-URL.')
+      } else if (msg.includes('AbortError') || msg.includes('timeout')) {
+        setYoutubeError('YouTube-Import hat zu lange gedauert (Timeout). Bitte versuche es erneut.')
+      } else {
+        setYoutubeError(msg)
+      }
+    } finally {
+      setYoutubeLoading(false)
+    }
+  }, [youtubeUrl, youtubeStartTime, youtubeEndTime, ttsUrl])
 
   const handleDownload = useCallback(() => {
     if (!audioUrl) return
@@ -661,13 +735,13 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                       <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
                       {!isRecording ? (
                         <Tooltip title="Über Browser aufnehmen">
-                          <IconButton size="small" color="error" onClick={handleStartRecording} disabled={loading || transcribing}>
+                          <IconButton size="small" color="primary" onClick={handleStartRecording} disabled={loading || transcribing}>
                             <MicIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       ) : (
                         <Tooltip title="Aufnahme stoppen">
-                          <IconButton size="small" color="error" onClick={handleStopRecording}>
+                          <IconButton size="small" color="primary" onClick={handleStopRecording}>
                             <StopIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -707,6 +781,59 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                       </Button>
                     )}
                     {transcribeError && (<Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{transcribeError}</Typography>)}
+                  </Box>
+                  {/* YouTube audio import */}
+                  <Box sx={{ mb: 1, p: 1, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="caption" fontWeight="bold" sx={{ display: 'block', mb: 0.5 }}>
+                      🎬 YouTube-Audio importieren
+                    </Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="YouTube-URL"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={youtubeUrl}
+                      onChange={(e) => setYoutubeUrl(e.target.value)}
+                      disabled={loading || youtubeLoading || isRecording}
+                      sx={{ mb: 0.5 }}
+                    />
+                    <Box sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
+                      <TextField
+                        size="small"
+                        label="Start (s)"
+                        placeholder="0"
+                        value={youtubeStartTime}
+                        onChange={(e) => setYoutubeStartTime(e.target.value)}
+                        disabled={loading || youtubeLoading || isRecording}
+                        sx={{ flex: 1 }}
+                        inputProps={{ type: 'number', min: 0 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="Ende (s)"
+                        placeholder="30"
+                        value={youtubeEndTime}
+                        onChange={(e) => setYoutubeEndTime(e.target.value)}
+                        disabled={loading || youtubeLoading || isRecording}
+                        sx={{ flex: 1 }}
+                        inputProps={{ type: 'number', min: 0 }}
+                      />
+                    </Box>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={handleYoutubeImport}
+                      disabled={loading || youtubeLoading || isRecording || !youtubeUrl.trim()}
+                      startIcon={youtubeLoading ? <CircularProgress size={12} color="inherit" /> : undefined}
+                      sx={{ fontSize: '0.7rem' }}
+                    >
+                      {youtubeLoading ? 'Lade Audio…' : 'Audio laden'}
+                    </Button>
+                    {youtubeError && (
+                      <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>
+                        {youtubeError}
+                      </Typography>
+                    )}
                   </Box>
                   <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
                   <FormControlLabel
