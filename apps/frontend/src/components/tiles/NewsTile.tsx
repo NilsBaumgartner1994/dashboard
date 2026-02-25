@@ -21,6 +21,7 @@ import {
 } from '@mui/material'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AddIcon from '@mui/icons-material/Add'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import DeleteIcon from '@mui/icons-material/Delete'
 import SettingsIcon from '@mui/icons-material/Settings'
 import BaseTile from './BaseTile'
@@ -39,7 +40,7 @@ const FEED_PRESETS: Array<{ id: string; label: string; url: string }> = [
 
 // Build a Google News RSS feed URL for a given search query
 const buildGoogleNewsUrl = (query: string) =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent(query)}`
+  `https://news.google.com/rss/search?q=${encodeURIComponent(query).replace(/%20/g, '+')}`
 
 // CORS proxies for browser RSS fetching (tried in order until one succeeds)
 const CORS_PROXIES = [
@@ -656,6 +657,11 @@ export default function NewsTile({ tile }: NewsTileProps) {
                     primaryTypographyProps={{ variant: 'caption', noWrap: true }}
                   />
                   <ListItemSecondaryAction>
+                    <Tooltip title="URL kopieren">
+                      <IconButton size="small" onClick={() => navigator.clipboard.writeText(url)}>
+                        <ContentCopyIcon fontSize="inherit" />
+                      </IconButton>
+                    </Tooltip>
                     <IconButton size="small" edge="end" onClick={() => removeUrl(url)}>
                       <DeleteIcon fontSize="inherit" />
                     </IconButton>
