@@ -2,11 +2,13 @@ import { ChildProcess, exec, spawn } from 'child_process';
 import { FetchHelper } from './FetchHelper';
 import * as os from 'node:os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import fse from 'fs-extra';
 
 // Server configuration
 const ADMIN_EMAIL = 'test@example.com';
 const ADMIN_PASSWORD = 'testpassword';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSIONS_PATH = path.join(__dirname, '..', '..', '..');
 
 /**
