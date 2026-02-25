@@ -3,10 +3,12 @@ FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# System deps for soundfile / scipy and git for pip git dependencies
+# System deps for soundfile / scipy, git for pip, and sox for audio processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     git \
+    sox \
+    libsox-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

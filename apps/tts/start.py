@@ -53,48 +53,48 @@ print("Loading all models to CUDA...")
 print("Loading VoiceDesign 1.7B model...")
 voice_design_model = Qwen3TTSModel.from_pretrained(
     get_model_path("VoiceDesign", "1.7B"),
-    device_map="cuda",
-    dtype=torch.bfloat16,
+    device_map="cpu",
+    dtype=torch.float32,
     # token=HF_TOKEN,
-    attn_implementation="kernels-community/flash-attn3",
+    attn_implementation="eager",
 )
 
 # Base (Voice Clone) models - both sizes
 print("Loading Base 0.6B model...")
 base_model_0_6b = Qwen3TTSModel.from_pretrained(
     get_model_path("Base", "0.6B"),
-    device_map="cuda",
-    dtype=torch.bfloat16,
+    device_map="cpu",
+    dtype=torch.float32,
     # token=HF_TOKEN,
-    attn_implementation="kernels-community/flash-attn3",
+    attn_implementation="eager",
 )
 
 print("Loading Base 1.7B model...")
 base_model_1_7b = Qwen3TTSModel.from_pretrained(
     get_model_path("Base", "1.7B"),
-    device_map="cuda",
-    dtype=torch.bfloat16,
+    device_map="cpu",
+    dtype=torch.float32,
     # token=HF_TOKEN,
-    attn_implementation="kernels-community/flash-attn3",
+    attn_implementation="eager",
 )
 
 # CustomVoice models - both sizes
 print("Loading CustomVoice 0.6B model...")
 custom_voice_model_0_6b = Qwen3TTSModel.from_pretrained(
     get_model_path("CustomVoice", "0.6B"),
-    device_map="cuda",
-    dtype=torch.bfloat16,
+    device_map="cpu",
+    dtype=torch.float32,
     # token=HF_TOKEN,
-    attn_implementation="kernels-community/flash-attn3",
+    attn_implementation="eager",
 )
 
 print("Loading CustomVoice 1.7B model...")
 custom_voice_model_1_7b = Qwen3TTSModel.from_pretrained(
     get_model_path("CustomVoice", "1.7B"),
-    device_map="cuda",
-    dtype=torch.bfloat16,
+    device_map="cpu",
+    dtype=torch.float32,
     # token=HF_TOKEN,
-    attn_implementation="kernels-community/flash-attn3",
+    attn_implementation="eager",
 )
 
 print("All models loaded successfully!")
