@@ -1,84 +1,119 @@
 import { defineEndpoint } from '@directus/extensions-sdk';
+import type { Request, Response } from 'express';
 
-// TTS endpoint – proxies requests to the TTS model container.
+// TTS endpoint – universal proxy to TTS model container.
+// All requests to /tts/* are forwarded directly to the TTS container.
 //
-// GET /tts/health
-//   Returns: { ok: true, ttsUrl: string, status: string, model: string } or { ok: false, error: string }
-//
-// POST /tts/generate
-//   Body: {
-//     "text": "...",
-//     "voice": "...",                    (optional)
-//     "model_id": "Qwen/...",            (optional)
-//     "mode": "voice_design|voice_clone", (optional, defaults to voice_design)
-//     "reference_audio_base64": "...",    (optional, reserved for future clone support)
-//     "reference_text": "..."             (optional, reserved for future clone support)
-//   }
-//   Returns: audio/wav binary
+// This allows the TTS container to define all its own routes without
+// needing to update this Directus extension for every new endpoint.
 
 const TTS_URL = process.env.TTS_URL ?? 'http://localhost:8880';
-const TTS_GENERATE_TIMEOUT_MS = 120_000; // 2 minutes
+const TTS_TIMEOUT_MS = 600_000; // 10 minutes for long-running TTS operations
 
 export default defineEndpoint({
   id: 'tts',
   handler: (router) => {
-    // Health check – proxies to TTS container's /health endpoint
-    router.get('/health', async (_req, res) => {
+    // Catch-all proxy: forwards all requests to the TTS container
+    router.all('/*', async (req: Request, res: Response) => {
       try {
-        const response = await fetch(`${TTS_URL}/health`, { signal: AbortSignal.timeout(5000) });
-        if (!response.ok) {
-          return res.status(502).json({ ok: false, error: `TTS returned ${response.status}`, ttsUrl: TTS_URL });
-        }
-        const data = (await response.json()) as Record<string, unknown>;
-        return res.json({ ok: true, ttsUrl: TTS_URL, ...data });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return res.status(503).json({ ok: false, error: message, ttsUrl: TTS_URL });
-      }
-    });
+        const path = req.path; // e.g., "/health", "/generate", "/voices/create"
+        const method = req.method;
+        const ttsEndpoint = `${TTS_URL}${path}`;
 
-    // TTS generate – proxies to TTS container's /tts/generate endpoint and streams the audio back
-    router.post('/generate', async (req, res) => {
-      try {
-        const { text, voice, model_id, mode, reference_audio_base64, reference_text } = req.body as {
-          text?: string;
-          voice?: string;
-          model_id?: string;
-          mode?: 'voice_design' | 'voice_clone';
-          reference_audio_base64?: string;
-          reference_text?: string;
-        };
-        if (!text || !text.trim()) {
-          return res.status(400).json({ error: 'text must not be empty' });
+        // Prepare headers to forward
+        const headers: Record<string, string> = {};
+        if (req.headers['content-type']) {
+          headers['Content-Type'] = req.headers['content-type'] as string;
         }
 
-        const body: Record<string, unknown> = { text, mode: mode ?? 'voice_design' };
-        if (voice) body.voice = voice;
-        if (model_id) body.model_id = model_id;
-        // Forward clone fields unchanged so backend contract is already in place.
-        if (reference_audio_base64) body.reference_audio_base64 = reference_audio_base64;
-        if (reference_text) body.reference_text = reference_text;
+        // Determine request body based on content type and method
+        let requestBody: any = undefined;
+        let timeout = TTS_TIMEOUT_MS;
 
-        const response = await fetch(`${TTS_URL}/tts/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(TTS_GENERATE_TIMEOUT_MS),
+        // Shorter timeout for health checks
+        if (path === '/health') {
+          timeout = 5000;
+        }
+
+        if (method === 'GET' || method === 'HEAD') {
+          // No body for GET/HEAD
+          requestBody = undefined;
+        } else if (req.headers['content-type']?.includes('application/json')) {
+          // JSON body - already parsed by Directus
+          requestBody = JSON.stringify(req.body);
+        } else if (req.headers['content-type']?.includes('multipart/form-data')) {
+          // Multipart form data - forward raw request stream
+          // @ts-ignore - req is a stream-like object
+          requestBody = req;
+        } else if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
+          // Form data - convert to FormData
+          const formData = new FormData();
+          for (const [key, value] of Object.entries(req.body || {})) {
+            formData.append(key, String(value));
+          }
+          requestBody = formData;
+        } else if (req.body && Object.keys(req.body).length > 0) {
+          // Fallback: convert body to FormData
+          const formData = new FormData();
+          for (const [key, value] of Object.entries(req.body)) {
+            formData.append(key, String(value));
+          }
+          requestBody = formData;
+        }
+
+        // Forward request to TTS container
+        const response = await fetch(ttsEndpoint, {
+          method,
+          headers,
+          body: requestBody,
+          // @ts-ignore - duplex needed for streaming
+          duplex: requestBody === req ? 'half' : undefined,
+          signal: AbortSignal.timeout(timeout),
         });
+
+        // Check response content type
+        const contentType = response.headers.get('content-type');
 
         if (!response.ok) {
           const errorBody = await response.text().catch(() => '');
-          return res.status(response.status).json({ error: `TTS returned ${response.status}: ${errorBody}` });
+          return res.status(response.status).json({
+            error: `TTS returned ${response.status}: ${errorBody}`,
+            path,
+            method
+          });
         }
 
-        const audioBuffer = await response.arrayBuffer();
-        const generationTime = response.headers.get('X-Generation-Time-Ms');
-        res.setHeader('Content-Type', 'audio/wav');
-        if (generationTime) res.setHeader('X-Generation-Time-Ms', generationTime);
-        return res.send(Buffer.from(audioBuffer));
+        // Forward response based on content type
+        if (contentType?.includes('application/json')) {
+          const data = await response.json();
+
+          // Special handling for /health to add ttsUrl info
+          if (path === '/health') {
+            return res.json({ ok: true, ttsUrl: TTS_URL, ...data });
+          }
+
+          return res.json(data);
+        } else if (contentType?.includes('audio/')) {
+          // Audio response - stream it back
+          const audioBuffer = await response.arrayBuffer();
+          const generationTime = response.headers.get('X-Generation-Time-Ms');
+          res.setHeader('Content-Type', contentType);
+          if (generationTime) res.setHeader('X-Generation-Time-Ms', generationTime);
+          return res.send(Buffer.from(audioBuffer));
+        } else {
+          // Unknown content type - forward as-is
+          const buffer = await response.arrayBuffer();
+          if (contentType) res.setHeader('Content-Type', contentType);
+          return res.send(Buffer.from(buffer));
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return res.status(503).json({ error: message });
+        console.error(`[TTS Proxy] Error for ${req.method} ${req.path}:`, message);
+        return res.status(503).json({
+          error: message,
+          path: req.path,
+          method: req.method
+        });
       }
     });
   },
