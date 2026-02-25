@@ -18,9 +18,9 @@ services:
       # Optional: set HUGGING_FACE_HUB_TOKEN in .env for private/gated models.
       # Not required for the default public model.
       HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
-      # Model loading configuration (default: only Base models to save memory)
+      # Model loading configuration (default: VoiceDesign + Base models)
       # Enable additional models by setting to 'true' in .env:
-      LOAD_VOICE_DESIGN: "${LOAD_VOICE_DESIGN:-false}"
+      LOAD_VOICE_DESIGN: "${LOAD_VOICE_DESIGN:-true}"
       LOAD_BASE_MODELS: "${LOAD_BASE_MODELS:-true}"
       LOAD_CUSTOM_VOICE_MODELS: "${LOAD_CUSTOM_VOICE_MODELS:-false}"
     mem_limit: ${TTS_MEMORY:-4g}

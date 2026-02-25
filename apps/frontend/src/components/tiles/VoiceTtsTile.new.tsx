@@ -69,30 +69,8 @@ const STATUS_COLOR: Record<ServerStatus, 'success' | 'error' | 'default'> = {
   unknown: 'default',
 }
 
-const LANGUAGES = [
-  'Auto',
-  'Chinese',
-  'English',
-  'Japanese',
-  'Korean',
-  'French',
-  'German',
-  'Spanish',
-  'Portuguese',
-  'Russian',
-]
-
-const SPEAKERS = [
-  'Aiden',
-  'Dylan',
-  'Eric',
-  'Ono_anna',
-  'Ryan',
-  'Serena',
-  'Sohee',
-  'Uncle_fu',
-  'Vivian',
-]
+const LANGUAGES = ['Auto', 'Chinese', 'English', 'Japanese', 'Korean', 'French', 'German', 'Spanish', 'Portuguese', 'Russian']
+const SPEAKERS = ['Aiden', 'Dylan', 'Eric', 'Ono_anna', 'Ryan', 'Serena', 'Sohee', 'Uncle_fu', 'Vivian']
 
 function StatusIcon({ status }: { status: ServerStatus }) {
   if (status === 'online') return <CheckCircleIcon />
@@ -206,11 +184,6 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     loadVoices()
   }, [ttsUrl, selectedVoice])
 
-  const getAvailableModelSizes = (): string[] => {
-    if (ttsMode === 'voice_design') return ['1.7B']
-    return ['0.6B', '1.7B']
-  }
-
   // Revoke object URL on unmount
   useEffect(() => {
     return () => {
@@ -218,11 +191,17 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     }
   }, [])
 
+  const getAvailableModelSizes = (): string[] => {
+    if (ttsMode === 'voice_design') return ['1.7B']
+    return ['0.6B', '1.7B']
+  }
+
   const handleGenerate = async () => {
     if (!textInput.trim()) return
     if (ttsMode === 'voice_design' && !voiceDescription.trim()) return
     if (ttsMode === 'voice_clone' && voiceCloneSubMode === 'select' && !selectedVoice) return
     if (ttsMode === 'voice_clone' && voiceCloneSubMode === 'create' && (!refAudioFile || (!refText && !useXVectorOnly))) return
+    if (ttsMode === 'custom_voice') return
 
     setLoading(true)
     setError(null)
@@ -405,7 +384,6 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setPlaying(false)
   }
 
-  // Settings state
   const [ttsUrlInput, setTtsUrlInput] = useState(ttsUrl)
   const [checkIntervalInput, setCheckIntervalInput] = useState(String(checkIntervalS))
 
@@ -576,50 +554,15 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
           {/* Actions */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Button
-              size="small"
-              variant="contained"
-              onClick={handleGenerate}
-              disabled={
-                loading ||
-                !textInput.trim() ||
-                (ttsMode === 'voice_design' && !voiceDescription.trim()) ||
-                (ttsMode === 'voice_clone' && !selectedVoice)
-              }
-              startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <RecordVoiceOverIcon fontSize="small" />}
-              sx={{ flex: 1 }}
-            >
+            <Button size="small" variant="contained" onClick={handleGenerate} disabled={loading || !textInput.trim() || (ttsMode === 'voice_design' && !voiceDescription.trim()) || (ttsMode === 'voice_clone' && !selectedVoice && voiceCloneSubMode === 'select')} startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <RecordVoiceOverIcon fontSize="small" />} sx={{ flex: 1 }}>
               {loading ? 'Generiere…' : 'Sprechen'}
             </Button>
-            {audioUrl && !playing && (
-              <Tooltip title="Abspielen">
-                <IconButton size="small" color="primary" onClick={handlePlay}>
-                  <PlayArrowIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {playing && (
-              <Tooltip title="Stopp">
-                <IconButton size="small" color="error" onClick={handleStop}>
-                  <StopIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
+            {audioUrl && !playing && (<Tooltip title="Abspielen"><IconButton size="small" color="primary" onClick={handlePlay}><PlayArrowIcon fontSize="small" /></IconButton></Tooltip>)}
+            {playing && (<Tooltip title="Stopp"><IconButton size="small" color="error" onClick={handleStop}><StopIcon fontSize="small" /></IconButton></Tooltip>)}
           </Box>
 
-          {/* Timing */}
-          {generationTimeMs !== null && (
-            <Typography variant="caption" color="text.secondary">
-              Generiert in {(generationTimeMs / 1000).toFixed(1)} s
-            </Typography>
-          )}
-
-          {/* Error */}
-          {error && (
-            <Typography variant="caption" color="error" sx={{ wordBreak: 'break-all' }}>
-              {error}
-            </Typography>
-          )}
+          {generationTimeMs !== null && (<Typography variant="caption" color="text.secondary">Generiert in {(generationTimeMs / 1000).toFixed(1)} s</Typography>)}
+          {error && (<Typography variant="caption" color="error" sx={{ wordBreak: 'break-all' }}>{error}</Typography>)}
         </Box>
       </BaseTile>
 
@@ -627,15 +570,11 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       <Dialog open={statusLogOpen} onClose={() => setStatusLogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
           <Box sx={{ flex: 1 }}>TTS Server Status Log</Box>
-          <IconButton size="small" onClick={() => setStatusLogOpen(false)}>
-            <CloseIcon fontSize="inherit" />
-          </IconButton>
+          <IconButton size="small" onClick={() => setStatusLogOpen(false)}><CloseIcon fontSize="inherit" /></IconButton>
         </DialogTitle>
         <DialogContent dividers>
           {statusLog.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              Noch keine Prüfungen durchgeführt.
-            </Typography>
+            <Typography variant="body2" color="text.secondary">Noch keine Prüfungen durchgeführt.</Typography>
           ) : (
             <List dense disablePadding>
               {statusLog.map((entry, i) => (
@@ -643,26 +582,14 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   <ListItemText
                     primary={
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Chip
-                          size="small"
-                          label={entry.result === 'online' ? 'Online' : 'Offline'}
-                          color={entry.result === 'online' ? 'success' : 'error'}
-                        />
-                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                          {formatDate(entry.timestamp)}
-                        </Typography>
+                        <Chip size="small" label={entry.result === 'online' ? 'Online' : 'Offline'} color={entry.result === 'online' ? 'success' : 'error'} />
+                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{formatDate(entry.timestamp)}</Typography>
                       </Box>
                     }
                     secondary={
                       <>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          URL: {entry.url}
-                        </Typography>
-                        {entry.detail && (
-                          <Typography variant="caption" color="error" sx={{ display: 'block', wordBreak: 'break-all' }}>
-                            {entry.detail}
-                          </Typography>
-                        )}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>URL: {entry.url}</Typography>
+                        {entry.detail && (<Typography variant="caption" color="error" sx={{ display: 'block', wordBreak: 'break-all' }}>{entry.detail}</Typography>)}
                       </>
                     }
                   />
@@ -675,3 +602,4 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     </>
   )
 }
+
