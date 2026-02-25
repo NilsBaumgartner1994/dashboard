@@ -504,8 +504,13 @@ async def generate_endpoint(request_body: dict = Body(...)):
                 )
                 print(f"[INFO] VoiceDesign generation completed", file=sys.stderr)
 
-            else:
-                # Custom Voice mode (default) or fallback
+            elif mode == "voice_design" and not model_state.voice_design_model:
+                # Voice Design not available, fallback to custom_voice
+                print(f"[WARNING] VoiceDesign not loaded, falling back to custom_voice mode", file=sys.stderr)
+                mode = "custom_voice"
+
+            # Custom Voice mode (default) or fallback from voice_design
+            if mode == "custom_voice":
                 if model_state.custom_voice_model_1_7b:
                     # Use CustomVoice if available
                     tts = model_state.CUSTOM_VOICE_MODELS[model_size]
@@ -527,16 +532,22 @@ async def generate_endpoint(request_body: dict = Body(...)):
                     print(f"[INFO] CustomVoice generation completed", file=sys.stderr)
                 elif model_state.base_model_1_7b:
                     # Fallback to Base model for simple TTS if CustomVoice not available
-                    tts = model_state.base_model_1_7b
+                    print(f"[INFO] Using Base model with x_vector_only mode", file=sys.stderr)
 
-                    # Create a simple voice clone prompt with a default description
-                    voice_clone_prompt = f"A clear and natural {voice.lower()} voice"
-                    print(f"[INFO] Generating with Base model (fallback): text='{text[:50]}...', prompt='{voice_clone_prompt}'", file=sys.stderr)
+                    # Create a dummy ref_audio to satisfy the interface
+                    # Generate a short silence as reference
+                    dummy_audio = np.zeros(16000)  # 1 second of silence at 16kHz
 
-                    wavs, sr = tts.generate_voice_clone(
+                    prompt = model_state.base_model_1_7b.create_voice_clone_prompt(
+                        ref_audio=(dummy_audio, 16000),
+                        x_vector_only_mode=True
+                    )
+
+                    wavs, sr = model_state.base_model_1_7b.generate_voice_clone(
                         text=text,
                         language=language,
-                        voice_clone_prompt=voice_clone_prompt,
+                        voice_clone_prompt=prompt,
+                        non_streaming_mode=True,
                         max_new_tokens=2048,
                     )
                     print(f"[INFO] Base model generation completed", file=sys.stderr)
