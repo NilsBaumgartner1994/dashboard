@@ -15,6 +15,12 @@ import {
   List,
   ListItem,
   ListItemText,
+  Tabs,
+  Tab,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from '@mui/material'
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -31,6 +37,7 @@ const DEFAULT_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
 
 type ServerStatus = 'online' | 'offline' | 'checking' | 'unknown'
+type TTSMode = 'voice_design' | 'voice_clone'
 
 interface StatusLogEntry {
   timestamp: Date
@@ -52,6 +59,31 @@ const STATUS_COLOR: Record<ServerStatus, 'success' | 'error' | 'default'> = {
   checking: 'default',
   unknown: 'default',
 }
+
+const LANGUAGES = [
+  'Auto',
+  'Chinese',
+  'English',
+  'Japanese',
+  'Korean',
+  'French',
+  'German',
+  'Spanish',
+  'Portuguese',
+  'Russian',
+]
+
+const SPEAKERS = [
+  'Aiden',
+  'Dylan',
+  'Eric',
+  'Ono_anna',
+  'Ryan',
+  'Serena',
+  'Sohee',
+  'Uncle_fu',
+  'Vivian',
+]
 
 function StatusIcon({ status }: { status: ServerStatus }) {
   if (status === 'online') return <CheckCircleIcon />
@@ -121,7 +153,12 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   }, [checkServer, checkIntervalS])
 
   // TTS state
+  const [ttsMode, setTtsMode] = useState<TTSMode>('voice_design')
   const [textInput, setTextInput] = useState('')
+  const [language, setLanguage] = useState('Auto')
+  const [voice, setVoice] = useState('Ryan')
+  const [voiceDescription, setVoiceDescription] = useState('')
+  const [modelSize, setModelSize] = useState('1.7B')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
@@ -129,6 +166,14 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [playing, setPlaying] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioBlobUrlRef = useRef<string | null>(null)
+
+  // Get available model sizes based on mode
+  const getAvailableModelSizes = (): string[] => {
+    if (ttsMode === 'voice_design') {
+      return ['1.7B'] // Voice Design only supports 1.7B
+    }
+    return ['0.6B', '1.7B'] // Voice Clone and CustomVoice support both
+  }
 
   // Revoke object URL on unmount
   useEffect(() => {
@@ -139,6 +184,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
   const handleGenerate = async () => {
     if (!textInput.trim()) return
+    if (ttsMode === 'voice_design' && !voiceDescription.trim()) return
+
     setLoading(true)
     setError(null)
     setAudioUrl(null)
@@ -151,10 +198,25 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
     const start = Date.now()
     try {
+      const requestBody =
+        ttsMode === 'voice_design'
+          ? {
+              text: textInput,
+              mode: 'voice_design',
+              language: language,
+              voice: voiceDescription, // Voice description for the model to generate voice
+              model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-VoiceDesign`,
+            }
+          : {
+              text: textInput,
+              mode: 'voice_clone',
+              model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-Base`,
+            }
+
       const res = await fetch(`${ttsUrl}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textInput }),
+        body: JSON.stringify(requestBody),
         signal: AbortSignal.timeout(120_000),
       })
       if (!res.ok) {
@@ -254,21 +316,141 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
 
-          {/* Text input */}
-          <TextField
-            multiline
-            minRows={2}
-            maxRows={4}
-            fullWidth
-            size="small"
-            placeholder="Text eingeben…"
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            disabled={loading}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.ctrlKey) handleGenerate()
-            }}
-          />
+          {/* Mode Tabs */}
+          <Tabs
+            value={ttsMode}
+            onChange={(_, newValue) => setTtsMode(newValue as TTSMode)}
+            variant="fullWidth"
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Voice Design" value="voice_design" />
+            <Tab label="Voice Clone" value="voice_clone" disabled />
+          </Tabs>
+
+          {/* Voice Design Mode */}
+          {ttsMode === 'voice_design' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {/* Text to Synthesize */}
+              <TextField
+                multiline
+                minRows={2}
+                maxRows={3}
+                fullWidth
+                size="small"
+                label="Text to Synthesize"
+                placeholder="Text eingeben…"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                disabled={loading}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.ctrlKey) handleGenerate()
+                }}
+              />
+
+              {/* Language Dropdown */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Language</InputLabel>
+                <Select
+                  value={language}
+                  label="Language"
+                  onChange={(e) => setLanguage(e.target.value)}
+                  disabled={loading}
+                >
+                  {LANGUAGES.map((lang) => (
+                    <MenuItem key={lang} value={lang}>
+                      {lang}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {/* Voice/Speaker Dropdown */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Voice</InputLabel>
+                <Select
+                  value={voice}
+                  label="Voice"
+                  onChange={(e) => setVoice(e.target.value)}
+                  disabled={loading}
+                >
+                  {SPEAKERS.map((speaker) => (
+                    <MenuItem key={speaker} value={speaker}>
+                      {speaker}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {/* Model Size Dropdown */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Model Size</InputLabel>
+                <Select
+                  value={modelSize}
+                  label="Model Size"
+                  onChange={(e) => setModelSize(e.target.value)}
+                  disabled={loading}
+                >
+                  {getAvailableModelSizes().map((size) => (
+                    <MenuItem key={size} value={size}>
+                      {size}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {/* Voice Description */}
+              <TextField
+                multiline
+                minRows={2}
+                maxRows={3}
+                fullWidth
+                size="small"
+                label="Voice Description"
+                placeholder="Describe the voice characteristics…"
+                value={voiceDescription}
+                onChange={(e) => setVoiceDescription(e.target.value)}
+                disabled={loading}
+                helperText="E.g., 'A natural female voice with a slight accent'"
+              />
+            </Box>
+          )}
+
+          {/* Voice Clone Mode */}
+          {ttsMode === 'voice_clone' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <TextField
+                multiline
+                minRows={2}
+                maxRows={3}
+                fullWidth
+                size="small"
+                placeholder="Text eingeben…"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                disabled={loading}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.ctrlKey) handleGenerate()
+                }}
+              />
+
+              {/* Model Size Dropdown */}
+              <FormControl fullWidth size="small">
+                <InputLabel>Model Size</InputLabel>
+                <Select
+                  value={modelSize}
+                  label="Model Size"
+                  onChange={(e) => setModelSize(e.target.value)}
+                  disabled={loading}
+                >
+                  {getAvailableModelSizes().map((size) => (
+                    <MenuItem key={size} value={size}>
+                      {size}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          )}
 
           {/* Actions */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -276,7 +458,11 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
               size="small"
               variant="contained"
               onClick={handleGenerate}
-              disabled={loading || !textInput.trim()}
+              disabled={
+                loading ||
+                !textInput.trim() ||
+                (ttsMode === 'voice_design' && !voiceDescription.trim())
+              }
               startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <RecordVoiceOverIcon fontSize="small" />}
               sx={{ flex: 1 }}
             >
