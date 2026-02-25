@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import {
   Box,
@@ -10,11 +10,6 @@ import {
   Tooltip,
   TextField,
   Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Divider,
   ToggleButtonGroup,
   ToggleButton,
   InputAdornment,
@@ -28,6 +23,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import SearchIcon from '@mui/icons-material/Search'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import type { Note } from '../../store/useStore'
@@ -46,49 +42,59 @@ function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) 
   const [content, setContent] = useState(note?.content ?? '')
   const [mode, setMode] = useState<'edit' | 'preview'>('edit')
 
+  useEffect(() => {
+    if (open) {
+      setContent(note?.content ?? '')
+      setMode('edit')
+    }
+  }, [note, open])
+
   const handleSave = () => {
     const firstLine = content.split('\n').find((line) => line.trim() !== '')?.replace(/^#+\s*/, '').trim() ?? ''
     onSave(firstLine || 'Neue Notiz', content)
   }
 
   return (
-    <Dialog
+    <MyModal
       key={note?.id ?? 'new'}
       open={open}
       onClose={onClose}
-      fullWidth
-      maxWidth="md"
-      PaperProps={{ sx: { height: '80vh', display: 'flex', flexDirection: 'column' } }}
+      title={note ? note.title || 'Notiz bearbeiten' : 'Neue Notiz'}
+      titleActions={
+        <>
+          <ToggleButtonGroup
+            value={mode}
+            exclusive
+            onChange={(_, val) => val && setMode(val)}
+            size="small"
+            sx={{ mr: 0.5 }}
+          >
+            <ToggleButton value="edit" aria-label="Bearbeiten">
+              <EditIcon fontSize="inherit" />
+            </ToggleButton>
+            <ToggleButton value="preview" aria-label="Vorschau">
+              <PreviewIcon fontSize="inherit" />
+            </ToggleButton>
+          </ToggleButtonGroup>
+          {onDelete && (
+            <Tooltip title="Notiz löschen">
+              <IconButton size="small" color="error" onClick={onDelete}>
+                <DeleteIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </>
+      }
+      actions={
+        <>
+          <Button onClick={onClose}>Abbrechen</Button>
+          <Button variant="contained" onClick={handleSave}>
+            Speichern
+          </Button>
+        </>
+      }
     >
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 1, justifyContent: 'flex-end' }}>
-        <ToggleButtonGroup
-          value={mode}
-          exclusive
-          onChange={(_, val) => val && setMode(val)}
-          size="small"
-        >
-          <ToggleButton value="edit" aria-label="Bearbeiten">
-            <EditIcon fontSize="inherit" />
-          </ToggleButton>
-          <ToggleButton value="preview" aria-label="Vorschau">
-            <PreviewIcon fontSize="inherit" />
-          </ToggleButton>
-        </ToggleButtonGroup>
-        {onDelete && (
-          <Tooltip title="Notiz löschen">
-            <IconButton size="small" color="error" onClick={onDelete}>
-              <DeleteIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-        )}
-        <Tooltip title="Schließen">
-          <IconButton size="small" onClick={onClose}>
-            <CloseIcon fontSize="inherit" />
-          </IconButton>
-        </Tooltip>
-      </DialogTitle>
-      <Divider />
-      <DialogContent sx={{ flex: 1, overflow: 'auto', p: mode === 'preview' ? 3 : 1 }}>
+      <Box sx={{ flex: 1, overflow: 'auto', p: mode === 'preview' ? 3 : 1 }}>
         {mode === 'edit' ? (
           <TextField
             multiline
@@ -116,14 +122,8 @@ function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) 
             <ReactMarkdown>{content || '*Keine Inhalte*'}</ReactMarkdown>
           </Box>
         )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Abbrechen</Button>
-        <Button variant="contained" onClick={handleSave}>
-          Speichern
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </Box>
+    </MyModal>
   )
 }
 

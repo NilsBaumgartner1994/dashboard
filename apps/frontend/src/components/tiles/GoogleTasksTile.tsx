@@ -19,10 +19,6 @@ import {
   Select,
   FormControl,
   InputLabel,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import AssignmentIcon from '@mui/icons-material/Assignment'
@@ -30,7 +26,6 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import CloseIcon from '@mui/icons-material/Close'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
@@ -50,6 +45,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
+import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
 
@@ -1081,14 +1077,25 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
       </LargeModal>
 
       {/* ── Add task dialog ──────────────────────────────────────────────── */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center' }}>
-          <Box sx={{ flex: 1 }}>Neue Aufgabe</Box>
-          <IconButton size="small" onClick={() => setAddOpen(false)}>
-            <CloseIcon fontSize="inherit" />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
+      <MyModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Neue Aufgabe"
+        actions={
+          <>
+            <Button onClick={() => setAddOpen(false)}>Abbrechen</Button>
+            <Button
+              variant="contained"
+              onClick={handleAddTask}
+              disabled={!newTitle.trim() || addLoading}
+              startIcon={addLoading ? <CircularProgress size={14} /> : <CheckIcon />}
+            >
+              Hinzufügen
+            </Button>
+          </>
+        }
+      >
+        <Box sx={{ p: 2 }}>
           <TextField
             autoFocus
             fullWidth
@@ -1149,19 +1156,8 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
               ))}
             </Select>
           </FormControl>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>Abbrechen</Button>
-          <Button
-            variant="contained"
-            onClick={handleAddTask}
-            disabled={!newTitle.trim() || addLoading}
-            startIcon={addLoading ? <CircularProgress size={14} /> : <CheckIcon />}
-          >
-            Hinzufügen
-          </Button>
-        </DialogActions>
-      </Dialog>
+        </Box>
+      </MyModal>
     </>
   )
 }

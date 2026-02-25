@@ -44,6 +44,7 @@ import PersonIcon from '@mui/icons-material/Person'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import DeleteIcon from '@mui/icons-material/Delete'
 import BaseTile from './BaseTile'
+import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 
@@ -97,7 +98,7 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
     setImageUploading(name)
     try {
       const formData = new FormData()
-      formData.append('voice_image', file)
+      formData.append('image', file)
       const res = await fetch(`${ttsUrl}/voices/${encodeURIComponent(name)}/image`, {
         method: 'POST',
         body: formData,
@@ -128,12 +129,8 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
-        <Box sx={{ flex: 1 }}>{title}</Box>
-        <IconButton size="small" onClick={onClose}><CloseIcon fontSize="inherit" /></IconButton>
-      </DialogTitle>
-      <DialogContent dividers>
+    <MyModal open={open} onClose={onClose} title={title}>
+      <Box sx={{ p: 2 }}>
         <TextField
           fullWidth
           size="small"
@@ -240,8 +237,8 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
             </Card>
           ))}
         </Box>
-      </DialogContent>
-    </Dialog>
+      </Box>
+    </MyModal>
   )
 }
 
