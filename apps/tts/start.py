@@ -478,14 +478,17 @@ async def generate_endpoint(request_body: dict = Body(...)):
                 )
             elif model_state.base_model_1_7b:
                 # Fallback to Base model for simple TTS if CustomVoice not available
+                # Base model requires either voice_clone_prompt or ref_audio for voice_clone
+                # For simple TTS without cloning, we need to use voice_clone_prompt
                 tts = model_state.base_model_1_7b
+
+                # Create a simple voice clone prompt with a default description
+                voice_clone_prompt = f"A clear and natural {voice.lower()} voice"
 
                 wavs, sr = tts.generate_voice_clone(
                     text=text,
                     language=language,
-                    ref_audio=None,  # No reference audio for simple generation
-                    ref_text=None,
-                    x_vector_only_mode=True,  # Use x-vector only mode for simple generation
+                    voice_clone_prompt=voice_clone_prompt,
                     max_new_tokens=2048,
                 )
             else:
