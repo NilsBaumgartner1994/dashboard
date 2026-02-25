@@ -250,6 +250,8 @@ function parseInlineToolCalls(content: string): Array<{ function: { name: string
 interface OllamaMessage {
   role: string;
   content: string | null;
+  /** Base64-encoded images for multimodal models (e.g. llava, llama3.2-vision). */
+  images?: string[];
   tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
 }
 
@@ -654,7 +656,7 @@ export default defineEndpoint({
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
       const { messages, model, tools, allowInternet = true, thinking = false } = req.body as {
-        messages?: Array<{ role: string; content: string }>;
+        messages?: Array<{ role: string; content: string; images?: string[] }>;
         model?: string;
         tools?: unknown[];
         allowInternet?: boolean;
@@ -676,6 +678,17 @@ export default defineEndpoint({
 
       const jobId = `job-${crypto.randomUUID()}`;
       const abortController = new AbortController();
+
+      // Strip the `data:<mime>;base64,` prefix from any image data URLs so that
+      // Ollama receives raw base64 strings as required by its multimodal API.
+      const ollamaMessages: OllamaMessage[] = (messages as Array<{ role: string; content: string; images?: string[] }>).map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+        ...(msg.images && msg.images.length > 0
+          ? { images: msg.images.map((img) => img.replace(/^data:[^;]+;base64,/, '')) }
+          : {}),
+      }));
+
       const job: Job = {
         status: 'pending',
         partialContent: '',
@@ -695,7 +708,7 @@ export default defineEndpoint({
       // Start inference in the background – do NOT await
       // The status is set to 'aborted' before abort() is called in the DELETE handler,
       // so by the time this .catch() callback runs (next event-loop tick), the check is reliable.
-      runAgentLoop(messages as OllamaMessage[], model ?? DEFAULT_MODEL, effectiveTools, job, thinking).catch((err) => {
+      runAgentLoop(ollamaMessages, model ?? DEFAULT_MODEL, effectiveTools, job, thinking).catch((err) => {
         if (job.status === 'aborted') return;
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);

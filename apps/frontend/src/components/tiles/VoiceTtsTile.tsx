@@ -23,8 +23,8 @@ import {
   InputLabel,
   Checkbox,
   FormControlLabel,
-  LinearProgress,
 } from '@mui/material'
+import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
@@ -32,10 +32,6 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import CloseIcon from '@mui/icons-material/Close'
-import MicIcon from '@mui/icons-material/Mic'
-import StopCircleIcon from '@mui/icons-material/StopCircle'
-import DownloadIcon from '@mui/icons-material/Download'
-import DeleteIcon from '@mui/icons-material/Delete'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -183,17 +179,9 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [refText, setRefText] = useState('')
   const [useXVectorOnly, setUseXVectorOnly] = useState(false)
   const [newVoiceName, setNewVoiceName] = useState('')
-
-  // Audio recording state
-  const [isRecording, setIsRecording] = useState(false)
-  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-
-  // Time estimation state
-  const [estimatedTime, setEstimatedTime] = useState<number | null>(null)
-  const [elapsedTime, setElapsedTime] = useState(0)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [voiceCloneDescription, setVoiceCloneDescription] = useState('')
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcribeError, setTranscribeError] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -222,57 +210,6 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     loadVoices()
   }, [ttsUrl, selectedVoice])
 
-  // Audio recording functions
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
-        }
-      }
-
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const audioUrl = URL.createObjectURL(audioBlob)
-        setRecordedAudioUrl(audioUrl)
-
-        // Convert blob to file and set as reference audio
-        const audioFile = new File([audioBlob], 'recorded-audio.webm', { type: 'audio/webm' })
-        setRefAudioFile(audioFile)
-
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop())
-      }
-
-      mediaRecorder.start()
-      setIsRecording(true)
-      setError(null)
-    } catch (err) {
-      setError(`Mikrofon-Fehler: ${String(err)}`)
-    }
-  }
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-    }
-  }
-
-  const deleteRecording = () => {
-    if (recordedAudioUrl) {
-      URL.revokeObjectURL(recordedAudioUrl)
-    }
-    setRecordedAudioUrl(null)
-    setRefAudioFile(null)
-    audioChunksRef.current = []
-  }
-
   const getAvailableModelSizes = (): string[] => {
     if (ttsMode === 'voice_design') return ['1.7B']
     return ['0.6B', '1.7B']
@@ -282,20 +219,26 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   useEffect(() => {
     return () => {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current)
-      if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl)
-      if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [recordedAudioUrl])
+  }, [])
 
-  const handleDownload = () => {
-    if (!audioUrl) return
-    const a = document.createElement('a')
-    a.href = audioUrl
-    a.download = `tts-${ttsMode}-${Date.now()}.wav`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
+  const handleTranscribe = useCallback(async () => {
+    if (!refAudioFile) return
+    setTranscribing(true)
+    setTranscribeError(null)
+    try {
+      const { pipeline } = await import('@xenova/transformers')
+      const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small')
+      const objectUrl = URL.createObjectURL(refAudioFile)
+      const result = await transcriber(objectUrl) as { text: string }
+      URL.revokeObjectURL(objectUrl)
+      setRefText(result.text.trim())
+    } catch (err) {
+      setTranscribeError(String(err))
+    } finally {
+      setTranscribing(false)
+    }
+  }, [refAudioFile])
 
   const handleGenerate = async () => {
     if (!textInput.trim()) return
@@ -308,34 +251,10 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setAudioUrl(null)
     setGenerationTimeMs(null)
     setPlaying(false)
-    setElapsedTime(0)
-    setEstimatedTime(null)
-
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current)
       audioBlobUrlRef.current = null
     }
-
-    // Fetch time estimation
-    try {
-      const estimateRes = await fetch(`${ttsUrl}/estimate-time`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textInput }),
-      })
-      if (estimateRes.ok) {
-        const estimateData = await estimateRes.json()
-        setEstimatedTime(estimateData.estimated_seconds)
-      }
-    } catch (err) {
-      console.warn('Failed to fetch time estimation:', err)
-    }
-
-    // Start elapsed time timer
-    const startTime = Date.now()
-    timerRef.current = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - startTime) / 1000))
-    }, 1000)
 
     const start = Date.now()
     try {
@@ -363,6 +282,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           formData.append('text', textInput)
           formData.append('language', language)
           formData.append('model_size', modelSize)
+          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
           res = await fetch(`${ttsUrl}/voices/clone`, {
             method: 'POST',
             body: formData,
@@ -377,6 +297,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
           formData.append('language', language)
           formData.append('use_xvector_only', String(useXVectorOnly))
           formData.append('model_size', modelSize)
+          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
           res = await fetch(`${ttsUrl}/voice-clone`, {
             method: 'POST',
             body: formData,
@@ -413,10 +334,6 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       setError(String(err))
     } finally {
       setLoading(false)
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
     }
   }
 
@@ -616,104 +533,33 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     Create New Voice Profile
                   </Typography>
                   <TextField fullWidth size="small" label="Voice Name" placeholder="e.g., Sarah" value={newVoiceName} onChange={(e) => setNewVoiceName(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
-
-                  {/* Audio Recording Section */}
-                  <Box sx={{ mb: 1, p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
-                      Audio aufnehmen oder hochladen
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                      {!isRecording && !recordedAudioUrl && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<MicIcon />}
-                          onClick={startRecording}
-                          disabled={loading}
-                        >
-                          Aufnahme starten
-                        </Button>
-                      )}
-                      {isRecording && (
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color="error"
-                          startIcon={<StopCircleIcon />}
-                          onClick={stopRecording}
-                        >
-                          Aufnahme stoppen
-                        </Button>
-                      )}
-                      {recordedAudioUrl && (
-                        <>
-                          <Typography variant="caption" color="success.main">
-                            ✓ Aufnahme bereit
-                          </Typography>
-                          <IconButton size="small" onClick={() => {
-                            const audio = new Audio(recordedAudioUrl)
-                            audio.play()
-                          }} title="Anhören">
-                            <PlayArrowIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton size="small" onClick={deleteRecording} title="Löschen" color="error">
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<MicIcon />}
-                            onClick={() => {
-                              deleteRecording()
-                              startRecording()
-                            }}
-                          >
-                            Neu aufnehmen
-                          </Button>
-                        </>
-                      )}
-                    </Box>
-                    {!recordedAudioUrl && (
-                      <>
-                        <Divider sx={{ my: 1 }}>oder</Divider>
-                        <input
-                          type="file"
-                          accept="audio/*"
-                          onChange={(e) => {
-                            setRefAudioFile(e.target.files?.[0] || null)
-                            if (recordedAudioUrl) {
-                              URL.revokeObjectURL(recordedAudioUrl)
-                              setRecordedAudioUrl(null)
-                            }
-                          }}
-                          disabled={loading}
-                          style={{ fontSize: '12px' }}
-                        />
-                      </>
+                  <Box sx={{ mb: 1 }}>
+                    <input type="file" accept="audio/*" onChange={(e) => setRefAudioFile(e.target.files?.[0] || null)} disabled={loading || transcribing} style={{ fontSize: '12px' }} />
+                    {refAudioFile && (<Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {refAudioFile.name}</Typography>)}
+                    {refAudioFile && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={transcribing ? <CircularProgress size={12} color="inherit" /> : <GraphicEqIcon fontSize="small" />}
+                        onClick={handleTranscribe}
+                        disabled={loading || transcribing}
+                        sx={{ mt: 0.5, fontSize: '0.7rem' }}
+                      >
+                        {transcribing ? 'Transkribiere…' : 'Transkribieren'}
+                      </Button>
                     )}
-                    {refAudioFile && !recordedAudioUrl && (
-                      <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
-                        ✓ {refAudioFile.name}
-                      </Typography>
-                    )}
+                    {transcribeError && (<Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{transcribeError}</Typography>)}
                   </Box>
-
-                  <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
+                  <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
                   <FormControlLabel
-                    control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || !!refText} />}
+                    control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || transcribing || !!refText} />}
                     label="Use x-vector only (no reference text needed, lower quality)"
                   />
                   <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                    <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
+                    <Button size="small" variant="contained" onClick={handleCreateVoice} disabled={loading || transcribing || !newVoiceName.trim() || !refAudioFile || (!refText && !useXVectorOnly)}>
                       Create & Continue
                     </Button>
-                    <Button size="small" variant="outlined" onClick={() => {
-                      setVoiceCloneSubMode('select')
-                      setNewVoiceName('')
-                      setRefAudioFile(null)
-                      setRefText('')
-                      deleteRecording()
-                    }} disabled={loading}>
+                    <Button size="small" variant="outlined" onClick={() => { setVoiceCloneSubMode('select'); setNewVoiceName(''); setRefAudioFile(null); setRefText(''); }} disabled={loading || transcribing}>
                       Cancel
                     </Button>
                   </Box>
@@ -722,6 +568,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
               {voices.length > 0 && (
                 <>
                   <TextField multiline minRows={2} maxRows={3} fullWidth size="small" label="Text to Synthesize" placeholder="Text eingeben…" value={textInput} onChange={(e) => setTextInput(e.target.value)} disabled={loading} onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) handleGenerate() }} />
+                  <TextField fullWidth size="small" label="Voice Description (optional)" placeholder="z.B. überrascht, fröhlich, traurig…" value={voiceCloneDescription} onChange={(e) => setVoiceCloneDescription(e.target.value)} disabled={loading} helperText="Beschreibe den gewünschten Sprachstil oder Emotionen" />
                   <FormControl fullWidth size="small">
                     <InputLabel>Language</InputLabel>
                     <Select value={language} label="Language" onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
@@ -796,33 +643,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                 </IconButton>
               </Tooltip>
             )}
-            {audioUrl && (
-              <Tooltip title="Herunterladen">
-                <IconButton size="small" color="success" onClick={handleDownload}>
-                  <DownloadIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
           </Box>
-
-          {/* Time Estimation Progress */}
-          {loading && estimatedTime !== null && (
-            <Box sx={{ mt: 1 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Fortschritt: {elapsedTime}s / ~{Math.ceil(estimatedTime)}s
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {estimatedTime > 0 ? Math.min(100, Math.round((elapsedTime / estimatedTime) * 100)) : 0}%
-                </Typography>
-              </Box>
-              <LinearProgress
-                variant="determinate"
-                value={estimatedTime > 0 ? Math.min(100, (elapsedTime / estimatedTime) * 100) : 0}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
-            </Box>
-          )}
 
           {/* Timing */}
           {generationTimeMs !== null && (
