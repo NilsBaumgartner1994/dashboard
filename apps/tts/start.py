@@ -44,9 +44,9 @@ LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "Germ
 
 # Optional: Configure which models to load via environment variables
 # Default: load all models
-LOAD_VOICE_DESIGN = os.environ.get("LOAD_VOICE_DESIGN", "true").lower() == "true"
+LOAD_VOICE_DESIGN = os.environ.get("LOAD_VOICE_DESIGN", "false").lower() == "true"
 LOAD_BASE_MODELS = os.environ.get("LOAD_BASE_MODELS", "true").lower() == "true"
-LOAD_CUSTOM_VOICE_MODELS = os.environ.get("LOAD_CUSTOM_VOICE_MODELS", "true").lower() == "true"
+LOAD_CUSTOM_VOICE_MODELS = os.environ.get("LOAD_CUSTOM_VOICE_MODELS", "false").lower() == "true"
 
 print(f"Model loading configuration:")
 print(f"  LOAD_VOICE_DESIGN: {LOAD_VOICE_DESIGN}")

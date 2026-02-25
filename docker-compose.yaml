@@ -18,11 +18,12 @@ services:
       # Optional: set HUGGING_FACE_HUB_TOKEN in .env for private/gated models.
       # Not required for the default public model.
       HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
-      # Optional: Control which models to load (saves memory if disabled)
-      # LOAD_VOICE_DESIGN: "${LOAD_VOICE_DESIGN:-true}"
-      # LOAD_BASE_MODELS: "${LOAD_BASE_MODELS:-true}"
-      # LOAD_CUSTOM_VOICE_MODELS: "${LOAD_CUSTOM_VOICE_MODELS:-true}"
-    mem_limit: ${TTS_MEMORY:-8g}
+      # Model loading configuration (default: only Base models to save memory)
+      # Enable additional models by setting to 'true' in .env:
+      LOAD_VOICE_DESIGN: "${LOAD_VOICE_DESIGN:-false}"
+      LOAD_BASE_MODELS: "${LOAD_BASE_MODELS:-true}"
+      LOAD_CUSTOM_VOICE_MODELS: "${LOAD_CUSTOM_VOICE_MODELS:-false}"
+    mem_limit: ${TTS_MEMORY:-4g}
 
   my-dashboard-ai:
     image: ollama/ollama:latest
