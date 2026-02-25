@@ -10,6 +10,6 @@ soundfile
 sox
 onnxruntime
 spaces
-torch
 numpy
 kernels
+qwen_tts @ git+https://github.com/QwenLM/Qwen3-TTS.git

@@ -3,9 +3,10 @@ FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# System deps for soundfile / scipy
+# System deps for soundfile / scipy and git for pip git dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -15,19 +16,12 @@ FROM base AS cpu-base
 
 # Install PyTorch CPU-only wheel first so the torch index is used
 RUN pip install --no-cache-dir \
-    torch==2.6.0+cpu \
-    torchaudio==2.6.0+cpu \
+    torch==2.8.0+cpu \
+    torchaudio==2.8.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Install remaining requirements (excluding torch/torchaudio already installed)
-RUN pip install --no-cache-dir \
-    fastapi==0.115.5 \
-    "uvicorn[standard]==0.32.1" \
-    transformers==4.57.3 \
-    huggingface_hub==0.36.2 \
-    soundfile==0.12.1 \
-    "numpy==2.0.2" \
-    scipy==1.14.1
+# Install all requirements from requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY start.py .
 
