@@ -638,6 +638,9 @@ async def generate_endpoint(request_body: dict = Body(...)):
 
         print(f"[INFO] TTS Request: text_len={len(text)}, mode={mode}, voice={voice}, language={language}, model_size={model_size}", file=sys.stderr)
 
+        import time
+        start_time = time.time()
+
         try:
             wavs = None
             sr = None
@@ -739,10 +742,19 @@ async def generate_endpoint(request_body: dict = Body(...)):
             print(f"[INFO] Audio generated successfully: sr={sr}, shape={wavs.shape if hasattr(wavs, 'shape') else 'N/A'}", file=sys.stderr)
             wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
 
+            # Track generation time for estimation
+            generation_time = time.time() - start_time
+            char_count = len(text)
+            word_count = len(text.split())
+            model_state.add_estimation_data(char_count, word_count, generation_time)
+
             return StreamingResponse(
                 iter([wav_bytes]),
                 media_type="audio/wav",
-                headers={"Content-Disposition": "attachment; filename=generated.wav"}
+                headers={
+                    "Content-Disposition": "attachment; filename=generated.wav",
+                    "X-Generation-Time-Ms": str(int(generation_time * 1000)),
+                }
             )
         except HTTPException:
             raise

@@ -32,6 +32,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import CloseIcon from '@mui/icons-material/Close'
+import MicIcon from '@mui/icons-material/Mic'
+import DownloadIcon from '@mui/icons-material/Download'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -191,6 +193,20 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioBlobUrlRef = useRef<string | null>(null)
 
+  // Browser recording state (for Voice Clone create mode)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+  const recordingStreamRef = useRef<MediaStream | null>(null)
+  const recordedBlobUrlRef = useRef<string | null>(null)
+  const recordingPlaybackRef = useRef<HTMLAudioElement | null>(null)
+
+  // Generation time estimation state
+  const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Load voices on mount
   useEffect(() => {
     const loadVoices = async () => {
@@ -215,10 +231,13 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     return ['0.6B', '1.7B']
   }
 
-  // Revoke object URL on unmount
+  // Revoke object URLs on unmount
   useEffect(() => {
     return () => {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current)
+      if (recordedBlobUrlRef.current) URL.revokeObjectURL(recordedBlobUrlRef.current)
+      if (recordingStreamRef.current) recordingStreamRef.current.getTracks().forEach((t) => t.stop())
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
     }
   }, [])
 
@@ -240,6 +259,84 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     }
   }, [refAudioFile])
 
+  // Browser audio recording handlers
+  const handleStartRecording = useCallback(async () => {
+    try {
+      if (recordedBlobUrlRef.current) {
+        URL.revokeObjectURL(recordedBlobUrlRef.current)
+        recordedBlobUrlRef.current = null
+      }
+      setRecordedAudioUrl(null)
+      setRefAudioFile(null)
+      recordingChunksRef.current = []
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      recordingStreamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, { type: 'audio/webm' })
+        const file = new File([blob], 'recording.webm', { type: 'audio/webm' })
+        setRefAudioFile(file)
+        const url = URL.createObjectURL(blob)
+        recordedBlobUrlRef.current = url
+        setRecordedAudioUrl(url)
+        stream.getTracks().forEach((t) => t.stop())
+        recordingStreamRef.current = null
+      }
+
+      recorder.start()
+      setIsRecording(true)
+    } catch (err) {
+      setError(`Mikrofon-Zugriff fehlgeschlagen: ${String(err)}`)
+    }
+  }, [])
+
+  const handleStopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }, [isRecording])
+
+  const handlePlayRecording = useCallback(() => {
+    if (!recordedAudioUrl) return
+    if (recordingPlaybackRef.current) {
+      recordingPlaybackRef.current.pause()
+      recordingPlaybackRef.current = null
+    }
+    const audio = new Audio(recordedAudioUrl)
+    recordingPlaybackRef.current = audio
+    audio.play().catch((err) => setError(String(err)))
+  }, [recordedAudioUrl])
+
+  const handleDiscardRecording = useCallback(() => {
+    if (recordingPlaybackRef.current) {
+      recordingPlaybackRef.current.pause()
+      recordingPlaybackRef.current = null
+    }
+    if (recordedBlobUrlRef.current) {
+      URL.revokeObjectURL(recordedBlobUrlRef.current)
+      recordedBlobUrlRef.current = null
+    }
+    setRecordedAudioUrl(null)
+    setRefAudioFile(null)
+  }, [])
+
+  const handleDownload = useCallback(() => {
+    if (!audioUrl) return
+    const a = document.createElement('a')
+    a.href = audioUrl
+    a.download = 'generated_audio.wav'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }, [audioUrl])
+
   const handleGenerate = async () => {
     if (!textInput.trim()) return
     if (ttsMode === 'voice_design' && !voiceDescription.trim()) return
@@ -251,10 +348,32 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setAudioUrl(null)
     setGenerationTimeMs(null)
     setPlaying(false)
+    setElapsedSeconds(0)
+    setEstimatedSeconds(null)
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current)
       audioBlobUrlRef.current = null
     }
+
+    // Fetch time estimate before generating
+    try {
+      const estimateRes = await fetch(`${ttsUrl}/estimate-time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textInput }),
+        signal: AbortSignal.timeout(5000),
+      })
+      if (estimateRes.ok) {
+        const estimateData = await estimateRes.json()
+        setEstimatedSeconds(estimateData.estimated_seconds)
+      }
+    } catch {
+      // Ignore estimate errors, generation continues regardless
+    }
+
+    // Start elapsed time counter
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    elapsedTimerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
 
     const start = Date.now()
     try {
@@ -333,6 +452,10 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     } catch (err) {
       setError(String(err))
     } finally {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current)
+        elapsedTimerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -534,8 +657,43 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   </Typography>
                   <TextField fullWidth size="small" label="Voice Name" placeholder="e.g., Sarah" value={newVoiceName} onChange={(e) => setNewVoiceName(e.target.value)} disabled={loading} sx={{ mb: 1 }} />
                   <Box sx={{ mb: 1 }}>
-                    <input type="file" accept="audio/*" onChange={(e) => setRefAudioFile(e.target.files?.[0] || null)} disabled={loading || transcribing} style={{ fontSize: '12px' }} />
-                    {refAudioFile && (<Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {refAudioFile.name}</Typography>)}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
+                      {!isRecording ? (
+                        <Tooltip title="Über Browser aufnehmen">
+                          <IconButton size="small" color="error" onClick={handleStartRecording} disabled={loading || transcribing}>
+                            <MicIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title="Aufnahme stoppen">
+                          <IconButton size="small" color="error" onClick={handleStopRecording}>
+                            <StopIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
+                    {isRecording && (
+                      <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                        ● Aufnahme läuft…
+                      </Typography>
+                    )}
+                    {recordedAudioUrl && !isRecording && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                        <Typography variant="caption" color="success.main">✓ Aufnahme vorhanden</Typography>
+                        <Tooltip title="Aufnahme abspielen">
+                          <IconButton size="small" onClick={handlePlayRecording}>
+                            <PlayArrowIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Aufnahme verwerfen & neu aufnehmen">
+                          <IconButton size="small" onClick={handleDiscardRecording}>
+                            <MicIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    )}
+                    {refAudioFile && !recordedAudioUrl && (<Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {refAudioFile.name}</Typography>)}
                     {refAudioFile && (
                       <Button
                         size="small"
@@ -643,10 +801,24 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                 </IconButton>
               </Tooltip>
             )}
+            {audioUrl && (
+              <Tooltip title="Herunterladen">
+                <IconButton size="small" color="primary" onClick={handleDownload}>
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
 
+          {/* Elapsed / estimated time counter */}
+          {loading && (
+            <Typography variant="caption" color="text.secondary">
+              {elapsedSeconds}s{estimatedSeconds !== null ? ` / ~${estimatedSeconds.toFixed(0)}s` : ''}
+            </Typography>
+          )}
+
           {/* Timing */}
-          {generationTimeMs !== null && (
+          {!loading && generationTimeMs !== null && (
             <Typography variant="caption" color="text.secondary">
               Generiert in {(generationTimeMs / 1000).toFixed(1)} s
             </Typography>
