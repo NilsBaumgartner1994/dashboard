@@ -10620,6 +10620,7 @@ __metadata:
     react-dom: "npm:^18.2.0"
     react-markdown: "npm:^10.1.0"
     react-router-dom: "npm:^6.22.3"
+    speech-to-text: "npm:^3.0.2"
     typescript: "npm:^5.2.2"
     vite: "npm:^5.2.0"
     zustand: "npm:^4.5.2"
@@ -17892,6 +17893,13 @@ __metadata:
   version: 3.0.2
   resolution: "spark-md5@npm:3.0.2"
   checksum: 10c0/3fd11735eac5e7d60d6006d99ac0a055f148a89e9baf5f0b51ac103022dec30556b44190b37f6737ca50f81e8e50dc13e724f9edf6290c412ff5ab2101ce7780
+  languageName: node
+  linkType: hard
+
+"speech-to-text@npm:^3.0.2":
+  version: 3.0.2
+  resolution: "speech-to-text@npm:3.0.2"
+  checksum: 10c0/44de83aac28d356e3a08f4b6dda0c7e0a44f0147ead986e3e6e49d6efd8637ce9cddcd271a96989c485443fbcd705e5f7ea81985e0e4865e59da6f819ad6aa72
   languageName: node
   linkType: hard
 
