@@ -45,6 +45,8 @@ import AiAgentTile from '../components/tiles/AiAgentTile'
 import VoiceTtsTile from '../components/tiles/VoiceTtsTile'
 import DockerLogsTile from '../components/tiles/DockerLogsTile'
 import SpeechToTextTile from '../components/tiles/SpeechToTextTile'
+import ReactCodeRenderTile from '../components/tiles/ReactCodeRenderTile'
+import SpeechLibraryTile from '../components/tiles/SpeechLibraryTile'
 
 const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
@@ -76,6 +78,31 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   voicetts: { label: 'Sprachausgabe (TTS)', component: VoiceTtsTile },
   dockerlogs: { label: 'Docker Logs', component: DockerLogsTile },
   speechtotext: { label: 'Speech to Text', component: SpeechToTextTile },
+  reactcoderender: { label: 'React Code Renderer', component: ReactCodeRenderTile },
+  speechlibrary: { label: 'Speech Aufnahme/Player', component: SpeechLibraryTile },
+}
+
+interface TileConnection {
+  from: TileInstance
+  to: TileInstance
+}
+
+function getTileConnections(tiles: TileInstance[]): TileConnection[] {
+  const byId = new Map(tiles.map((t) => [t.id, t]))
+  const connections: TileConnection[] = []
+
+  tiles.forEach((tile) => {
+    const targets = Array.isArray(tile.config?.outputTargets)
+      ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
+      : []
+    targets.forEach((targetId) => {
+      const target = byId.get(targetId)
+      if (!target) return
+      connections.push({ from: tile, to: target })
+    })
+  })
+
+  return connections
 }
 
 function DraggableTile({
@@ -221,6 +248,7 @@ export default function DashboardScreen() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  const tileConnections = getTileConnections(tiles)
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event
@@ -284,6 +312,39 @@ export default function DashboardScreen() {
               ))}
             </Box>
           </DndContext>
+          {!isMobile && tileConnections.length > 0 && (
+            <svg
+              width="100%"
+              height="100%"
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2 }}
+            >
+              <defs>
+                <marker id="tile-flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill={theme.palette.primary.main} />
+                </marker>
+              </defs>
+              {tileConnections.map((connection) => {
+                const fromX = ((connection.from.x + connection.from.w) / gridColumns) * 100
+                const fromY = (connection.from.y + connection.from.h / 2) * DESKTOP_ROW_HEIGHT
+                const toX = (connection.to.x / gridColumns) * 100
+                const toY = (connection.to.y + connection.to.h / 2) * DESKTOP_ROW_HEIGHT
+                const c1x = Math.min(98, fromX + 6)
+                const c2x = Math.max(2, toX - 6)
+                const key = `${connection.from.id}-${connection.to.id}`
+                return (
+                  <path
+                    key={key}
+                    d={`M ${fromX}% ${fromY} C ${c1x}% ${fromY}, ${c2x}% ${toY}, ${toX}% ${toY}`}
+                    stroke={theme.palette.primary.main}
+                    strokeWidth="2"
+                    fill="none"
+                    markerEnd="url(#tile-flow-arrow)"
+                    opacity="0.8"
+                  />
+                )
+              })}
+            </svg>
+          )}
           {editMode && (
             <Tooltip title="Add tile">
               <IconButton

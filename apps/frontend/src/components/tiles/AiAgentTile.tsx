@@ -38,6 +38,8 @@ import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { useTileFlowStore } from '../../store/useTileFlowStore'
+import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
 import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
@@ -709,6 +711,9 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
 
 export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const backendUrl = useStore((s) => s.backendUrl)
+  const tiles = useStore((s) => s.tiles)
+  const outputs = useTileFlowStore((s) => s.outputs)
+  const publishOutput = useTileFlowStore((s) => s.publishOutput)
   const [modalOpen, setModalOpen] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
 
@@ -881,6 +886,21 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
+  const latestConnectedPayload = getLatestConnectedPayload(tiles, outputs, tile.id)
+
+  const handleUseConnectedInput = () => {
+    const content = latestConnectedPayload?.content?.trim()
+    if (!content) return
+    const newMessages: Message[] = [...messages, { role: 'user', content }]
+    handleSetMessages(newMessages)
+  }
+
+  const handlePublishAssistantOutput = () => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    const content = lastAssistant?.content?.trim()
+    if (!content) return
+    publishOutput(tile.id, { content, dataType: 'text' })
+  }
 
   return (
     <>
@@ -1004,6 +1024,10 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             )}
           </Box>
           <Box sx={{ flex: 1, overflow: 'hidden', cursor: 'pointer' }} onClick={() => setModalOpen(true)}>
+            <Box sx={{ display: 'flex', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
+              <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); handleUseConnectedInput() }} disabled={!latestConnectedPayload?.content}>Input übernehmen</Button>
+              <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); handlePublishAssistantOutput() }} disabled={!messages.some((m) => m.role === 'assistant')}>Output senden</Button>
+            </Box>
             {messages.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 Tippe hier, um mit dem KI-Agenten zu chatten…
