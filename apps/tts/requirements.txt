@@ -13,3 +13,5 @@ numpy
 fastapi
 uvicorn[standard]
 huggingface_hub
+
+yt-dlp

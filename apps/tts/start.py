@@ -11,6 +11,10 @@ import asyncio
 import threading
 import sys
 import traceback
+import tempfile
+import subprocess
+import uuid
+from queue import Queue
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
@@ -118,6 +122,77 @@ class ModelState:
         return (estimate_by_chars * 0.7 + estimate_by_words * 0.3)
 
 model_state = ModelState()
+
+
+class GenerationJob:
+    def __init__(self, job_id: str, request_body: dict):
+        self.job_id = job_id
+        self.request_body = request_body
+        self.status = "queued"
+        self.progress = 0
+        self.message = "Queued"
+        self.error = None
+        self.audio_bytes = None
+        self.generation_time_ms = None
+
+
+class GenerationJobManager:
+    def __init__(self):
+        self.jobs = {}
+        self.queue: Queue[str] = Queue()
+        self.lock = threading.Lock()
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
+
+    def create_job(self, request_body: dict) -> GenerationJob:
+        job_id = str(uuid.uuid4())
+        job = GenerationJob(job_id=job_id, request_body=request_body)
+        with self.lock:
+            self.jobs[job_id] = job
+        self.queue.put(job_id)
+        return job
+
+    def get_job(self, job_id: str) -> GenerationJob | None:
+        with self.lock:
+            return self.jobs.get(job_id)
+
+    def _set_job_state(self, job_id: str, *, status: str, progress: int, message: str, error: str | None = None):
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return
+            job.status = status
+            job.progress = progress
+            job.message = message
+            job.error = error
+
+    def _worker_loop(self):
+        while True:
+            job_id = self.queue.get()
+            job = self.get_job(job_id)
+            if not job:
+                self.queue.task_done()
+                continue
+
+            try:
+                self._set_job_state(job_id, status="running", progress=10, message="Starting generation")
+                wav_bytes, generation_time_ms = run_generation_request(job.request_body, progress_callback=lambda progress, msg: self._set_job_state(job_id, status="running", progress=progress, message=msg))
+                with self.lock:
+                    if self.jobs.get(job_id):
+                        self.jobs[job_id].audio_bytes = wav_bytes
+                        self.jobs[job_id].generation_time_ms = generation_time_ms
+                        self.jobs[job_id].status = "completed"
+                        self.jobs[job_id].progress = 100
+                        self.jobs[job_id].message = "Completed"
+            except Exception as e:
+                self._set_job_state(job_id, status="failed", progress=100, message="Failed", error=f"{type(e).__name__}: {e}")
+                print(f"[ERROR] Job {job_id} failed: {type(e).__name__}: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+            finally:
+                self.queue.task_done()
+
+
+job_manager = GenerationJobManager()
 
 # FastAPI app
 app = FastAPI(title="Qwen3-TTS API", version="1.0.0")
@@ -593,193 +668,272 @@ async def voice_design_base64_endpoint(
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
 
 
+def run_generation_request(request_body: dict, progress_callback=None) -> tuple[bytes, int]:
+    if progress_callback is None:
+        progress_callback = lambda _p, _m: None
+
+    # Ensure request_body is a dict
+    if not isinstance(request_body, dict):
+        raise HTTPException(status_code=400, detail=f"Invalid request body type: {type(request_body).__name__}, expected dict")
+
+    text = request_body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text field is required and must not be empty")
+
+    mode = request_body.get("mode", "custom_voice").lower()
+    voice = request_body.get("voice", "Ryan")
+    language = request_body.get("language", "English")
+    model_id_str = request_body.get("model_id", "1.7B")
+
+    try:
+        model_size = str(model_id_str).split("-")[-1]
+    except Exception:
+        model_size = "1.7B"
+
+    if model_size not in MODEL_SIZES:
+        model_size = "1.7B"
+
+    import time
+    start_time = time.time()
+
+    wavs = None
+    sr = None
+
+    progress_callback(20, "Preparing model")
+
+    if mode == "voice_clone" and model_state.base_model_1_7b:
+        ref_audio_b64 = request_body.get("reference_audio_base64")
+        ref_text = request_body.get("reference_text", "")
+
+        if not ref_audio_b64:
+            raise HTTPException(status_code=400, detail="voice_clone mode requires reference_audio_base64")
+
+        try:
+            audio_bytes = base64.b64decode(ref_audio_b64)
+            audio_buffer = io.BytesIO(audio_bytes)
+            wav, sr = sf.read(audio_buffer)
+            wav = _normalize_audio(wav)
+            audio_tuple = (wav, int(sr))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode reference audio: {e}")
+
+        tts = model_state.BASE_MODELS[model_size]
+        progress_callback(35, "Generating voice clone")
+        wavs, sr = tts.generate_voice_clone(
+            text=text,
+            language=language,
+            ref_audio=audio_tuple,
+            ref_text=ref_text.strip() if ref_text else None,
+            x_vector_only_mode=not ref_text,
+            max_new_tokens=2048,
+        )
+
+    elif mode == "voice_design" and model_state.voice_design_model:
+        voice_description = request_body.get("voice", "A natural, clear voice")
+        progress_callback(35, "Generating voice design")
+        wavs, sr = model_state.voice_design_model.generate_voice_design(
+            text=text,
+            language=language,
+            instruct=voice_description,
+            non_streaming_mode=True,
+            max_new_tokens=2048,
+        )
+
+    elif mode == "voice_design" and not model_state.voice_design_model:
+        raise HTTPException(status_code=503, detail="VoiceDesign model not available")
+
+    else:
+        if model_state.CUSTOM_VOICE_MODELS.get(model_size):
+            progress_callback(35, "Generating custom voice")
+            wavs, sr = model_state.CUSTOM_VOICE_MODELS[model_size].generate_custom_voice(
+                text=text,
+                language=language,
+                speaker=voice.lower().replace(" ", "_"),
+                instruct=request_body.get("instruction", ""),
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
+        elif model_state.base_model_1_7b:
+            progress_callback(35, "Generating with base model")
+            dummy_audio = np.zeros(16000)
+            prompt = model_state.base_model_1_7b.create_voice_clone_prompt(
+                ref_audio=(dummy_audio, 16000),
+                x_vector_only_mode=True
+            )
+            wavs, sr = model_state.base_model_1_7b.generate_voice_clone(
+                text=text,
+                language=language,
+                voice_clone_prompt=prompt,
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
+        else:
+            raise HTTPException(status_code=503, detail="No TTS models available")
+
+    if wavs is None or sr is None:
+        raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+    progress_callback(85, "Encoding audio")
+    wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
+    generation_time = time.time() - start_time
+
+    char_count = len(text)
+    word_count = len(text.split())
+    model_state.add_estimation_data(char_count, word_count, generation_time)
+    progress_callback(95, "Finalizing")
+
+    return wav_bytes, int(generation_time * 1000)
+
+
+def parse_mmss_to_seconds(value: str) -> int:
+    try:
+        minute_part, second_part = value.strip().split(":", 1)
+        minutes = int(minute_part)
+        seconds = int(second_part)
+        if minutes < 0 or seconds < 0 or seconds > 59:
+            raise ValueError
+        return minutes * 60 + seconds
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid time format '{value}'. Expected MM:SS") from e
+
+
+
 # ============================================================================
 # UNIFIED GENERATE ENDPOINT (for Directus integration)
 # ============================================================================
 @app.post("/generate")
 @app.post("/tts/generate")
 async def generate_endpoint(request_body: dict = Body(...)):
-    """
-    Unified TTS generation endpoint for Directus integration.
-
-    Request body can contain:
-    {
-        "text": "Text to synthesize (required)",
-        "voice": "Speaker name (optional, default: Ryan)",
-        "model_id": "Model ID (optional)",
-        "mode": "voice_design|voice_clone|custom_voice (optional, default: custom_voice)",
-        "language": "Language (optional, default: English)",
-        "reference_audio_base64": "Base64 audio for voice clone (optional)",
-        "reference_text": "Text for voice clone reference (optional)"
-    }
-
-    Returns: audio/wav binary
-    """
+    """Synchronous TTS generation endpoint."""
     check_models_loaded()
 
     try:
-        # Debug: Log the request body type and content
-        print(f"[DEBUG] Request body type: {type(request_body)}", file=sys.stderr)
-        print(f"[DEBUG] Request body: {request_body}", file=sys.stderr)
-
-        # Ensure request_body is a dict
-        if not isinstance(request_body, dict):
-            print(f"[ERROR] Expected dict, got {type(request_body).__name__}", file=sys.stderr)
-            raise HTTPException(status_code=400, detail=f"Invalid request body type: {type(request_body).__name__}, expected dict")
-
-        text = request_body.get("text", "").strip()
-        if not text:
-            raise HTTPException(status_code=400, detail="text field is required and must not be empty")
-
-        mode = request_body.get("mode", "custom_voice").lower()
-        voice = request_body.get("voice", "Ryan")
-        language = request_body.get("language", "English")
-        model_id_str = request_body.get("model_id", "1.7B")
-
-        # Safely extract model size
-        try:
-            model_size = str(model_id_str).split("-")[-1]
-        except Exception as e:
-            print(f"[WARNING] Failed to parse model_id: {model_id_str}, using default 1.7B", file=sys.stderr)
-            model_size = "1.7B"
-
-        # Validate model size
-        if model_size not in MODEL_SIZES:
-            model_size = "1.7B"
-
-        print(f"[INFO] TTS Request: text_len={len(text)}, mode={mode}, voice={voice}, language={language}, model_size={model_size}", file=sys.stderr)
-
-        import time
-        start_time = time.time()
-
-        try:
-            wavs = None
-            sr = None
-
-            if mode == "voice_clone" and model_state.base_model_1_7b:
-                # Voice Clone mode
-                ref_audio_b64 = request_body.get("reference_audio_base64")
-                ref_text = request_body.get("reference_text", "")
-
-                if not ref_audio_b64:
-                    raise HTTPException(status_code=400, detail="voice_clone mode requires reference_audio_base64")
-
-                # Decode base64 audio
-                try:
-                    audio_bytes = base64.b64decode(ref_audio_b64)
-                    audio_buffer = io.BytesIO(audio_bytes)
-                    wav, sr = sf.read(audio_buffer)
-                    wav = _normalize_audio(wav)
-                    audio_tuple = (wav, int(sr))
-                except Exception as e:
-                    raise HTTPException(status_code=400, detail=f"Failed to decode reference audio: {e}")
-
-                tts = model_state.BASE_MODELS[model_size]
-                wavs, sr = tts.generate_voice_clone(
-                    text=text,
-                    language=language,
-                    ref_audio=audio_tuple,
-                    ref_text=ref_text.strip() if ref_text else None,
-                    x_vector_only_mode=not ref_text,
-                    max_new_tokens=2048,
-                )
-
-            elif mode == "voice_design" and model_state.voice_design_model:
-                # Voice Design mode
-                voice_description = request_body.get("voice", "A natural, clear voice")
-                print(f"[INFO] Generating VoiceDesign: '{text[:50]}...' with description: '{voice_description}'", file=sys.stderr)
-                wavs, sr = model_state.voice_design_model.generate_voice_design(
-                    text=text,
-                    language=language,
-                    instruct=voice_description,
-                    non_streaming_mode=True,
-                    max_new_tokens=2048,
-                )
-                print(f"[INFO] VoiceDesign generation completed", file=sys.stderr)
-
-            elif mode == "voice_design" and not model_state.voice_design_model:
-                # Voice Design not available, fallback to custom_voice
-                print(f"[WARNING] VoiceDesign not loaded, falling back to custom_voice mode", file=sys.stderr)
-                mode = "custom_voice"
-
-            # Custom Voice mode (default) or fallback from voice_design
-            if mode == "custom_voice":
-                if model_state.custom_voice_model_1_7b:
-                    # Use CustomVoice if available
-                    tts = model_state.CUSTOM_VOICE_MODELS[model_size]
-
-                    # Validate speaker
-                    if voice not in SPEAKERS:
-                        print(f"[WARNING] Speaker '{voice}' not in SPEAKERS, using 'Ryan'", file=sys.stderr)
-                        voice = "Ryan"  # Default speaker
-
-                    print(f"[INFO] Generating CustomVoice: speaker={voice}, text='{text[:50]}...'", file=sys.stderr)
-                    wavs, sr = tts.generate_custom_voice(
-                        text=text,
-                        language=language,
-                        speaker=voice.lower().replace(" ", "_"),
-                        instruct=request_body.get("instruction", ""),
-                        non_streaming_mode=True,
-                        max_new_tokens=2048,
-                    )
-                    print(f"[INFO] CustomVoice generation completed", file=sys.stderr)
-                elif model_state.base_model_1_7b:
-                    # Fallback to Base model for simple TTS if CustomVoice not available
-                    print(f"[INFO] Using Base model with x_vector_only mode", file=sys.stderr)
-
-                    # Create a dummy ref_audio to satisfy the interface
-                    # Generate a short silence as reference
-                    dummy_audio = np.zeros(16000)  # 1 second of silence at 16kHz
-
-                    prompt = model_state.base_model_1_7b.create_voice_clone_prompt(
-                        ref_audio=(dummy_audio, 16000),
-                        x_vector_only_mode=True
-                    )
-
-                    wavs, sr = model_state.base_model_1_7b.generate_voice_clone(
-                        text=text,
-                        language=language,
-                        voice_clone_prompt=prompt,
-                        non_streaming_mode=True,
-                        max_new_tokens=2048,
-                    )
-                    print(f"[INFO] Base model generation completed", file=sys.stderr)
-                else:
-                    raise HTTPException(status_code=503, detail="No TTS models available")
-
-            if wavs is None or sr is None:
-                raise HTTPException(status_code=500, detail="Failed to generate audio")
-
-            print(f"[INFO] Audio generated successfully: sr={sr}, shape={wavs.shape if hasattr(wavs, 'shape') else 'N/A'}", file=sys.stderr)
-            wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
-
-            # Track generation time for estimation
-            generation_time = time.time() - start_time
-            char_count = len(text)
-            word_count = len(text.split())
-            model_state.add_estimation_data(char_count, word_count, generation_time)
-
-            return StreamingResponse(
-                iter([wav_bytes]),
-                media_type="audio/wav",
-                headers={
-                    "Content-Disposition": "attachment; filename=generated.wav",
-                    "X-Generation-Time-Ms": str(int(generation_time * 1000)),
-                }
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            print(f"[ERROR] Generation failed: {type(e).__name__}: {e}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
-
+        wav_bytes, generation_time_ms = run_generation_request(request_body)
+        return StreamingResponse(
+            iter([wav_bytes]),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=generated.wav",
+                "X-Generation-Time-Ms": str(generation_time_ms),
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         print(f"[FATAL ERROR] Unexpected error in /generate endpoint: {type(e).__name__}: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {type(e).__name__}: {e}")
+
+
+@app.post('/generate/jobs')
+async def create_generate_job(request_body: dict = Body(...)):
+    """Creates an async TTS generation job."""
+    check_models_loaded()
+    job = job_manager.create_job(request_body)
+    return JSONResponse({
+        'job_id': job.job_id,
+        'status': job.status,
+        'progress': job.progress,
+        'message': job.message,
+    })
+
+
+@app.get('/generate/jobs/{job_id}')
+async def get_generate_job(job_id: str):
+    """Returns current status of a TTS job."""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='Job not found')
+
+    return JSONResponse({
+        'job_id': job.job_id,
+        'status': job.status,
+        'progress': job.progress,
+        'message': job.message,
+        'error': job.error,
+        'generation_time_ms': job.generation_time_ms,
+        'audio_ready': job.audio_bytes is not None,
+    })
+
+
+@app.get('/generate/jobs/{job_id}/audio')
+async def get_generate_job_audio(job_id: str):
+    """Downloads generated audio for a completed job."""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='Job not found')
+    if job.status != 'completed' or not job.audio_bytes:
+        raise HTTPException(status_code=409, detail='Audio is not ready yet')
+
+    return StreamingResponse(
+        iter([job.audio_bytes]),
+        media_type='audio/wav',
+        headers={
+            'Content-Disposition': f'attachment; filename={job.job_id}.wav',
+            'X-Generation-Time-Ms': str(job.generation_time_ms or 0),
+        }
+    )
+
+
+@app.post('/youtube-audio-clip')
+async def youtube_audio_clip(
+    url: str = Form(...),
+    start_time: str = Form(...),
+    end_time: str = Form(...),
+):
+    """Downloads and clips audio from a YouTube URL in the TTS container."""
+    start_seconds = parse_mmss_to_seconds(start_time)
+    end_seconds = parse_mmss_to_seconds(end_time)
+
+    if end_seconds <= start_seconds:
+        raise HTTPException(status_code=400, detail='end_time must be later than start_time')
+
+    duration = end_seconds - start_seconds
+    if duration > 120:
+        raise HTTPException(status_code=400, detail='Clip duration must be <= 120 seconds')
+
+    with tempfile.TemporaryDirectory(prefix='yt_clip_') as tmp_dir:
+        input_path = Path(tmp_dir) / 'source_audio.%(ext)s'
+        output_path = Path(tmp_dir) / 'clip.wav'
+
+        yt_cmd = [
+            'yt-dlp',
+            '-f', 'bestaudio/best',
+            '--no-playlist',
+            '-o', str(input_path),
+            url,
+        ]
+        yt_result = subprocess.run(yt_cmd, capture_output=True, text=True)
+        if yt_result.returncode != 0:
+            raise HTTPException(status_code=400, detail=f'YouTube download failed: {yt_result.stderr.strip() or yt_result.stdout.strip()}')
+
+        downloaded_files = list(Path(tmp_dir).glob('source_audio.*'))
+        if not downloaded_files:
+            raise HTTPException(status_code=500, detail='Downloaded audio file not found')
+
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-y',
+            '-ss', str(start_seconds),
+            '-i', str(downloaded_files[0]),
+            '-t', str(duration),
+            '-ar', '16000',
+            '-ac', '1',
+            str(output_path),
+        ]
+        ffmpeg_result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+        if ffmpeg_result.returncode != 0 or not output_path.exists():
+            raise HTTPException(status_code=500, detail=f'Audio clipping failed: {ffmpeg_result.stderr.strip() or ffmpeg_result.stdout.strip()}')
+
+        clip_bytes = output_path.read_bytes()
+
+    return StreamingResponse(
+        iter([clip_bytes]),
+        media_type='audio/wav',
+        headers={'Content-Disposition': 'attachment; filename=youtube_clip.wav'}
+    )
 
 
 # ============================================================================
@@ -1264,4 +1418,3 @@ async def clone_voice_with_training(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8880)
-

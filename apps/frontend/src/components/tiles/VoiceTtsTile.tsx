@@ -374,6 +374,12 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [useXVectorOnly, setUseXVectorOnly] = useState(false)
   const [newVoiceName, setNewVoiceName] = useState('')
   const [voiceCloneDescription, setVoiceCloneDescription] = useState('')
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeStartTime, setYoutubeStartTime] = useState('00:00')
+  const [youtubeEndTime, setYoutubeEndTime] = useState('00:10')
+  const [youtubeLoading, setYoutubeLoading] = useState(false)
+  const [jobProgress, setJobProgress] = useState<number | null>(null)
+  const [jobMessage, setJobMessage] = useState<string | null>(null)
   const [transcribing, setTranscribing] = useState(false)
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
   const [newVoiceImageFile, setNewVoiceImageFile] = useState<File | null>(null)
@@ -541,6 +547,37 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     document.body.removeChild(a)
   }, [audioUrl])
 
+  const handleYoutubeImport = async () => {
+    if (!youtubeUrl.trim()) return
+    setYoutubeLoading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('url', youtubeUrl.trim())
+      formData.append('start_time', youtubeStartTime)
+      formData.append('end_time', youtubeEndTime)
+
+      const res = await fetch(`${ttsUrl}/youtube-audio-clip`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(120_000),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${body}`)
+      }
+
+      const blob = await res.blob()
+      const file = new File([blob], 'youtube_clip.wav', { type: 'audio/wav' })
+      setRefAudioFile(file)
+      setRecordedAudioUrl(null)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setYoutubeLoading(false)
+    }
+  }
+
   const handleGenerate = async () => {
     if (!textInput.trim()) return
     if (ttsMode === 'voice_design' && !voiceDescription.trim()) return
@@ -554,6 +591,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setPlaying(false)
     setElapsedSeconds(0)
     setEstimatedSeconds(null)
+    setJobProgress(null)
+    setJobMessage(null)
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current)
       audioBlobUrlRef.current = null
@@ -581,78 +620,125 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
     const start = Date.now()
     try {
-      let res
+      let requestBody: Record<string, string> = {
+        text: textInput,
+        language,
+        model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-Base`,
+      }
 
       if (ttsMode === 'voice_design') {
-        const requestBody = {
-          text: textInput,
+        requestBody = {
+          ...requestBody,
           mode: 'voice_design',
-          language,
           voice: voiceDescription,
           model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-VoiceDesign`,
         }
-        res = await fetch(`${ttsUrl}/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(120_000),
-        })
       } else if (ttsMode === 'voice_clone') {
         if (voiceCloneSubMode === 'select') {
-          // Use saved voice
-          const formData = new FormData()
-          formData.append('voice_name', selectedVoice || '')
-          formData.append('text', textInput)
-          formData.append('language', language)
-          formData.append('model_size', modelSize)
-          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
-          res = await fetch(`${ttsUrl}/voices/clone`, {
+          const selectedVoiceData = voices.find((voiceItem) => voiceItem.name === selectedVoice)
+          if (!selectedVoiceData?.has_reference_audio) {
+            throw new Error('Selected voice has no reference audio')
+          }
+
+          const cloneFormData = new FormData()
+          cloneFormData.append('voice_name', selectedVoice || '')
+          cloneFormData.append('text', textInput)
+          cloneFormData.append('language', language)
+          cloneFormData.append('model_size', modelSize)
+          if (voiceCloneDescription.trim()) cloneFormData.append('voice_description', voiceCloneDescription)
+
+          const res = await fetch(`${ttsUrl}/voices/clone`, {
             method: 'POST',
-            body: formData,
+            body: cloneFormData,
             signal: AbortSignal.timeout(120_000),
           })
-        } else {
-          // Create new voice and generate
-          const formData = new FormData()
-          formData.append('ref_audio', refAudioFile!)
-          formData.append('ref_text', refText || '')
-          formData.append('target_text', textInput)
-          formData.append('language', language)
-          formData.append('use_xvector_only', String(useXVectorOnly))
-          formData.append('model_size', modelSize)
-          if (voiceCloneDescription.trim()) formData.append('voice_description', voiceCloneDescription)
-          res = await fetch(`${ttsUrl}/voice-clone`, {
-            method: 'POST',
-            body: formData,
-            signal: AbortSignal.timeout(120_000),
-          })
+
+          if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            throw new Error(`HTTP ${res.status}: ${body}`)
+          }
+
+          const elapsed = Date.now() - start
+          const headerMs = res.headers.get('X-Generation-Time-Ms')
+          setGenerationTimeMs(headerMs ? parseInt(headerMs, 10) : elapsed)
+          const blob = await res.blob()
+          const url = URL.createObjectURL(blob)
+          audioBlobUrlRef.current = url
+          setAudioUrl(url)
+          return
         }
-      } else if (ttsMode === 'custom_voice') {
-        const formData = new FormData()
-        formData.append('text', textInput)
-        formData.append('language', language)
-        formData.append('speaker', speaker)
-        formData.append('instruct', styleInstruction)
-        formData.append('model_size', modelSize)
-        res = await fetch(`${ttsUrl}/custom-voice`, {
-          method: 'POST',
-          body: formData,
+
+        const refAudioBuffer = await refAudioFile!.arrayBuffer()
+        const referenceAudioBase64 = btoa(String.fromCharCode(...new Uint8Array(refAudioBuffer)))
+        requestBody = {
+          ...requestBody,
+          mode: 'voice_clone',
+          reference_audio_base64: referenceAudioBase64,
+          reference_text: refText || '',
+        }
+      } else {
+        requestBody = {
+          ...requestBody,
+          mode: 'custom_voice',
+          voice: speaker,
+          instruction: styleInstruction,
+          model_id: `Qwen/Qwen3-TTS-12Hz-${modelSize}-CustomVoice`,
+        }
+      }
+
+      const createJobResponse = await fetch(`${ttsUrl}/generate/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(120_000),
+      })
+      if (!createJobResponse.ok) {
+        const body = await createJobResponse.text().catch(() => '')
+        throw new Error(`HTTP ${createJobResponse.status}: ${body}`)
+      }
+
+      const createJobData = await createJobResponse.json()
+      const jobId = createJobData.job_id as string
+
+      while (true) {
+        const statusRes = await fetch(`${ttsUrl}/generate/jobs/${jobId}`, {
+          method: 'GET',
           signal: AbortSignal.timeout(120_000),
         })
-      }
+        if (!statusRes.ok) {
+          const body = await statusRes.text().catch(() => '')
+          throw new Error(`HTTP ${statusRes.status}: ${body}`)
+        }
 
-      if (!res!.ok) {
-        const body = await res!.text().catch(() => '')
-        throw new Error(`HTTP ${res!.status}: ${body}`)
-      }
-      const elapsed = Date.now() - start
-      const headerMs = res!.headers.get('X-Generation-Time-Ms')
-      setGenerationTimeMs(headerMs ? parseInt(headerMs, 10) : elapsed)
+        const statusData = await statusRes.json()
+        setJobProgress(typeof statusData.progress === 'number' ? statusData.progress : null)
+        setJobMessage(statusData.message || null)
 
-      const blob = await res!.blob()
-      const url = URL.createObjectURL(blob)
-      audioBlobUrlRef.current = url
-      setAudioUrl(url)
+        if (statusData.status === 'completed') {
+          const audioRes = await fetch(`${ttsUrl}/generate/jobs/${jobId}/audio`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(120_000),
+          })
+          if (!audioRes.ok) {
+            const body = await audioRes.text().catch(() => '')
+            throw new Error(`HTTP ${audioRes.status}: ${body}`)
+          }
+          const elapsed = Date.now() - start
+          const headerMs = audioRes.headers.get('X-Generation-Time-Ms')
+          setGenerationTimeMs(headerMs ? parseInt(headerMs, 10) : elapsed)
+          const blob = await audioRes.blob()
+          const url = URL.createObjectURL(blob)
+          audioBlobUrlRef.current = url
+          setAudioUrl(url)
+          break
+        }
+
+        if (statusData.status === 'failed') {
+          throw new Error(statusData.error || 'TTS job failed')
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -661,6 +747,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
         elapsedTimerRef.current = null
       }
       setLoading(false)
+      setJobProgress(null)
+      setJobMessage(null)
     }
   }
 
@@ -997,7 +1085,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   </Divider>
                   <Box sx={{ mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                      <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
+                      <input type="file" accept="audio/*" onChange={(e) => { setRefAudioFile(e.target.files?.[0] || null); setRecordedAudioUrl(null) }} disabled={loading || transcribing || isRecording || youtubeLoading} style={{ fontSize: '12px', flex: 1, minWidth: 0 }} />
                       {!isRecording ? (
                         <Tooltip title="Über Browser aufnehmen">
                           <IconButton size="small" color="error" onClick={handleStartRecording} disabled={loading || transcribing}>
@@ -1046,6 +1134,17 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                       </Button>
                     )}
                     {transcribeError && (<Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{transcribeError}</Typography>)}
+                    <Divider sx={{ my: 1 }}>
+                      <Typography variant="caption" color="text.secondary">YouTube Clip Import</Typography>
+                    </Divider>
+                    <TextField fullWidth size="small" label="YouTube URL" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} disabled={loading || youtubeLoading} sx={{ mb: 1 }} />
+                    <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                      <TextField fullWidth size="small" label="Start (MM:SS)" value={youtubeStartTime} onChange={(e) => setYoutubeStartTime(e.target.value)} disabled={loading || youtubeLoading} />
+                      <TextField fullWidth size="small" label="Ende (MM:SS)" value={youtubeEndTime} onChange={(e) => setYoutubeEndTime(e.target.value)} disabled={loading || youtubeLoading} />
+                    </Box>
+                    <Button size="small" variant="outlined" onClick={handleYoutubeImport} disabled={loading || youtubeLoading || !youtubeUrl.trim()}>
+                      {youtubeLoading ? 'Lade Clip…' : 'YouTube Clip laden'}
+                    </Button>
                   </Box>
                   <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
                   <FormControlLabel
@@ -1169,7 +1268,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                 loading ||
                 !textInput.trim() ||
                 (ttsMode === 'voice_design' && !voiceDescription.trim()) ||
-                (ttsMode === 'voice_clone' && !selectedVoice)
+                (ttsMode === 'voice_clone' && voiceCloneSubMode === 'select' && !selectedVoice) ||
+                (ttsMode === 'voice_clone' && voiceCloneSubMode === 'create' && (!refAudioFile || (!refText && !useXVectorOnly)))
               }
               startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <RecordVoiceOverIcon fontSize="small" />}
               sx={{ flex: 1 }}
@@ -1201,9 +1301,16 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
           {/* Elapsed / estimated time counter */}
           {loading && (
-            <Typography variant="caption" color="text.secondary">
-              {elapsedSeconds}s{estimatedSeconds !== null ? ` / ~${estimatedSeconds.toFixed(0)}s` : ''}
-            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+              <Typography variant="caption" color="text.secondary">
+                {elapsedSeconds}s{estimatedSeconds !== null ? ` / ~${estimatedSeconds.toFixed(0)}s` : ''}
+              </Typography>
+              {jobProgress !== null && (
+                <Typography variant="caption" color="text.secondary">
+                  Job: {jobProgress}%{jobMessage ? ` · ${jobMessage}` : ''}
+                </Typography>
+              )}
+            </Box>
           )}
 
           {/* Timing */}
