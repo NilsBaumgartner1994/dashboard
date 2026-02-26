@@ -26,7 +26,6 @@ import {
   Card,
   CardActionArea,
   CardContent,
-  CardMedia,
   InputAdornment,
 } from '@mui/material'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
@@ -43,6 +42,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import PersonIcon from '@mui/icons-material/Person'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import DeleteIcon from '@mui/icons-material/Delete'
+import HideImageIcon from '@mui/icons-material/HideImage'
 import BaseTile from './BaseTile'
 import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
@@ -162,18 +162,30 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
                 flexShrink: 0,
               }}
             >
+              {manageImages && (
+                <input
+                  ref={(el) => { imageInputRefs.current[item.name] = el }}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleImageUpload(item.name, file)
+                    e.target.value = ''
+                  }}
+                />
+              )}
               <CardActionArea onClick={() => { onSelect(item.name); onClose() }}>
-                <Box sx={{ position: 'relative' }}>
+                <Box sx={{ position: 'relative', width: '100%', aspectRatio: '1 / 1' }}>
                   {item.imageUrl ? (
-                    <CardMedia
+                    <Box
                       component="img"
-                      height="100"
-                      image={item.imageUrl}
+                      src={item.imageUrl}
                       alt={item.name}
-                      sx={{ objectFit: 'cover' }}
+                      sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     />
                   ) : (
-                    <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
                       <PersonIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                     </Box>
                   )}
@@ -181,6 +193,42 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
                     <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(0,0,0,0.4)' }}>
                       <CircularProgress size={24} sx={{ color: 'white' }} />
                     </Box>
+                  )}
+                  {/* Image upload overlay button (bottom-right) */}
+                  {manageImages && (
+                    <Tooltip title="Bild hochladen">
+                      <Box
+                        component="span"
+                        onClick={(e) => { e.stopPropagation(); imageInputRefs.current[item.name]?.click() }}
+                        sx={{ position: 'absolute', bottom: 2, right: 2 }}
+                      >
+                        <IconButton
+                          size="small"
+                          sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: 'white', '&:hover': { bgcolor: 'rgba(0,0,0,0.75)' }, p: '3px' }}
+                          disabled={imageUploading === item.name}
+                        >
+                          <AddPhotoAlternateIcon sx={{ fontSize: '0.85rem' }} />
+                        </IconButton>
+                      </Box>
+                    </Tooltip>
+                  )}
+                  {/* Image delete overlay button (top-right) – only for the image, not the voice */}
+                  {manageImages && item.imageUrl && (
+                    <Tooltip title="Bild entfernen">
+                      <Box
+                        component="span"
+                        onClick={(e) => { e.stopPropagation(); handleImageDelete(item.name) }}
+                        sx={{ position: 'absolute', top: 2, right: 2 }}
+                      >
+                        <IconButton
+                          size="small"
+                          sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: 'white', '&:hover': { bgcolor: 'rgba(180,0,0,0.75)' }, p: '3px' }}
+                          disabled={imageUploading === item.name}
+                        >
+                          <HideImageIcon sx={{ fontSize: '0.85rem' }} />
+                        </IconButton>
+                      </Box>
+                    </Tooltip>
                   )}
                 </Box>
                 <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
@@ -194,46 +242,6 @@ function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUr
                   )}
                 </CardContent>
               </CardActionArea>
-              {manageImages && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, px: 0.5, pb: 0.5 }} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    ref={(el) => { imageInputRefs.current[item.name] = el }}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) handleImageUpload(item.name, file)
-                      e.target.value = ''
-                    }}
-                  />
-                  <Tooltip title="Bild hochladen">
-                    <span>
-                      <IconButton
-                        size="small"
-                        onClick={() => imageInputRefs.current[item.name]?.click()}
-                        disabled={imageUploading === item.name}
-                      >
-                        <AddPhotoAlternateIcon fontSize="inherit" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  {item.imageUrl && (
-                    <Tooltip title="Bild löschen">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleImageDelete(item.name)}
-                          disabled={imageUploading === item.name}
-                        >
-                          <DeleteIcon fontSize="inherit" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  )}
-                </Box>
-              )}
             </Card>
           ))}
         </Box>
@@ -831,6 +839,20 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               {voiceCloneSubMode === 'select' ? (
                 <>
+                  {/* Selected voice image + name display */}
+                  {selectedVoice && voices.find((v) => v.name === selectedVoice)?.has_image && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                      <Box
+                        component="img"
+                        src={`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`}
+                        alt={selectedVoice}
+                        sx={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '2px solid', borderColor: 'primary.main' }}
+                      />
+                      <Typography variant="caption" fontWeight="bold" sx={{ textAlign: 'center' }}>
+                        {selectedVoice}
+                      </Typography>
+                    </Box>
+                  )}
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Button
                       size="small"
@@ -839,19 +861,12 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                       onClick={() => setVoiceSelectModalOpen(true)}
                       disabled={loading}
                       startIcon={
-                        selectedVoice && voices.find((v) => v.name === selectedVoice)?.has_image ? (
-                          <Box
-                            component="img"
-                            src={`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`}
-                            alt={selectedVoice}
-                            sx={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover' }}
-                          />
-                        ) : (
+                        selectedVoice && !voices.find((v) => v.name === selectedVoice)?.has_image ? (
                           <PersonIcon fontSize="small" />
-                        )
+                        ) : undefined
                       }
                     >
-                      {selectedVoice || 'Stimme auswählen…'}
+                      {selectedVoice ? 'Stimme wechseln…' : 'Stimme auswählen…'}
                     </Button>
                   </Box>
                   <Button size="small" variant="outlined" onClick={() => setVoiceCloneSubMode('create')} disabled={loading}>
@@ -934,13 +949,15 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                   </Divider>
                   <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1 }}>
                     <Card variant="outlined" sx={{ width: 90, flexShrink: 0, cursor: 'pointer' }} onClick={() => newVoiceImageInputRef.current?.click()}>
-                      {newVoiceImagePreview ? (
-                        <CardMedia component="img" height="90" image={newVoiceImagePreview} alt="Profilbild Vorschau" sx={{ objectFit: 'cover' }} />
-                      ) : (
-                        <Box sx={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
-                          <PersonIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
-                        </Box>
-                      )}
+                      <Box sx={{ width: '100%', aspectRatio: '1 / 1', position: 'relative', overflow: 'hidden' }}>
+                        {newVoiceImagePreview ? (
+                          <Box component="img" src={newVoiceImagePreview} alt="Profilbild Vorschau" sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                        ) : (
+                          <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                            <PersonIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
+                          </Box>
+                        )}
+                      </Box>
                       <CardContent sx={{ p: 0.5, '&:last-child': { pb: 0.5 } }}>
                         <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', fontSize: '0.6rem', color: 'text.secondary' }}>
                           {newVoiceImageFile ? newVoiceImageFile.name.substring(0, 12) + (newVoiceImageFile.name.length > 12 ? '…' : '') : 'Kein Bild'}
