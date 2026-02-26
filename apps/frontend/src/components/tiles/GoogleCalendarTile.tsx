@@ -37,6 +37,7 @@ import type { CalendarEventData } from './CalendarEventItem'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
@@ -63,6 +64,8 @@ interface GoogleCalendarConfig {
   showReloadBars?: boolean
   showLastUpdate?: boolean
   calculateTravelTime?: boolean
+  showEventLinks?: boolean
+  showEventCodes?: boolean
 }
 
 // ─── Geocoding + routing helpers (shared with RouteTile) ──────────────────────
@@ -182,6 +185,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const showReloadBars = config.showReloadBars ?? false
   const showLastUpdate = config.showLastUpdate ?? false
   const calculateTravelTime = config.calculateTravelTime ?? false
+  const showEventLinks = config.showEventLinks ?? false
+  const showEventCodes = config.showEventCodes ?? false
 
   // Global default location (for travel time calculation)
   const defaultLat = useStore((s) => s.defaultLat)
@@ -229,6 +234,7 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedLink, setCopiedLink] = useState<string | null>(null)
   const [lastEventsUpdate, setLastEventsUpdate] = useState<number | null>(null)
   // Incrementing this triggers an events reload
   const [reloadTrigger, setReloadTrigger] = useState(0)
@@ -265,6 +271,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
   const [settingsShowReloadBars, setSettingsShowReloadBars] = useState(showReloadBars)
   const [settingsShowLastUpdate, setSettingsShowLastUpdate] = useState(showLastUpdate)
   const [settingsCalculateTravelTime, setSettingsCalculateTravelTime] = useState(calculateTravelTime)
+  const [settingsShowEventLinks, setSettingsShowEventLinks] = useState(showEventLinks)
+  const [settingsShowEventCodes, setSettingsShowEventCodes] = useState(showEventCodes)
 
   // ── Travel time state (event id → rounded minutes) ────────────────────────
   const [eventTravelMinutes, setEventTravelMinutes] = useState<Record<string, number>>({})
@@ -684,6 +692,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
     setSettingsShowReloadBars(showReloadBars)
     setSettingsShowLastUpdate(showLastUpdate)
     setSettingsCalculateTravelTime(calculateTravelTime)
+    setSettingsShowEventLinks(showEventLinks)
+    setSettingsShowEventCodes(showEventCodes)
   }
 
   const getExtraConfig = () => {
@@ -698,6 +708,8 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
       showReloadBars: settingsShowReloadBars,
       showLastUpdate: settingsShowLastUpdate,
       calculateTravelTime: settingsCalculateTravelTime,
+      showEventLinks: settingsShowEventLinks,
+      showEventCodes: settingsShowEventCodes,
     }
   }
 
@@ -835,11 +847,56 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
         label="Fahrtzeit berechnen (benötigt globalen Startort)"
         sx={{ display: 'block', mt: 1 }}
       />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={settingsShowEventLinks}
+            onChange={(e) => setSettingsShowEventLinks(e.target.checked)}
+            size="small"
+          />
+        }
+        label="Links für den Tag anzeigen (nur heutige Termine)"
+        sx={{ display: 'block', mt: 1 }}
+      />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={settingsShowEventCodes}
+            onChange={(e) => setSettingsShowEventCodes(e.target.checked)}
+            size="small"
+          />
+        }
+        label="Kenncodes anzeigen (z.B. Kenncode: XXXX in Beschreibung)"
+        sx={{ display: 'block', mt: 1 }}
+      />
     </>
   )
 
   // ── Event formatting helper ──────────────────────────────────────────────
   // (formatEventTime is now in CalendarEventItem.tsx)
+
+  // ── Helper: extract URLs from event description ──────────────────────────
+  const extractEventLinks = (description?: string): string[] => {
+    if (!description) return []
+    const urlRegex = /https?:\/\/[^\s<>")\]]+/g
+    return Array.from(description.matchAll(urlRegex))
+      .map((m) => m[0].replace(/[.,;:!?]+$/, ''))
+  }
+
+  // ── Helper: extract Kenncode from event description ──────────────────────
+  const extractKenncode = (description?: string): string | null => {
+    if (!description) return null
+    const match = description.match(/Kenncode:\s*(\S+)/i)
+    return match ? match[1] : null
+  }
+
+  // ── Shared link action handlers ──────────────────────────────────────────
+  const handleOpenLink = (link: string) => window.open(link, '_blank', 'noopener,noreferrer')
+  const handleCopyLink = (link: string) => {
+    navigator.clipboard.writeText(link)
+      .then(() => { setCopiedLink(link); setTimeout(() => setCopiedLink(null), 2000) })
+      .catch(() => {})
+  }
 
   // ── Calendar color lookup ────────────────────────────────────────────────
   const calColorMap: Record<string, string> = {}
@@ -962,7 +1019,9 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
 
       {tokenOk && !loading && grouped.length > 0 && (
         <Box sx={{ overflow: 'auto', flex: 1 }}>
-          {groupedWithToday.map((group) => (
+          {groupedWithToday.map((group) => {
+            const isToday = group.dateLabel === todayLabel
+            return (
             <Box key={group.dateLabel}>
               <Typography
                 variant="caption"
@@ -981,75 +1040,128 @@ function GoogleCalendarTileInner({ tile }: { tile: TileInstance }) {
                   {group.events.map((ev) => {
                     const evColor = ev.calendarId ? calColorMap[ev.calendarId] : undefined
                     const travelMin = calculateTravelTime && ev.location?.trim() ? eventTravelMinutes[ev.id] : undefined
+                    const links = isToday && showEventLinks ? extractEventLinks(ev.description) : []
+                    const kenncode = isToday && showEventCodes ? extractKenncode(ev.description) : null
+                    const hasExtras = links.length > 0 || kenncode !== null
                     if (travelMin !== undefined && ev.start.dateTime) {
                       const arrivalDate = new Date(ev.start.dateTime)
                       const departureDate = new Date(arrivalDate.getTime() - travelMin * 60 * 1000)
                       const deptStr = `${String(departureDate.getHours()).padStart(2, '0')}:${String(departureDate.getMinutes()).padStart(2, '0')}`
                       const arrStr = formatEventTime(ev)
                       return (
-                        <ListItem
-                          key={ev.id}
-                          disableGutters
-                          disablePadding
-                          sx={{ mb: 0.5, alignItems: 'flex-start', borderRadius: 1 }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5, width: '100%' }}>
-                            <Box
-                              component="span"
-                              sx={{
-                                fontSize: '0.65rem',
-                                bgcolor: evColor ?? 'action.selected',
-                                color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
-                                borderRadius: '12px',
-                                px: 1,
-                                py: 0.25,
-                                fontWeight: 'bold',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {deptStr}
-                            </Box>
-                            <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
-                              <DirectionsCarIcon sx={{ fontSize: '0.85rem', color: 'text.secondary' }} />
-                              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
-                                {travelMin} Min.
+                        <Box key={ev.id}>
+                          <ListItem
+                            disableGutters
+                            disablePadding
+                            sx={{ mb: hasExtras ? 0 : 0.5, alignItems: 'flex-start', borderRadius: 1 }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5, width: '100%' }}>
+                              <Box
+                                component="span"
+                                sx={{
+                                  fontSize: '0.65rem',
+                                  bgcolor: evColor ?? 'action.selected',
+                                  color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                                  borderRadius: '12px',
+                                  px: 1,
+                                  py: 0.25,
+                                  fontWeight: 'bold',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {deptStr}
+                              </Box>
+                              <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
+                                <DirectionsCarIcon sx={{ fontSize: '0.85rem', color: 'text.secondary' }} />
+                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                                  {travelMin} Min.
+                                </Typography>
+                              </Box>
+                              <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
+                              <Box
+                                component="span"
+                                sx={{
+                                  fontSize: '0.65rem',
+                                  bgcolor: evColor ?? 'action.selected',
+                                  color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
+                                  borderRadius: '12px',
+                                  px: 1,
+                                  py: 0.25,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {arrStr}
+                              </Box>
+                              <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: '0.8rem' }}>
+                                {ev.summary}
                               </Typography>
                             </Box>
-                            <ArrowForwardIcon sx={{ fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }} />
-                            <Box
-                              component="span"
-                              sx={{
-                                fontSize: '0.65rem',
-                                bgcolor: evColor ?? 'action.selected',
-                                color: evColor ? (shouldUseWhiteText(evColor) ? '#fff' : '#000') : undefined,
-                                borderRadius: '12px',
-                                px: 1,
-                                py: 0.25,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {arrStr}
+                          </ListItem>
+                          {hasExtras && (
+                            <Box sx={{ pl: 0.5, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                              {links.map((link, i) => (
+                                <Box key={i} sx={{ display: 'flex', gap: 0.25 }}>
+                                  <Tooltip title="Link öffnen">
+                                    <IconButton size="small" onClick={() => handleOpenLink(link)} sx={{ p: '2px' }}>
+                                      <OpenInNewIcon sx={{ fontSize: '0.75rem', color: 'primary.main' }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={copiedLink === link ? 'Kopiert!' : 'Link kopieren'}>
+                                    <IconButton size="small" onClick={() => handleCopyLink(link)} sx={{ p: '2px' }}>
+                                      {copiedLink === link ? <CheckIcon sx={{ fontSize: '0.75rem', color: 'success.main' }} /> : <ContentCopyIcon sx={{ fontSize: '0.75rem', color: 'text.secondary' }} />}
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
+                              ))}
+                              {kenncode && (
+                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', fontFamily: 'monospace' }}>
+                                  {kenncode}
+                                </Typography>
+                              )}
                             </Box>
-                            <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: '0.8rem' }}>
-                              {ev.summary}
-                            </Typography>
-                          </Box>
-                        </ListItem>
+                          )}
+                        </Box>
                       )
                     }
                     return (
-                      <CalendarEventItem
-                        key={ev.id}
-                        ev={ev}
-                        color={evColor}
-                      />
+                      <Box key={ev.id}>
+                        <CalendarEventItem
+                          ev={ev}
+                          color={evColor}
+                          sx={hasExtras ? { mb: 0 } : undefined}
+                        />
+                        {hasExtras && (
+                          <Box sx={{ pl: 0.5, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                            {links.map((link, i) => (
+                              <Box key={i} sx={{ display: 'flex', gap: 0.25 }}>
+                                <Tooltip title="Link öffnen">
+                                  <IconButton size="small" onClick={() => handleOpenLink(link)} sx={{ p: '2px' }}>
+                                    <OpenInNewIcon sx={{ fontSize: '0.75rem', color: 'primary.main' }} />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title={copiedLink === link ? 'Kopiert!' : 'Link kopieren'}>
+                                  <IconButton size="small" onClick={() => handleCopyLink(link)} sx={{ p: '2px' }}>
+                                    {copiedLink === link ? <CheckIcon sx={{ fontSize: '0.75rem', color: 'success.main' }} /> : <ContentCopyIcon sx={{ fontSize: '0.75rem', color: 'text.secondary' }} />}
+                                  </IconButton>
+                                </Tooltip>
+                              </Box>
+                            ))}
+                            {kenncode && (
+                              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', fontFamily: 'monospace' }}>
+                                {kenncode}
+                              </Typography>
+                            )}
+                          </Box>
+                        )}
+                      </Box>
                     )
                   })}
                 </List>
               )}
             </Box>
-          ))}
+            )
+          })}
         </Box>
       )}
 
