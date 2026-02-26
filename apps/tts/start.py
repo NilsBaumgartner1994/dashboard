@@ -13,7 +13,7 @@ import sys
 import traceback
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import snapshot_download, login
 from qwen_tts import Qwen3TTSModel
@@ -1260,6 +1260,77 @@ async def clone_voice_with_training(
         print(f"[ERROR] Voice cloning failed: {type(e).__name__}: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__}: {e}")
+
+@app.post("/youtube/audio")
+async def youtube_audio_endpoint(url: str = Form(...)):
+    """Download audio-only stream from a YouTube URL without ffmpeg and return it as binary.
+
+    The yt-dlp download is run in a thread executor so the async event loop is not blocked.
+    Only audio-only streams (vcodec=none) are selected, which avoids any ffmpeg post-processing.
+    Time-trimming is intentionally left to the frontend via the Web Audio API.
+    """
+    import yt_dlp
+    import tempfile
+
+    if not url or not url.strip():
+        raise HTTPException(status_code=400, detail="url is required")
+
+    # Restrict to YouTube domains to reduce attack surface
+    import re
+    if not re.match(r"https?://(www\.)?(youtube\.com|youtu\.be)/", url.strip()):
+        raise HTTPException(status_code=400, detail="Only youtube.com and youtu.be URLs are supported")
+
+    def _download(video_url: str):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_template = os.path.join(tmpdir, "audio.%(ext)s")
+            ydl_opts = {
+                # Prefer webm/opus then m4a/aac – both are audio-only on YouTube and need no ffmpeg
+                "format": "bestaudio[ext=webm][vcodec=none]/bestaudio[ext=m4a][vcodec=none]/bestaudio[vcodec=none]",
+                "outtmpl": output_template,
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url.strip()])
+
+            files = os.listdir(tmpdir)
+            if not files:
+                raise ValueError("yt-dlp produced no output file")
+
+            audio_file = os.path.join(tmpdir, files[0])
+            ext = os.path.splitext(files[0])[1].lstrip(".")
+            with open(audio_file, "rb") as fh:
+                return fh.read(), ext
+
+    try:
+        loop = asyncio.get_event_loop()
+        audio_bytes, ext = await asyncio.wait_for(
+            loop.run_in_executor(None, _download, url),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="YouTube download timed out after 120 s")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    content_type_map = {
+        "webm": "audio/webm",
+        "m4a": "audio/mp4",
+        "opus": "audio/ogg; codecs=opus",
+        "mp3": "audio/mpeg",
+        "ogg": "audio/ogg",
+    }
+    content_type = content_type_map.get(ext, f"audio/{ext}")
+
+    return Response(
+        content=audio_bytes,
+        media_type=content_type,
+        headers={"Content-Disposition": f"attachment; filename=youtube_audio.{ext}"},
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

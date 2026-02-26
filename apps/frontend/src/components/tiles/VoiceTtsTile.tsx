@@ -295,6 +295,31 @@ function StatusIcon({ status }: { status: ServerStatus }) {
   return <HelpOutlineIcon />
 }
 
+/** Encode an AudioBuffer as a 16-bit PCM WAV Blob (no external deps, no ffmpeg). */
+function encodeWav(buffer: AudioBuffer): Blob {
+  const numCh = buffer.numberOfChannels
+  const sr = buffer.sampleRate
+  const numSamples = buffer.length
+  const dataSize = numSamples * numCh * 2 // 16-bit = 2 bytes per sample
+  const ab = new ArrayBuffer(44 + dataSize)
+  const v = new DataView(ab)
+  const ws = (off: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)) }
+  ws(0, 'RIFF'); v.setUint32(4, 36 + dataSize, true); ws(8, 'WAVE')
+  ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true)
+  v.setUint16(22, numCh, true); v.setUint32(24, sr, true); v.setUint32(28, sr * numCh * 2, true)
+  v.setUint16(32, numCh * 2, true); v.setUint16(34, 16, true)
+  ws(36, 'data'); v.setUint32(40, dataSize, true)
+  let off = 44
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      const s = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]))
+      v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+      off += 2
+    }
+  }
+  return new Blob([ab], { type: 'audio/wav' })
+}
+
 function formatDate(date: Date): string {
   const hh = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
@@ -409,6 +434,13 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // YouTube audio extraction state (for Voice Clone create mode)
+  const [ytUrl, setYtUrl] = useState('')
+  const [ytStartTime, setYtStartTime] = useState('0:00')
+  const [ytEndTime, setYtEndTime] = useState('')
+  const [ytLoading, setYtLoading] = useState(false)
+  const [ytError, setYtError] = useState<string | null>(null)
 
   // Load voices on mount
   useEffect(() => {
@@ -530,6 +562,80 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     setRecordedAudioUrl(null)
     setRefAudioFile(null)
   }, [])
+
+  /** Parse a time string like "MM:SS" or "HH:MM:SS" into seconds. Returns 0 for invalid input. */
+  const parseTimeMMSS = (timeStr: string): number => {
+    const s = timeStr.trim()
+    if (!s) return 0
+    const parts = s.split(':').map(Number)
+    if (parts.some((p) => !Number.isFinite(p) || p < 0)) return 0
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    if (parts.length === 2) return parts[0] * 60 + parts[1]
+    const plain = parseFloat(s)
+    return Number.isFinite(plain) && plain >= 0 ? plain : 0
+  }
+
+  const handleYouTubeLoad = useCallback(async () => {
+    if (!ytUrl.trim()) return
+    setYtLoading(true)
+    setYtError(null)
+    try {
+      const formData = new FormData()
+      formData.append('url', ytUrl)
+      const res = await fetch(`${ttsUrl}/youtube/audio`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(180_000),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${body}`)
+      }
+      const arrayBuffer = await res.arrayBuffer()
+
+      const startSec = parseTimeMMSS(ytStartTime)
+      const endSec = ytEndTime.trim() ? parseTimeMMSS(ytEndTime) : null
+
+      const audioCtx = new AudioContext()
+      try {
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+        const sr = audioBuffer.sampleRate
+        const startSample = Math.floor(startSec * sr)
+        const endSample = endSec !== null ? Math.min(Math.floor(endSec * sr), audioBuffer.length) : audioBuffer.length
+        const trimLength = Math.max(0, endSample - startSample)
+        if (trimLength === 0) throw new Error('Zeitbereich ergibt keinen Audio-Inhalt')
+
+        const numCh = audioBuffer.numberOfChannels
+        const offlineCtx = new OfflineAudioContext(numCh, trimLength, sr)
+        const trimmed = offlineCtx.createBuffer(numCh, trimLength, sr)
+        for (let ch = 0; ch < numCh; ch++) {
+          const src = audioBuffer.getChannelData(ch)
+          const dst = trimmed.getChannelData(ch)
+          for (let i = 0; i < trimLength; i++) dst[i] = src[startSample + i]
+        }
+        const source = offlineCtx.createBufferSource()
+        source.buffer = trimmed
+        source.connect(offlineCtx.destination)
+        source.start()
+        const rendered = await offlineCtx.startRendering()
+
+        const wavBlob = encodeWav(rendered)
+        const file = new File([wavBlob], 'youtube_audio.wav', { type: 'audio/wav' })
+        if (recordedBlobUrlRef.current) {
+          URL.revokeObjectURL(recordedBlobUrlRef.current)
+          recordedBlobUrlRef.current = null
+        }
+        setRecordedAudioUrl(null)
+        setRefAudioFile(file)
+      } finally {
+        audioCtx.close()
+      }
+    } catch (err) {
+      setYtError(String(err))
+    } finally {
+      setYtLoading(false)
+    }
+  }, [ytUrl, ytStartTime, ytEndTime, ttsUrl])
 
   const handleDownload = useCallback(() => {
     if (!audioUrl) return
@@ -1047,6 +1153,53 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     )}
                     {transcribeError && (<Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{transcribeError}</Typography>)}
                   </Box>
+                  <Divider sx={{ my: 1 }}>
+                    <Typography variant="caption" color="text.secondary">oder von YouTube</Typography>
+                  </Divider>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="YouTube URL"
+                    placeholder="https://www.youtube.com/watch?v=…"
+                    value={ytUrl}
+                    onChange={(e) => setYtUrl(e.target.value)}
+                    disabled={ytLoading || loading || transcribing}
+                    sx={{ mb: 0.5 }}
+                  />
+                  <Box sx={{ display: 'flex', gap: 1, mb: 0.5 }}>
+                    <TextField
+                      size="small"
+                      label="Start (MM:SS)"
+                      placeholder="0:00"
+                      value={ytStartTime}
+                      onChange={(e) => setYtStartTime(e.target.value)}
+                      disabled={ytLoading || loading || transcribing}
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      size="small"
+                      label="Ende (MM:SS)"
+                      placeholder="1:00"
+                      value={ytEndTime}
+                      onChange={(e) => setYtEndTime(e.target.value)}
+                      disabled={ytLoading || loading || transcribing}
+                      sx={{ flex: 1 }}
+                    />
+                  </Box>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    fullWidth
+                    onClick={handleYouTubeLoad}
+                    disabled={ytLoading || loading || transcribing || !ytUrl.trim()}
+                    startIcon={ytLoading ? <CircularProgress size={12} color="inherit" /> : <DownloadIcon fontSize="small" />}
+                    sx={{ mb: 0.5 }}
+                  >
+                    {ytLoading ? 'Lade von YouTube…' : 'Von YouTube laden'}
+                  </Button>
+                  {ytError && (
+                    <Typography variant="caption" color="error" sx={{ display: 'block', mb: 0.5, wordBreak: 'break-all' }}>{ytError}</Typography>
+                  )}
                   <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
                   <FormControlLabel
                     control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || transcribing || !!refText} />}
