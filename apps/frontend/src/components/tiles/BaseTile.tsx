@@ -11,6 +11,7 @@ import {
   Typography,
   Divider,
   Button,
+  MenuItem,
 } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -66,11 +67,22 @@ export default function BaseTile({
   const [maxWidthInput, setMaxWidthInput] = useState(
     tile.config?.maxWidth != null ? String(tile.config.maxWidth) : ''
   )
+  const [outputTargetsInput, setOutputTargetsInput] = useState<string[]>(
+    Array.isArray(tile.config?.outputTargets)
+      ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
+      : [],
+  )
+  const connectableTiles = useStore((s) => s.tiles.filter((t) => t.id !== tile.id))
 
   const handleOpenSettings = () => {
     setNameInput((tile.config?.name as string) ?? '')
     setBgInput((tile.config?.backgroundImage as string) ?? '')
     setMaxWidthInput(tile.config?.maxWidth != null ? String(tile.config.maxWidth) : '')
+    setOutputTargetsInput(
+      Array.isArray(tile.config?.outputTargets)
+        ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
+        : [],
+    )
     onSettingsOpen?.()
     setSettingsOpen(true)
   }
@@ -84,7 +96,14 @@ export default function BaseTile({
     const parsed = parseInt(maxWidthInput, 10)
     const parsedMaxWidth = maxWidthInput !== '' && !isNaN(parsed) ? Math.max(1, Math.min(gridColumns, parsed)) : undefined
     updateTile(tile.id, {
-      config: { ...tile.config, name: nameInput, backgroundImage: bgInput, maxWidth: parsedMaxWidth, ...extraCfg },
+      config: {
+        ...tile.config,
+        name: nameInput,
+        backgroundImage: bgInput,
+        maxWidth: parsedMaxWidth,
+        outputTargets: outputTargetsInput,
+        ...extraCfg,
+      },
     })
     setSettingsOpen(false)
   }
@@ -236,6 +255,25 @@ export default function BaseTile({
             inputProps={{ min: 1, max: gridColumns }}
             sx={{ mb: 2 }}
           />
+          <TextField
+            select
+            fullWidth
+            SelectProps={{ multiple: true }}
+            label="Output an Kachel(n)"
+            value={outputTargetsInput}
+            onChange={(e) => {
+              const value = e.target.value
+              setOutputTargetsInput(Array.isArray(value) ? (value as string[]) : [value as string])
+            }}
+            helperText="Output dieser Kachel an ausgewählte Kacheln weitergeben."
+            sx={{ mb: 2 }}
+          >
+            {connectableTiles.map((connectable) => (
+              <MenuItem key={connectable.id} value={connectable.id}>
+                {(connectable.config?.name as string) || `${connectable.type} (${connectable.id.slice(0, 6)})`}
+              </MenuItem>
+            ))}
+          </TextField>
 
           {/* Position & size controls – applied immediately */}
           <Divider sx={{ my: 2 }}>Position & Größe</Divider>

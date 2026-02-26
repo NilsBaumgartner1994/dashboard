@@ -8,7 +8,10 @@ import UploadFileIcon from '@mui/icons-material/UploadFile'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 import { pipeline } from '@xenova/transformers'
+import { useTileFlowStore } from '../../store/useTileFlowStore'
+import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
 
 interface SpeechToTextTileProps {
   tile: TileInstance
@@ -77,12 +80,28 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadProcessing, setUploadProcessing] = useState(false)
   const [languageInput, setLanguageInput] = useState((tile.config?.language as string) || 'de-DE')
+  const [outputPromptWrapInput, setOutputPromptWrapInput] = useState(
+    (tile.config?.outputPromptWrap as string)
+      || 'Erstelle mir eine react Code und gebe diesen direkt aus ohne Erklärungen sondern direkt den Code, fange mit <View> an. Hier die Anforderung {content}',
+  )
+  const tiles = useStore((s) => s.tiles)
+  const outputs = useTileFlowStore((s) => s.outputs)
+  const publishOutput = useTileFlowStore((s) => s.publishOutput)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const shouldKeepListeningRef = useRef(false)
 
   const language = (tile.config?.language as string) || 'de-DE'
 
   const transcript = useMemo(() => finalTexts.join('\n'), [finalTexts])
+  const latestConnectedPayload = useMemo(
+    () => getLatestConnectedPayload(tiles, outputs, tile.id),
+    [tiles, outputs, tile.id],
+  )
+  const wrappedTranscript = useMemo(() => {
+    if (!transcript.trim()) return ''
+    const template = ((tile.config?.outputPromptWrap as string) || outputPromptWrapInput || '{content}').trim()
+    return template.includes('{content}') ? template.replace('{content}', transcript) : `${template} ${transcript}`
+  }, [transcript, tile.config?.outputPromptWrap, outputPromptWrapInput])
 
   const stopListeningInternal = () => {
     shouldKeepListeningRef.current = false
@@ -210,21 +229,63 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     }
   }
 
+  const applyConnectedInput = async () => {
+    const content = latestConnectedPayload?.content?.trim()
+    if (!content) return
+    if (latestConnectedPayload?.dataType === 'audio') {
+      setUploadProcessing(true)
+      setError(null)
+      try {
+        const transcriber = await getTranscriber()
+        const result = await transcriber(content, { chunk_length_s: 20, stride_length_s: 4 })
+        const text = result.text?.trim()
+        if (!text) {
+          setError('Audio-Input konnte nicht transkribiert werden.')
+          return
+        }
+        setFinalTexts((prev) => [text, ...prev])
+        setInterimText('')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Audio-Transkription fehlgeschlagen.')
+      } finally {
+        setUploadProcessing(false)
+      }
+      return
+    }
+    setFinalTexts((prev) => [content, ...prev])
+  }
+
+  const handlePushOutput = () => {
+    if (!wrappedTranscript) return
+    publishOutput(tile.id, { content: wrappedTranscript, dataType: 'text' })
+  }
+
   return (
     <BaseTile
       tile={tile}
       onSettingsOpen={() => setLanguageInput(language)}
       settingsChildren={
-        <TextField
-          fullWidth
-          label="Sprache"
-          helperText="BCP-47 Sprachcode, z. B. de-DE oder en-US"
-          value={languageInput}
-          onChange={(e) => setLanguageInput(e.target.value)}
-          sx={{ mt: 1 }}
-        />
+        <>
+          <TextField
+            fullWidth
+            label="Sprache"
+            helperText="BCP-47 Sprachcode, z. B. de-DE oder en-US"
+            value={languageInput}
+            onChange={(e) => setLanguageInput(e.target.value)}
+            sx={{ mt: 1, mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            multiline
+            minRows={3}
+            label="Output Wrapper"
+            helperText="Nutze {content} als Platzhalter für den transkribierten Text."
+            value={outputPromptWrapInput}
+            onChange={(e) => setOutputPromptWrapInput(e.target.value)}
+          />
+        </>
       }
-      getExtraConfig={() => ({ language: languageInput || 'de-DE' })}
+      getExtraConfig={() => ({ language: languageInput || 'de-DE', outputPromptWrap: outputPromptWrapInput })}
     >
       <Stack spacing={1.2}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -263,6 +324,22 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
             disabled={!transcript}
           >
             Kopieren
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={applyConnectedInput}
+            disabled={!latestConnectedPayload?.content}
+          >
+            Input übernehmen
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handlePushOutput}
+            disabled={!wrappedTranscript}
+          >
+            Output senden
           </Button>
           <Button
             variant="text"
@@ -319,6 +396,15 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           value={transcript}
           InputProps={{ readOnly: true }}
           placeholder="Final erkannter Text erscheint hier…"
+        />
+        <TextField
+          label="Output (gewrappt)"
+          size="small"
+          multiline
+          minRows={3}
+          value={wrappedTranscript}
+          InputProps={{ readOnly: true }}
+          placeholder="Für Weitergabe vorbereiteter Output…"
         />
       </Stack>
     </BaseTile>
