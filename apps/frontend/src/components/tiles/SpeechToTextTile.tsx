@@ -4,8 +4,11 @@ import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
+import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
+import { pipeline } from '@xenova/transformers'
 
 interface SpeechToTextTileProps {
   tile: TileInstance
@@ -46,6 +49,21 @@ type WindowWithSpeechRecognition = Window & {
   webkitSpeechRecognition?: SpeechRecognitionCtor
 }
 
+type AsrResult = { text?: string }
+type AsrTranscriber = (audio: string, options?: { chunk_length_s?: number; stride_length_s?: number }) => Promise<AsrResult>
+
+let transcriberPromise: Promise<AsrTranscriber> | null = null
+
+const getTranscriber = async (): Promise<AsrTranscriber> => {
+  if (!transcriberPromise) {
+    transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+      quantized: true,
+    }) as Promise<AsrTranscriber>
+  }
+
+  return transcriberPromise
+}
+
 function getSpeechRecognitionCtor() {
   const browserWindow = window as WindowWithSpeechRecognition
   return browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition
@@ -56,6 +74,8 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const [finalTexts, setFinalTexts] = useState<string[]>([])
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadProcessing, setUploadProcessing] = useState(false)
   const [languageInput, setLanguageInput] = useState((tile.config?.language as string) || 'de-DE')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const shouldKeepListeningRef = useRef(false)
@@ -162,6 +182,34 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     }
   }
 
+  const handleUploadedAudioTranscription = async () => {
+    if (!uploadFile) return
+
+    setUploadProcessing(true)
+    setError(null)
+
+    try {
+      const objectUrl = URL.createObjectURL(uploadFile)
+      const transcriber = await getTranscriber()
+      const result = await transcriber(objectUrl, { chunk_length_s: 20, stride_length_s: 4 })
+      URL.revokeObjectURL(objectUrl)
+
+      const text = result.text?.trim()
+      if (!text) {
+        setError('Die Datei konnte nicht transkribiert werden.')
+        return
+      }
+
+      setFinalTexts((prev) => [text, ...prev])
+      setInterimText('')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Transkription fehlgeschlagen.'
+      setError(message)
+    } finally {
+      setUploadProcessing(false)
+    }
+  }
+
   return (
     <BaseTile
       tile={tile}
@@ -228,6 +276,30 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           >
             Leeren
           </Button>
+        </Stack>
+
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Button component="label" variant="outlined" size="small" startIcon={<UploadFileIcon />} disabled={uploadProcessing}>
+            Audio auswählen
+            <input
+              hidden
+              type="file"
+              accept="audio/mpeg,audio/mp3,audio/*"
+              onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+            />
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<GraphicEqIcon />}
+            disabled={!uploadFile || uploadProcessing}
+            onClick={handleUploadedAudioTranscription}
+          >
+            {uploadProcessing ? 'Wandle um…' : 'MP3 umwandeln'}
+          </Button>
+          <Typography variant="caption" color="text.secondary">
+            {uploadFile ? uploadFile.name : 'Keine Datei ausgewählt'}
+          </Typography>
         </Stack>
 
         <TextField
