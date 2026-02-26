@@ -381,6 +381,8 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const newVoiceImageInputRef = useRef<HTMLInputElement | null>(null)
   const newVoiceImagePreviewRef = useRef<string | null>(null)
   const [voicesRefreshKey, setVoicesRefreshKey] = useState(0)
+  const [selectedVoiceImageUploading, setSelectedVoiceImageUploading] = useState(false)
+  const selectedVoiceImageInputRef = useRef<HTMLInputElement | null>(null)
 
   // Modal state
   const [voiceSelectModalOpen, setVoiceSelectModalOpen] = useState(false)
@@ -735,6 +737,41 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     }
   }
 
+  const handleSelectedVoiceImageUpload = async (file: File) => {
+    if (!selectedVoice) return
+    setSelectedVoiceImageUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const res = await fetch(`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setVoicesRefreshKey((k) => k + 1)
+    } catch (err) {
+      console.error('Image upload failed:', err)
+    } finally {
+      setSelectedVoiceImageUploading(false)
+    }
+  }
+
+  const handleSelectedVoiceImageDelete = async () => {
+    if (!selectedVoice) return
+    setSelectedVoiceImageUploading(true)
+    try {
+      const res = await fetch(`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setVoicesRefreshKey((k) => k + 1)
+    } catch (err) {
+      console.error('Image delete failed:', err)
+    } finally {
+      setSelectedVoiceImageUploading(false)
+    }
+  }
+
   const handlePlay = () => {
     if (!audioUrl) return
     if (audioRef.current) {
@@ -839,36 +876,107 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               {voiceCloneSubMode === 'select' ? (
                 <>
-                  {/* Selected voice image + name display */}
-                  {selectedVoice && voices.find((v) => v.name === selectedVoice)?.has_image && (
+                  {/* Selected voice card */}
+                  {selectedVoice ? (
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                      <Box
-                        component="img"
-                        src={`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`}
-                        alt={selectedVoice}
-                        sx={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '2px solid', borderColor: 'primary.main' }}
+                      <input
+                        ref={selectedVoiceImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handleSelectedVoiceImageUpload(file)
+                          e.target.value = ''
+                        }}
                       />
-                      <Typography variant="caption" fontWeight="bold" sx={{ textAlign: 'center' }}>
-                        {selectedVoice}
-                      </Typography>
+                      <Card
+                        variant="outlined"
+                        sx={{
+                          width: 130,
+                          cursor: 'pointer',
+                          border: '2px solid',
+                          borderColor: 'primary.main',
+                          flexShrink: 0,
+                        }}
+                        onClick={() => setVoiceSelectModalOpen(true)}
+                      >
+                        <Box sx={{ position: 'relative', width: '100%', aspectRatio: '1 / 1' }}>
+                          {voices.find((v) => v.name === selectedVoice)?.has_image ? (
+                            <Box
+                              component="img"
+                              src={`${ttsUrl}/voices/${encodeURIComponent(selectedVoice)}/image`}
+                              alt={selectedVoice}
+                              sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            />
+                          ) : (
+                            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover' }}>
+                              <PersonIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+                            </Box>
+                          )}
+                          {selectedVoiceImageUploading && (
+                            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(0,0,0,0.4)' }}>
+                              <CircularProgress size={24} sx={{ color: 'white' }} />
+                            </Box>
+                          )}
+                          {/* Image upload button (bottom-right) */}
+                          <Tooltip title="Bild hochladen">
+                            <Box
+                              component="span"
+                              onClick={(e) => { e.stopPropagation(); selectedVoiceImageInputRef.current?.click() }}
+                              sx={{ position: 'absolute', bottom: 2, right: 2 }}
+                            >
+                              <IconButton
+                                size="small"
+                                sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: 'white', '&:hover': { bgcolor: 'rgba(0,0,0,0.75)' }, p: '3px' }}
+                                disabled={selectedVoiceImageUploading}
+                              >
+                                <AddPhotoAlternateIcon sx={{ fontSize: '0.85rem' }} />
+                              </IconButton>
+                            </Box>
+                          </Tooltip>
+                          {/* Image delete button (top-right) – only shown when image exists */}
+                          {voices.find((v) => v.name === selectedVoice)?.has_image && (
+                            <Tooltip title="Bild entfernen">
+                              <Box
+                                component="span"
+                                onClick={(e) => { e.stopPropagation(); handleSelectedVoiceImageDelete() }}
+                                sx={{ position: 'absolute', top: 2, right: 2 }}
+                              >
+                                <IconButton
+                                  size="small"
+                                  sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: 'error.main', '&:hover': { bgcolor: 'rgba(180,0,0,0.75)', color: 'white' }, p: '3px' }}
+                                  disabled={selectedVoiceImageUploading}
+                                >
+                                  <HideImageIcon sx={{ fontSize: '0.85rem' }} />
+                                </IconButton>
+                              </Box>
+                            </Tooltip>
+                          )}
+                        </Box>
+                        <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
+                          <Typography variant="caption" fontWeight="bold" sx={{ display: 'block', textAlign: 'center', wordBreak: 'break-word' }}>
+                            {selectedVoice}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+                            Stimme wechseln…
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Box>
+                  ) : (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        fullWidth
+                        onClick={() => setVoiceSelectModalOpen(true)}
+                        disabled={loading}
+                      >
+                        Stimme auswählen…
+                      </Button>
                     </Box>
                   )}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      fullWidth
-                      onClick={() => setVoiceSelectModalOpen(true)}
-                      disabled={loading}
-                      startIcon={
-                        selectedVoice && !voices.find((v) => v.name === selectedVoice)?.has_image ? (
-                          <PersonIcon fontSize="small" />
-                        ) : undefined
-                      }
-                    >
-                      {selectedVoice ? 'Stimme wechseln…' : 'Stimme auswählen…'}
-                    </Button>
-                  </Box>
                   <Button size="small" variant="outlined" onClick={() => setVoiceCloneSubMode('create')} disabled={loading}>
                     + Create New Voice
                   </Button>
