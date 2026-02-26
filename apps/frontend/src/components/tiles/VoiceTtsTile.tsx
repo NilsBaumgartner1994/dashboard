@@ -370,6 +370,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [voices, setVoices] = useState<Voice[]>([])
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null)
   const [refAudioFile, setRefAudioFile] = useState<File | null>(null)
+  const [refAudioPreviewUrl, setRefAudioPreviewUrl] = useState<string | null>(null)
   const [refText, setRefText] = useState('')
   const [useXVectorOnly, setUseXVectorOnly] = useState(false)
   const [newVoiceName, setNewVoiceName] = useState('')
@@ -409,6 +410,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const recordingChunksRef = useRef<Blob[]>([])
   const recordingStreamRef = useRef<MediaStream | null>(null)
   const recordedBlobUrlRef = useRef<string | null>(null)
+  const refAudioPreviewUrlRef = useRef<string | null>(null)
   const recordingPlaybackRef = useRef<HTMLAudioElement | null>(null)
 
   // Generation time estimation state
@@ -445,11 +447,28 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     return () => {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current)
       if (recordedBlobUrlRef.current) URL.revokeObjectURL(recordedBlobUrlRef.current)
+      if (refAudioPreviewUrlRef.current) URL.revokeObjectURL(refAudioPreviewUrlRef.current)
       if (newVoiceImagePreviewRef.current) URL.revokeObjectURL(newVoiceImagePreviewRef.current)
       if (recordingStreamRef.current) recordingStreamRef.current.getTracks().forEach((t) => t.stop())
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (refAudioPreviewUrlRef.current) {
+      URL.revokeObjectURL(refAudioPreviewUrlRef.current)
+      refAudioPreviewUrlRef.current = null
+    }
+
+    if (!refAudioFile) {
+      setRefAudioPreviewUrl(null)
+      return
+    }
+
+    const url = URL.createObjectURL(refAudioFile)
+    refAudioPreviewUrlRef.current = url
+    setRefAudioPreviewUrl(url)
+  }, [refAudioFile])
 
   const handleTranscribe = useCallback(async () => {
     if (!refAudioFile) return
@@ -1120,7 +1139,16 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                         </Tooltip>
                       </Box>
                     )}
-                    {refAudioFile && !recordedAudioUrl && (<Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>✓ {refAudioFile.name}</Typography>)}
+                    {refAudioFile && !recordedAudioUrl && (
+                      <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
+                        ✓ {refAudioFile.name}
+                      </Typography>
+                    )}
+                    {refAudioPreviewUrl && (
+                      <Box sx={{ mt: 0.5 }}>
+                        <audio controls src={refAudioPreviewUrl} style={{ width: '100%' }} />
+                      </Box>
+                    )}
                     {refAudioFile && (
                       <Button
                         size="small"
