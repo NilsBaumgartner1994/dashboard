@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
@@ -6,15 +6,49 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
-import SpeechToText from 'speech-to-text'
 
 interface SpeechToTextTileProps {
   tile: TileInstance
 }
 
-type SpeechListener = {
-  startListening: () => void
-  stopListening: () => void
+type SpeechRecognitionResultItem = {
+  transcript: string
+}
+
+type SpeechRecognitionResultListItem = {
+  0: SpeechRecognitionResultItem
+  isFinal: boolean
+}
+
+type SpeechRecognitionEventLike = Event & {
+  resultIndex: number
+  results: {
+    [index: number]: SpeechRecognitionResultListItem
+    length: number
+  }
+}
+
+type SpeechRecognitionLike = EventTarget & {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start: () => void
+  stop: () => void
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: ((event: Event & { error?: string }) => void) | null
+  onend: (() => void) | null
+}
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike
+
+type WindowWithSpeechRecognition = Window & {
+  SpeechRecognition?: SpeechRecognitionCtor
+  webkitSpeechRecognition?: SpeechRecognitionCtor
+}
+
+function getSpeechRecognitionCtor() {
+  const browserWindow = window as WindowWithSpeechRecognition
+  return browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition
 }
 
 export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
@@ -22,56 +56,101 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const [finalTexts, setFinalTexts] = useState<string[]>([])
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const listenerRef = useRef<SpeechListener | null>(null)
   const [languageInput, setLanguageInput] = useState((tile.config?.language as string) || 'de-DE')
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const shouldKeepListeningRef = useRef(false)
 
   const language = (tile.config?.language as string) || 'de-DE'
 
-  useEffect(() => {
-    const onFinalised = (text: string) => {
-      if (!text.trim()) return
-      setFinalTexts((prev) => [text, ...prev])
-      setInterimText('')
-    }
-
-    const onEndEvent = () => {
-      if (listening) listenerRef.current?.startListening()
-    }
-
-    const onAnythingSaid = (text: string) => {
-      setInterimText(text)
-    }
-
-    try {
-      listenerRef.current = new SpeechToText(onFinalised, onEndEvent, onAnythingSaid, language) as SpeechListener
-      setError(null)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Speech-to-text konnte nicht initialisiert werden.'
-      setError(message)
-    }
-
-    return () => {
-      listenerRef.current?.stopListening()
-      listenerRef.current = null
-    }
-  }, [language, listening])
-
   const transcript = useMemo(() => finalTexts.join('\n'), [finalTexts])
 
-  const handleStart = () => {
+  const stopListeningInternal = () => {
+    shouldKeepListeningRef.current = false
+    recognitionRef.current?.stop()
+    setListening(false)
+  }
+
+  const handleStart = async () => {
+    const SpeechRecognition = getSpeechRecognitionCtor()
+
+    if (!SpeechRecognition) {
+      setError('Dieser Browser unterstützt Speech-to-Text nicht (Safari benötigt iOS 14.5+).')
+      return
+    }
+
+    if (!window.isSecureContext) {
+      setError('Speech-to-Text funktioniert nur über HTTPS oder auf localhost.')
+      return
+    }
+
+    if (!recognitionRef.current) {
+      const recognition = new SpeechRecognition()
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognitionRef.current = recognition
+    }
+
+    const recognition = recognitionRef.current
+    recognition.lang = language
+
+    recognition.onresult = (event) => {
+      let latestInterim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]
+        const text = result[0]?.transcript?.trim() ?? ''
+        if (!text) continue
+
+        if (result.isFinal) {
+          setFinalTexts((prev) => [text, ...prev])
+          latestInterim = ''
+        } else {
+          latestInterim = text
+        }
+      }
+
+      setInterimText(latestInterim)
+    }
+
+    recognition.onerror = (event) => {
+      const normalizedError = event.error ?? 'unknown'
+      if (normalizedError === 'no-speech') return
+      shouldKeepListeningRef.current = false
+      setListening(false)
+      setError(
+        normalizedError === 'not-allowed'
+          ? 'Mikrofonzugriff verweigert. Bitte in Safari erlauben.'
+          : `Speech-to-Text Fehler: ${normalizedError}`,
+      )
+    }
+
+    recognition.onend = () => {
+      if (!shouldKeepListeningRef.current) {
+        setListening(false)
+        return
+      }
+
+      try {
+        recognition.start()
+      } catch {
+        // Safari/iOS can throw when restarting too quickly after pause.
+      }
+    }
+
     try {
-      listenerRef.current?.startListening()
-      setListening(true)
       setError(null)
+      shouldKeepListeningRef.current = true
+      recognition.start()
+      setListening(true)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Start fehlgeschlagen.'
+      shouldKeepListeningRef.current = false
+      setListening(false)
       setError(message)
     }
   }
 
   const handleStop = () => {
-    listenerRef.current?.stopListening()
-    setListening(false)
+    stopListeningInternal()
   }
 
   const handleCopy = async () => {
