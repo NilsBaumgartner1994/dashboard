@@ -92,15 +92,63 @@ type AsrResult = { text?: string }
 type AsrTranscriber = (audio: string, options?: { chunk_length_s?: number; stride_length_s?: number }) => Promise<AsrResult>
 
 let transcriberPromise: Promise<AsrTranscriber> | null = null
+let triedWebGpuTranscriber = false
 
 const getTranscriber = async (): Promise<AsrTranscriber> => {
   if (!transcriberPromise) {
-    transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-      quantized: true,
-    }) as Promise<AsrTranscriber>
+    if (!triedWebGpuTranscriber && typeof navigator !== 'undefined' && 'gpu' in navigator) {
+      triedWebGpuTranscriber = true
+      transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+        quantized: true,
+        device: 'webgpu',
+      } as any) as Promise<AsrTranscriber>
+
+      transcriberPromise = transcriberPromise.catch((err) => {
+        console.warn('WebGPU ASR initialization failed, falling back to WASM backend.', err)
+        return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+          quantized: true,
+        }) as Promise<AsrTranscriber>
+      })
+    } else {
+      transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+        quantized: true,
+      }) as Promise<AsrTranscriber>
+    }
   }
 
   return transcriberPromise
+}
+
+interface AudioLevelVisualizerProps {
+  level: number
+}
+
+function AudioLevelVisualizer({ level }: AudioLevelVisualizerProps) {
+  const barCount = 18
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: 30, mt: 0.5 }}>
+      {Array.from({ length: barCount }).map((_, index) => {
+        const wave = Math.abs(Math.sin((index / barCount) * Math.PI * 2))
+        const normalized = Math.min(1, level * (0.65 + wave * 0.7))
+        const height = 4 + normalized * 24
+
+        return (
+          <Box
+            key={index}
+            sx={{
+              width: 4,
+              height,
+              borderRadius: 999,
+              transition: 'height 120ms ease-out, opacity 120ms ease-out',
+              bgcolor: 'error.main',
+              opacity: 0.25 + normalized * 0.75,
+            }}
+          />
+        )
+      })}
+    </Box>
+  )
 }
 
 function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUrl, manageImages, onImagesChanged }: VoiceCardModalProps) {
@@ -428,6 +476,10 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const recordedBlobUrlRef = useRef<string | null>(null)
   const refAudioPreviewUrlRef = useRef<string | null>(null)
   const recordingPlaybackRef = useRef<HTMLAudioElement | null>(null)
+  const recordingAudioContextRef = useRef<AudioContext | null>(null)
+  const recordingAnalyserRef = useRef<AnalyserNode | null>(null)
+  const recordingAnimationFrameRef = useRef<number | null>(null)
+  const [audioLevel, setAudioLevel] = useState(0)
 
   // Generation time estimation state
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null)
@@ -466,8 +518,20 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
       if (refAudioPreviewUrlRef.current) URL.revokeObjectURL(refAudioPreviewUrlRef.current)
       if (newVoiceImagePreviewRef.current) URL.revokeObjectURL(newVoiceImagePreviewRef.current)
       if (recordingStreamRef.current) recordingStreamRef.current.getTracks().forEach((t) => t.stop())
+      if (recordingAnimationFrameRef.current) cancelAnimationFrame(recordingAnimationFrameRef.current)
+      if (recordingAudioContextRef.current) recordingAudioContextRef.current.close().catch(() => undefined)
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
     }
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      getTranscriber().catch((err) => {
+        console.warn('Failed to pre-load speech-to-text pipeline.', err)
+      })
+    }, 300)
+
+    return () => window.clearTimeout(timeoutId)
   }, [])
 
   useEffect(() => {
@@ -520,6 +584,31 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recordingStreamRef.current = stream
+
+      const audioContext = new AudioContext()
+      const source = audioContext.createMediaStreamSource(stream)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.85
+      source.connect(analyser)
+      recordingAudioContextRef.current = audioContext
+      recordingAnalyserRef.current = analyser
+
+      const dataArray = new Uint8Array(analyser.fftSize)
+      const renderAudioLevel = () => {
+        if (!recordingAnalyserRef.current) return
+        recordingAnalyserRef.current.getByteTimeDomainData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i += 1) {
+          const normalized = (dataArray[i] - 128) / 128
+          sum += normalized * normalized
+        }
+        const rms = Math.sqrt(sum / dataArray.length)
+        setAudioLevel(Math.min(1, rms * 5))
+        recordingAnimationFrameRef.current = requestAnimationFrame(renderAudioLevel)
+      }
+      recordingAnimationFrameRef.current = requestAnimationFrame(renderAudioLevel)
+
       const recorder = new MediaRecorder(stream)
       mediaRecorderRef.current = recorder
 
@@ -535,6 +624,16 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
         setRecordedAudioUrl(url)
         stream.getTracks().forEach((t) => t.stop())
         recordingStreamRef.current = null
+        if (recordingAnimationFrameRef.current) {
+          cancelAnimationFrame(recordingAnimationFrameRef.current)
+          recordingAnimationFrameRef.current = null
+        }
+        setAudioLevel(0)
+        if (recordingAudioContextRef.current) {
+          recordingAudioContextRef.current.close().catch(() => undefined)
+          recordingAudioContextRef.current = null
+        }
+        recordingAnalyserRef.current = null
       }
 
       recorder.start()
@@ -1139,9 +1238,12 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                       )}
                     </Box>
                     {isRecording && (
-                      <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                        ● Aufnahme läuft…
-                      </Typography>
+                      <Box sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          ● Aufnahme läuft…
+                        </Typography>
+                        <AudioLevelVisualizer level={audioLevel} />
+                      </Box>
                     )}
                     {recordedAudioUrl && !isRecording && (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
