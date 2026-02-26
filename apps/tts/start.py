@@ -5,12 +5,18 @@
 import os
 import io
 import base64
+import uuid
+import functools
 import numpy as np
 import torch
 import asyncio
 import threading
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, Response
@@ -130,6 +136,64 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================================
+# ASYNC JOB SYSTEM
+# Single-threaded executor ensures only one TTS job runs at a time (GPU/model
+# is not re-entrant) while keeping the asyncio event loop responsive for all
+# other requests (health checks, status queries, voice management, etc.).
+# ============================================================================
+
+TTS_EXECUTOR = ThreadPoolExecutor(max_workers=1)
+
+class JobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+@dataclass
+class TtsJob:
+    job_id: str
+    status: JobStatus = JobStatus.queued
+    created_at: float = 0.0
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    error: Optional[str] = None
+    result_bytes: Optional[bytes] = None
+    result_content_type: str = "audio/wav"
+    result_filename: str = "generated.wav"
+    generation_time_ms: Optional[int] = None
+
+_job_store: dict = {}  # job_id -> TtsJob
+_JOB_STORE_MAX = 50
+
+def _new_job() -> TtsJob:
+    import time as _t
+    job = TtsJob(job_id=str(uuid.uuid4()), created_at=_t.time())
+    _job_store[job.job_id] = job
+    if len(_job_store) > _JOB_STORE_MAX:
+        sorted_ids = sorted(_job_store, key=lambda k: _job_store[k].created_at)
+        for old_id in sorted_ids[:len(_job_store) - _JOB_STORE_MAX]:
+            del _job_store[old_id]
+    return job
+
+async def _dispatch_tts(job: TtsJob, blocking_fn):
+    """Run blocking_fn in the TTS executor and record the result on the job."""
+    loop = asyncio.get_running_loop()
+    try:
+        wav_bytes, gen_time_ms, filename = await loop.run_in_executor(TTS_EXECUTOR, blocking_fn)
+        job.result_bytes = wav_bytes
+        job.generation_time_ms = gen_time_ms
+        job.result_filename = filename
+        job.status = JobStatus.done
+    except Exception as e:
+        job.error = f"{type(e).__name__}: {e}"
+        job.status = JobStatus.failed
+        traceback.print_exc(file=sys.stderr)
+    finally:
+        import time as _t
+        job.finished_at = _t.time()
 
 
 def get_voice_path(voice_name: str) -> Path:
@@ -495,6 +559,47 @@ async def estimate_generation_time(request_body: dict = Body(...)):
 
 
 # ============================================================================
+# JOB STATUS / RESULT ENDPOINTS
+# ============================================================================
+
+@app.get("/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Get the status and progress of an async TTS generation job."""
+    job = _job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    import time as _t
+    elapsed = (_t.time() - job.started_at) if job.started_at else 0.0
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "elapsed_seconds": round(elapsed, 1),
+        "generation_time_ms": job.generation_time_ms,
+        "error": job.error,
+    }
+
+
+@app.get("/jobs/{job_id}/result")
+async def get_job_result(job_id: str):
+    """Fetch the audio result of a completed TTS job."""
+    job = _job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    if job.status in (JobStatus.queued, JobStatus.running):
+        raise HTTPException(status_code=202, detail=f"Job is still {job.status}")
+    if job.status == JobStatus.failed:
+        raise HTTPException(status_code=500, detail=job.error or "TTS generation failed")
+    return Response(
+        content=job.result_bytes,
+        media_type=job.result_content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={job.result_filename}",
+            "X-Generation-Time-Ms": str(job.generation_time_ms or 0),
+        },
+    )
+
+
+# ============================================================================
 # VOICE DESIGN ENDPOINT (1.7B only)
 # ============================================================================
 @app.post("/voice-design")
@@ -522,14 +627,16 @@ async def voice_design_endpoint(
     start_time = time.time()
 
     try:
-        wavs, sr = model_state.voice_design_model.generate_voice_design(
-            text=text.strip(),
-            language=language,
-            instruct=voice_description.strip(),
-            non_streaming_mode=True,
-            max_new_tokens=2048,
-        )
+        def _generate():
+            return model_state.voice_design_model.generate_voice_design(
+                text=text.strip(),
+                language=language,
+                instruct=voice_description.strip(),
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
 
+        wavs, sr = await asyncio.get_running_loop().run_in_executor(TTS_EXECUTOR, _generate)
         wav_bytes = _audio_to_wav_bytes(wavs[0], sr)
 
         # Track generation time
