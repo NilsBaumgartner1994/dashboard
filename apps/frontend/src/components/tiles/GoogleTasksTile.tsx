@@ -137,6 +137,7 @@ interface SortableTaskItemProps {
 }
 
 function SortableTaskItem({ task, onComplete, onDelete, onEdit }: SortableTaskItemProps) {
+  const [showFullDescription, setShowFullDescription] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -187,9 +188,31 @@ function SortableTaskItem({ task, onComplete, onDelete, onEdit }: SortableTaskIt
               </Typography>
             )}
             {cleanNotes && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {cleanNotes}
-              </Typography>
+              <>
+                <Typography
+                  component="span"
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    display: '-webkit-box',
+                    overflow: 'hidden',
+                    WebkitLineClamp: showFullDescription ? 'unset' : 1,
+                    WebkitBoxOrient: 'vertical',
+                  }}
+                >
+                  {cleanNotes}
+                </Typography>
+                <Button
+                  size="small"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setShowFullDescription((prev) => !prev)
+                  }}
+                  sx={{ mt: 0.25, minWidth: 0, px: 0, fontSize: '0.7rem', textTransform: 'none' }}
+                >
+                  {showFullDescription ? 'Weniger anzeigen' : 'Mehr anzeigen'}
+                </Button>
+              </>
             )}
           </>
         }
