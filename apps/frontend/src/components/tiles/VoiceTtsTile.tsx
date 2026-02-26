@@ -852,9 +852,10 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
         throw new Error(`HTTP ${res.status}: ${errorBody}`)
       }
 
-      setVoices(voices.filter((v) => v.name !== voiceName))
+      const updatedVoices = voices.filter((v) => v.name !== voiceName)
+      setVoices(updatedVoices)
       if (selectedVoice === voiceName) {
-        setSelectedVoice(voices.length > 1 ? voices[0].name : null)
+        setSelectedVoice(null)
       }
     } catch (err) {
       setError(String(err))
