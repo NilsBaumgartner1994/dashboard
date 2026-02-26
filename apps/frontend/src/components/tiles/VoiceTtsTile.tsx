@@ -47,6 +47,7 @@ import BaseTile from './BaseTile'
 import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { pipeline } from '@xenova/transformers'
 
 const DEFAULT_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
@@ -85,6 +86,21 @@ interface VoiceCardModalProps {
   ttsUrl?: string
   manageImages?: boolean
   onImagesChanged?: () => void
+}
+
+type AsrResult = { text?: string }
+type AsrTranscriber = (audio: string, options?: { chunk_length_s?: number; stride_length_s?: number }) => Promise<AsrResult>
+
+let transcriberPromise: Promise<AsrTranscriber> | null = null
+
+const getTranscriber = async (): Promise<AsrTranscriber> => {
+  if (!transcriberPromise) {
+    transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+      quantized: true,
+    }) as Promise<AsrTranscriber>
+  }
+
+  return transcriberPromise
 }
 
 function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUrl, manageImages, onImagesChanged }: VoiceCardModalProps) {
@@ -474,16 +490,19 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     if (!refAudioFile) return
     setTranscribing(true)
     setTranscribeError(null)
+    const objectUrl = URL.createObjectURL(refAudioFile)
+
     try {
-      const { pipeline } = await import('@xenova/transformers')
-      const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small')
-      const objectUrl = URL.createObjectURL(refAudioFile)
-      const result = await transcriber(objectUrl) as { text: string }
-      URL.revokeObjectURL(objectUrl)
-      setRefText(result.text.trim())
+      const transcriber = await getTranscriber()
+      const result = await transcriber(objectUrl, {
+        chunk_length_s: 20,
+        stride_length_s: 3,
+      })
+      setRefText((result.text || '').trim())
     } catch (err) {
       setTranscribeError(String(err))
     } finally {
+      URL.revokeObjectURL(objectUrl)
       setTranscribing(false)
     }
   }, [refAudioFile])
