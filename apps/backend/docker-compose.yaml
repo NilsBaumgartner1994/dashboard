@@ -5,6 +5,8 @@ services:
   my-dashboard-directus:
     build:
       context: ./
+    # Needed for docker-logs endpoint access to /var/run/docker.sock
+    user: "0:0"
     #container_name: "my-dashboard-directus" # "replicas" is ignored if you name your container using container_name: myname
     restart: always
     deploy:
