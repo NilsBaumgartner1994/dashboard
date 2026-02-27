@@ -166,18 +166,30 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
       onSettingsOpen={() => setCodeInput((tile.config?.code as string) || DEFAULT_CODE)}
       getExtraConfig={() => ({ code: codeInput })}
     >
-      <Stack spacing={1} sx={{ height: '100%' }}>
+      <Stack spacing={1} sx={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle2" fontWeight={700}>React Code Renderer</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, minHeight: 220, flex: 1, minWidth: 0, overflow: 'hidden' }}>
-          <TextField
-            label="Code Eingabe"
-            multiline
-            minRows={12}
-            value={codeInput}
-            onChange={(e) => setCodeInput(e.target.value)}
-            sx={{ minWidth: 0, '& .MuiInputBase-root': { height: '100%' }, '& textarea': { overflowX: 'auto' } }}
-          />
-          <Box sx={{ minWidth: 0, border: '1px solid', borderColor: 'divider', borderRadius: 1, minHeight: 220, bgcolor: 'background.paper', overflow: 'hidden' }}>
+          <Box sx={{ minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+            <TextField
+              label="Code Eingabe"
+              multiline
+              minRows={12}
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              sx={{
+                height: '100%',
+                minWidth: 0,
+                '& .MuiInputBase-root': { height: '100%', alignItems: 'stretch' },
+                '& .MuiInputBase-inputMultiline': {
+                  height: '100% !important',
+                  overflowY: 'auto',
+                  overflowX: 'auto',
+                  overscrollBehavior: 'contain',
+                },
+              }}
+            />
+          </Box>
+          <Box sx={{ minWidth: 0, minHeight: 0, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper', overflow: 'hidden', overscrollBehavior: 'contain' }}>
             <iframe title={`render-${tile.id}`} srcDoc={srcDoc} style={{ border: 0, width: '100%', height: '100%' }} sandbox="allow-scripts" />
           </Box>
         </Box>
