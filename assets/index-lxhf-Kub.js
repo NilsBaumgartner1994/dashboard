@@ -2205,6 +2205,7 @@ export default function ColorSquare() {
         }
 
         const transformed = Babel.transform(normalized, {
+          filename: 'rendered-component.tsx',
           presets: ['react', 'typescript'],
           plugins: ['transform-modules-commonjs'],
           sourceType: 'module',
