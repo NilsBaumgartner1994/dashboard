@@ -31,16 +31,27 @@ function makeSrcDoc(code: string): string {
     <script type="text/babel">
       const View = ({ style, children, ...props }) => <div style={style} {...props}>{children}</div>;
       const Text = ({ style, children, ...props }) => <span style={style} {...props}>{children}</span>;
+
+      function stripMarkdownFences(input) {
+        const fenced = input.match(/^\`\`\`(?:jsx|tsx|javascript|js)?\s*([\s\S]*?)\s*\`\`\`$/i);
+        return fenced ? fenced[1] : input;
+      }
+
       try {
         const userCode = ${JSON.stringify(escapedCode)};
-        const trimmed = userCode.trim();
-        const normalized = /export\s+default/.test(trimmed)
-          ? trimmed.replace(/export\s+default/, 'const __DefaultExport =')
-          : trimmed.startsWith('<')
-            ? 'function App() { return (' + trimmed + '); }'
-            : trimmed;
+        const trimmed = stripMarkdownFences(userCode).trim();
 
-        const transformed = Babel.transform(normalized, { presets: ['react'] }).code;
+        let normalized = trimmed;
+        if (/export\s+default/.test(normalized)) {
+          normalized = normalized.replace(/export\s+default/, 'const __DefaultExport =');
+        }
+
+        const hasNamedApp = /(function\s+App\s*\()|(const\s+App\s*=)|(let\s+App\s*=)|(var\s+App\s*=)|(class\s+App\s+)/.test(normalized);
+        if (!hasNamedApp && normalized.startsWith('<')) {
+          normalized = 'function App() { return (' + normalized + '); }';
+        }
+
+        const transformed = Babel.transform(normalized, { presets: ['react', 'typescript'] }).code;
         const resolveApp = new Function(
           'React',
           'View',
