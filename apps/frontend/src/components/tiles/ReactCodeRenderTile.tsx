@@ -172,12 +172,14 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
           <Box sx={{ minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
             <TextField
               label="Code Eingabe"
+              fullWidth
               multiline
               minRows={12}
               value={codeInput}
               onChange={(e) => setCodeInput(e.target.value)}
               sx={{
                 height: '100%',
+                width: '100%',
                 minWidth: 0,
                 '& .MuiInputBase-root': { height: '100%', alignItems: 'stretch' },
                 '& .MuiInputBase-inputMultiline': {
