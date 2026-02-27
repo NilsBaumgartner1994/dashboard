@@ -40,6 +40,10 @@ function makeSrcDoc(code: string): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@emotion/react@11/dist/emotion-react.umd.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@emotion/styled@11/dist/emotion-styled.umd.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@mui/material@5/umd/material-ui.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
       html, body, #root { height: 100%; margin: 0; font-family: Arial, sans-serif; }
@@ -68,7 +72,15 @@ function makeSrcDoc(code: string): string {
           if (requestedModule === 'react') return React;
           if (requestedModule === 'react-dom') return ReactDOM;
           if (requestedModule === 'react-native') return reactNativeShim;
-          throw new Error('Import nicht unterstützt: ' + requestedModule + '. Erlaubt: react, react-dom, react-native');
+          if (requestedModule === '@mui/material') {
+            if (!window.MaterialUI) {
+              throw new Error('MUI konnte nicht geladen werden. Bitte erneut rendern.');
+            }
+
+            return window.MaterialUI;
+          }
+
+          throw new Error('Import nicht unterstützt: ' + requestedModule + '. Erlaubt: react, react-dom, react-native, @mui/material');
         };
       }
 
@@ -156,16 +168,16 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
     >
       <Stack spacing={1} sx={{ height: '100%' }}>
         <Typography variant="subtitle2" fontWeight={700}>React Code Renderer</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, minHeight: 220, flex: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, minHeight: 220, flex: 1, minWidth: 0, overflow: 'hidden' }}>
           <TextField
             label="Code Eingabe"
             multiline
             minRows={12}
             value={codeInput}
             onChange={(e) => setCodeInput(e.target.value)}
-            sx={{ '& .MuiInputBase-root': { height: '100%' } }}
+            sx={{ minWidth: 0, '& .MuiInputBase-root': { height: '100%' }, '& textarea': { overflowX: 'auto' } }}
           />
-          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, minHeight: 220, bgcolor: 'background.paper' }}>
+          <Box sx={{ minWidth: 0, border: '1px solid', borderColor: 'divider', borderRadius: 1, minHeight: 220, bgcolor: 'background.paper', overflow: 'hidden' }}>
             <iframe title={`render-${tile.id}`} srcDoc={srcDoc} style={{ border: 0, width: '100%', height: '100%' }} sandbox="allow-scripts" />
           </Box>
         </Box>
