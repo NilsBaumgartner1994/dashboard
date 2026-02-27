@@ -6,9 +6,30 @@ import { useStore } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
 import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
 
-const DEFAULT_CODE = `<View style={{padding: 16, border: '1px solid #888', borderRadius: 8}}>
-  <Text>Hallo von der React Code Kachel 👋</Text>
-</View>`
+const DEFAULT_CODE = `import React, { useEffect, useState } from 'react'
+
+export default function ColorSquare() {
+  const [isRed, setIsRed] = useState(true)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsRed((previous) => !previous)
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        backgroundColor: isRed ? '#FF0000' : '#0000FF',
+        transition: 'background-color 300ms ease',
+      }}
+    />
+  )
+}`
 
 function makeSrcDoc(code: string): string {
   const escapedCode = code.replace(/<\/script>/gi, '<\\/script>')
@@ -37,31 +58,68 @@ function makeSrcDoc(code: string): string {
         return fenced ? fenced[1] : input;
       }
 
+      function createRuntimeRequire(View, Text) {
+        const reactNativeShim = {
+          View,
+          Text,
+        };
+
+        return function runtimeRequire(requestedModule) {
+          if (requestedModule === 'react') return React;
+          if (requestedModule === 'react-dom') return ReactDOM;
+          if (requestedModule === 'react-native') return reactNativeShim;
+          throw new Error('Import nicht unterstützt: ' + requestedModule + '. Erlaubt: react, react-dom, react-native');
+        };
+      }
+
+      function resolveComponentExport(moduleExports) {
+        if (typeof moduleExports === 'function') return moduleExports;
+
+        if (moduleExports && typeof moduleExports.default === 'function') {
+          return moduleExports.default;
+        }
+
+        if (moduleExports && typeof moduleExports === 'object') {
+          const candidates = Object.entries(moduleExports)
+            .filter(([key, value]) => key !== '__esModule' && typeof value === 'function');
+
+          if (candidates.length === 1) {
+            return candidates[0][1];
+          }
+
+          if (candidates.length > 1) {
+            throw new Error('Bitte genau eine React-Komponente exportieren (default oder genau ein named export).');
+          }
+        }
+
+        return null;
+      }
+
       try {
         const userCode = ${JSON.stringify(escapedCode)};
         const trimmed = stripMarkdownFences(userCode).trim();
 
         let normalized = trimmed;
-        if (/export\s+default/.test(normalized)) {
-          normalized = normalized.replace(/export\s+default/, 'const __DefaultExport =');
+        if (normalized.startsWith('<')) {
+          normalized = 'export default function App() { return (' + normalized + '); }';
         }
 
-        const hasNamedApp = /(function\s+App\s*\()|(const\s+App\s*=)|(let\s+App\s*=)|(var\s+App\s*=)|(class\s+App\s+)/.test(normalized);
-        if (!hasNamedApp && normalized.startsWith('<')) {
-          normalized = 'function App() { return (' + normalized + '); }';
-        }
+        const transformed = Babel.transform(normalized, {
+          presets: ['react', 'typescript'],
+          plugins: ['transform-modules-commonjs'],
+          sourceType: 'module',
+        }).code;
 
-        const transformed = Babel.transform(normalized, { presets: ['react', 'typescript'] }).code;
-        const resolveApp = new Function(
-          'React',
-          'View',
-          'Text',
-          transformed + '; return typeof App === "function" ? App : (typeof __DefaultExport === "function" ? __DefaultExport : null);',
-        );
-        const App = resolveApp(React, View, Text);
+        const moduleObject = { exports: {} };
+        const runtimeRequire = createRuntimeRequire(View, Text);
+
+        const executeModule = new Function('require', 'module', 'exports', transformed);
+        executeModule(runtimeRequire, moduleObject, moduleObject.exports);
+
+        const App = resolveComponentExport(moduleObject.exports);
 
         if (typeof App !== 'function') {
-          throw new Error('Bitte "App" Funktion definieren oder JSX einfügen.');
+          throw new Error('Kein gültiger Export gefunden. Bitte genau eine Komponente exportieren.');
         }
 
         ReactDOM.createRoot(document.getElementById('root')).render(<App />);
