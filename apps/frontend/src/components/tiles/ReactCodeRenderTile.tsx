@@ -33,21 +33,26 @@ function makeSrcDoc(code: string): string {
       const Text = ({ style, children, ...props }) => <span style={style} {...props}>{children}</span>;
       try {
         const userCode = ${JSON.stringify(escapedCode)};
-        let App;
-        if (/export\\s+default/.test(userCode)) {
-          const normalized = userCode.replace(/export\\s+default/, 'const __DefaultExport =');
-          // eslint-disable-next-line no-eval
-          eval(normalized + '; App = __DefaultExport;');
-        } else if (userCode.trim().startsWith('<')) {
-          // eslint-disable-next-line no-eval
-          App = () => eval('(' + userCode + ')');
-        } else {
-          // eslint-disable-next-line no-eval
-          eval(userCode);
-          if (typeof App !== 'function') {
-            App = () => <pre>Bitte \"App\" Funktion definieren oder JSX einfügen.</pre>;
-          }
+        const trimmed = userCode.trim();
+        const normalized = /export\s+default/.test(trimmed)
+          ? trimmed.replace(/export\s+default/, 'const __DefaultExport =')
+          : trimmed.startsWith('<')
+            ? 'function App() { return (' + trimmed + '); }'
+            : trimmed;
+
+        const transformed = Babel.transform(normalized, { presets: ['react'] }).code;
+        const resolveApp = new Function(
+          'React',
+          'View',
+          'Text',
+          transformed + '; return typeof App === "function" ? App : (typeof __DefaultExport === "function" ? __DefaultExport : null);',
+        );
+        const App = resolveApp(React, View, Text);
+
+        if (typeof App !== 'function') {
+          throw new Error('Bitte "App" Funktion definieren oder JSX einfügen.');
         }
+
         ReactDOM.createRoot(document.getElementById('root')).render(<App />);
       } catch (err) {
         document.getElementById('root').innerHTML = '<div class="error">' + String(err) + '</div>';
