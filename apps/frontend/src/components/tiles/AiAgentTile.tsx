@@ -927,6 +927,9 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [debugModeInput, setDebugModeInput] = useState(
     tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false,
   )
+  const [autoOutputInput, setAutoOutputInput] = useState(
+    tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false,
+  )
   const [checkIntervalInput, setCheckIntervalInput] = useState(String(backendCheckIntervalS))
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
@@ -934,7 +937,16 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
+  const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false
   const latestConnectedPayload = getLatestConnectedPayload(tiles, outputs, tile.id)
+
+  useEffect(() => {
+    if (!autoOutputEnabled) return
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    const content = lastAssistant?.content?.trim()
+    if (!content) return
+    publishOutput(tile.id, { content, dataType: 'text' })
+  }, [autoOutputEnabled, messages, publishOutput, tile.id])
 
   const handleUseConnectedInput = () => {
     const content = latestConnectedPayload?.content?.trim()
@@ -960,6 +972,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
+          setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
           setCheckIntervalInput(String(
             typeof tile.config?.backendCheckInterval === 'number' && tile.config.backendCheckInterval >= 10
               ? tile.config.backendCheckInterval
@@ -1017,6 +1030,15 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 <Typography variant="body2">Debug-Modus (zeige Ollama-Anfrage)</Typography>
               }
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={autoOutputInput}
+                  onChange={(e) => setAutoOutputInput(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Auto-Output (letzte KI-Antwort) weiterleiten</Typography>}
+            />
             <Divider sx={{ my: 2 }}>Server-Statusprüfung</Divider>
             <TextField
               fullWidth
@@ -1029,7 +1051,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Box, Button, Stack, TextField, Typography } from '@mui/material'
+import { useEffect, useMemo, useState } from 'react'
+import { Box, Button, FormControlLabel, Stack, Switch, TextField, Typography } from '@mui/material'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -152,7 +152,31 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
 
   const [codeInput, setCodeInput] = useState((tile.config?.code as string) || DEFAULT_CODE)
   const [renderedCode, setRenderedCode] = useState((tile.config?.code as string) || DEFAULT_CODE)
+  const [autoInputApplyInput, setAutoInputApplyInput] = useState(
+    tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : false,
+  )
+  const [autoOutputInput, setAutoOutputInput] = useState(
+    tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false,
+  )
   const srcDoc = useMemo(() => makeSrcDoc(renderedCode), [renderedCode])
+  const autoInputApplyEnabled = tile.config?.autoInputApplyEnabled !== undefined
+    ? (tile.config.autoInputApplyEnabled as boolean)
+    : false
+  const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined
+    ? (tile.config.autoOutputEnabled as boolean)
+    : false
+
+  useEffect(() => {
+    if (!autoInputApplyEnabled) return
+    const content = latestConnectedPayload?.content?.trim()
+    if (!content) return
+    setCodeInput(content)
+  }, [autoInputApplyEnabled, latestConnectedPayload?.content])
+
+  useEffect(() => {
+    if (!autoOutputEnabled || !codeInput.trim()) return
+    publishOutput(tile.id, { content: codeInput, dataType: 'text' })
+  }, [autoOutputEnabled, codeInput, publishOutput, tile.id])
 
   const handleApplyInput = () => {
     const content = latestConnectedPayload?.content?.trim()
@@ -163,8 +187,28 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
   return (
     <BaseTile
       tile={tile}
-      onSettingsOpen={() => setCodeInput((tile.config?.code as string) || DEFAULT_CODE)}
-      getExtraConfig={() => ({ code: codeInput })}
+      onSettingsOpen={() => {
+        setCodeInput((tile.config?.code as string) || DEFAULT_CODE)
+        setAutoInputApplyInput(tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : false)
+        setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
+      }}
+      settingsChildren={
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          <FormControlLabel
+            control={<Switch checked={autoInputApplyInput} onChange={(e) => setAutoInputApplyInput(e.target.checked)} />}
+            label="Input automatisch übernehmen"
+          />
+          <FormControlLabel
+            control={<Switch checked={autoOutputInput} onChange={(e) => setAutoOutputInput(e.target.checked)} />}
+            label="Auto-Output bei Eingabeänderung senden"
+          />
+        </Stack>
+      }
+      getExtraConfig={() => ({
+        code: codeInput,
+        autoInputApplyEnabled: autoInputApplyInput,
+        autoOutputEnabled: autoOutputInput,
+      })}
     >
       <Stack spacing={1} sx={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle2" fontWeight={700}>React Code Renderer</Typography>

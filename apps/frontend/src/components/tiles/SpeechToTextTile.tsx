@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Box, Button, Chip, FormControlLabel, Stack, Switch, TextField, Typography } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -84,6 +84,9 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     (tile.config?.outputPromptWrap as string)
       || 'Erstelle mir eine react Code und gebe diesen direkt aus ohne Erklärungen sondern direkt den Code, fange mit <View> an. Hier die Anforderung {content}',
   )
+  const [autoOutputInput, setAutoOutputInput] = useState(
+    tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false,
+  )
   const tiles = useStore((s) => s.tiles)
   const outputs = useTileFlowStore((s) => s.outputs)
   const publishOutput = useTileFlowStore((s) => s.publishOutput)
@@ -102,6 +105,14 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     const template = ((tile.config?.outputPromptWrap as string) || outputPromptWrapInput || '{content}').trim()
     return template.includes('{content}') ? template.replace('{content}', transcript) : `${template} ${transcript}`
   }, [transcript, tile.config?.outputPromptWrap, outputPromptWrapInput])
+  const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined
+    ? (tile.config.autoOutputEnabled as boolean)
+    : false
+
+  useEffect(() => {
+    if (!autoOutputEnabled || !wrappedTranscript.trim()) return
+    publishOutput(tile.id, { content: wrappedTranscript, dataType: 'text' })
+  }, [autoOutputEnabled, publishOutput, tile.id, wrappedTranscript])
 
   const stopListeningInternal = () => {
     shouldKeepListeningRef.current = false
@@ -263,7 +274,10 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   return (
     <BaseTile
       tile={tile}
-      onSettingsOpen={() => setLanguageInput(language)}
+      onSettingsOpen={() => {
+        setLanguageInput(language)
+        setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
+      }}
       settingsChildren={
         <>
           <TextField
@@ -283,9 +297,18 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
             value={outputPromptWrapInput}
             onChange={(e) => setOutputPromptWrapInput(e.target.value)}
           />
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={<Switch checked={autoOutputInput} onChange={(e) => setAutoOutputInput(e.target.checked)} />}
+            label="Auto-Output bei Änderungen direkt senden"
+          />
         </>
       }
-      getExtraConfig={() => ({ language: languageInput || 'de-DE', outputPromptWrap: outputPromptWrapInput })}
+      getExtraConfig={() => ({
+        language: languageInput || 'de-DE',
+        outputPromptWrap: outputPromptWrapInput,
+        autoOutputEnabled: autoOutputInput,
+      })}
     >
       <Stack spacing={1.2}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
