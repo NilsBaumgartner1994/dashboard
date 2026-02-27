@@ -305,6 +305,8 @@ export default function DashboardScreen() {
                 gridAutoRows: `${isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT}px`,
                 width: '100%',
                 gap: 0.5,
+                position: 'relative',
+                zIndex: 1,
               }}
             >
               {tiles.map((tile) => (
@@ -312,35 +314,40 @@ export default function DashboardScreen() {
               ))}
             </Box>
           </DndContext>
-          {!isMobile && tileConnections.length > 0 && (
+          {tileConnections.length > 0 && (
             <svg
               width="100%"
               height="100%"
-              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2 }}
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'visible' }}
             >
               <defs>
-                <marker id="tile-flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                  <path d="M0,0 L8,4 L0,8 z" fill={theme.palette.primary.main} />
+                <marker id="tile-flow-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill={theme.palette.primary.main} />
                 </marker>
               </defs>
               {tileConnections.map((connection) => {
-                const fromX = ((connection.from.x + connection.from.w) / gridColumns) * 100
-                const fromY = (connection.from.y + connection.from.h / 2) * DESKTOP_ROW_HEIGHT
-                const toX = (connection.to.x / gridColumns) * 100
-                const toY = (connection.to.y + connection.to.h / 2) * DESKTOP_ROW_HEIGHT
-                const c1x = Math.min(98, fromX + 6)
-                const c2x = Math.max(2, toX - 6)
+                const currentColumns = isMobile ? MOBILE_COLS : gridColumns
+                const rowHeight = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
+                const fromX = ((connection.from.x + connection.from.w / 2) / currentColumns) * 100
+                const fromY = (connection.from.y + connection.from.h / 2) * rowHeight
+                const toX = ((connection.to.x + connection.to.w / 2) / currentColumns) * 100
+                const toY = (connection.to.y + connection.to.h / 2) * rowHeight
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
-                  <path
+                  <line
                     key={key}
-                    d={`M ${fromX}% ${fromY} C ${c1x}% ${fromY}, ${c2x}% ${toY}, ${toX}% ${toY}`}
+                    x1={`${fromX}%`}
+                    y1={fromY}
+                    x2={`${toX}%`}
+                    y2={toY}
                     stroke={theme.palette.primary.main}
                     strokeWidth="2"
-                    fill="none"
+                    strokeDasharray="8 8"
                     markerEnd="url(#tile-flow-arrow)"
-                    opacity="0.8"
-                  />
+                    opacity="0.75"
+                  >
+                    <animate attributeName="stroke-dashoffset" from="16" to="0" dur="0.8s" repeatCount="indefinite" />
+                  </line>
                 )
               })}
             </svg>

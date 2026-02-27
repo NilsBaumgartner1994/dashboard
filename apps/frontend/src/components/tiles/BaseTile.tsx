@@ -12,6 +12,8 @@ import {
   Divider,
   Button,
   MenuItem,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -72,6 +74,9 @@ export default function BaseTile({
       ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
       : [],
   )
+  const [autoForwardOutputInput, setAutoForwardOutputInput] = useState(
+    tile.config?.autoForwardOutput !== false,
+  )
   const connectableTiles = useStore((s) => s.tiles.filter((t) => t.id !== tile.id))
 
   const handleOpenSettings = () => {
@@ -83,6 +88,7 @@ export default function BaseTile({
         ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
         : [],
     )
+    setAutoForwardOutputInput(tile.config?.autoForwardOutput !== false)
     onSettingsOpen?.()
     setSettingsOpen(true)
   }
@@ -102,6 +108,7 @@ export default function BaseTile({
         backgroundImage: bgInput,
         maxWidth: parsedMaxWidth,
         outputTargets: outputTargetsInput,
+        autoForwardOutput: autoForwardOutputInput,
         ...extraCfg,
       },
     })
@@ -274,6 +281,17 @@ export default function BaseTile({
               </MenuItem>
             ))}
           </TextField>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoForwardOutputInput}
+                onChange={(e) => setAutoForwardOutputInput(e.target.checked)}
+              />
+            }
+            label="Output automatisch weiterleiten"
+            sx={{ mb: 2 }}
+          />
 
           {/* Position & size controls – applied immediately */}
           <Divider sx={{ my: 2 }}>Position & Größe</Divider>
