@@ -2131,16 +2131,27 @@ If a question does not make any sense, or is not factually coherent, explain why
     <script type="text/babel">
       const View = ({ style, children, ...props }) => <div style={style} {...props}>{children}</div>;
       const Text = ({ style, children, ...props }) => <span style={style} {...props}>{children}</span>;
+
+      function stripMarkdownFences(input) {
+        const fenced = input.match(/^\`\`\`(?:jsx|tsx|javascript|js)?s*([sS]*?)s*\`\`\`$/i);
+        return fenced ? fenced[1] : input;
+      }
+
       try {
         const userCode = ${JSON.stringify(i)};
-        const trimmed = userCode.trim();
-        const normalized = /exports+default/.test(trimmed)
-          ? trimmed.replace(/exports+default/, 'const __DefaultExport =')
-          : trimmed.startsWith('<')
-            ? 'function App() { return (' + trimmed + '); }'
-            : trimmed;
+        const trimmed = stripMarkdownFences(userCode).trim();
 
-        const transformed = Babel.transform(normalized, { presets: ['react'] }).code;
+        let normalized = trimmed;
+        if (/exports+default/.test(normalized)) {
+          normalized = normalized.replace(/exports+default/, 'const __DefaultExport =');
+        }
+
+        const hasNamedApp = /(functions+Apps*()|(consts+Apps*=)|(lets+Apps*=)|(vars+Apps*=)|(classs+Apps+)/.test(normalized);
+        if (!hasNamedApp && normalized.startsWith('<')) {
+          normalized = 'function App() { return (' + normalized + '); }';
+        }
+
+        const transformed = Babel.transform(normalized, { presets: ['react', 'typescript'] }).code;
         const resolveApp = new Function(
           'React',
           'View',
