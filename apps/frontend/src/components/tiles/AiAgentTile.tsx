@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, isValidElement } from 'react'
 import {
   Box,
   Typography,
@@ -136,6 +136,68 @@ interface AiChatProps {
   /** Called when the current job finishes (success or error), so the caller can clear the persisted job ID. */
   onJobDone?: () => void
   compact?: boolean
+}
+
+function MarkdownWithCopyCode({ content, compact = false }: { content: string; compact?: boolean }) {
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
+
+  const handleCopyCode = async (codeText: string) => {
+    try {
+      await navigator.clipboard.writeText(codeText)
+      setCopiedCode(codeText)
+      setTimeout(() => setCopiedCode((current) => (current === codeText ? null : current)), 1500)
+    } catch {
+      // Clipboard API may be unavailable in some browser contexts.
+    }
+  }
+
+  return (
+    <Box
+      sx={{
+        '& p': { my: 0.25 },
+        '& pre': { bgcolor: 'action.selected', p: 0.75, borderRadius: 1, overflow: 'auto', fontSize: '0.8rem' },
+        '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
+        fontSize: compact ? '0.8rem' : '0.875rem',
+      }}
+    >
+      <ReactMarkdown
+        components={{
+          pre({ children, ...props }) {
+            const firstChild = Array.isArray(children) ? children[0] : children
+            const rawText = isValidElement(firstChild)
+              ? (firstChild.props as { children?: unknown }).children
+              : ''
+            const codeText = String(rawText ?? '').replace(/\n$/, '')
+            return (
+              <Box sx={{ position: 'relative', my: 0.5 }}>
+                <Tooltip title={copiedCode === codeText ? 'Kopiert!' : 'Code kopieren'}>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleCopyCode(codeText)}
+                    sx={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      bgcolor: 'background.paper',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      zIndex: 1,
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                  >
+                    <ContentCopyIcon fontSize="inherit" />
+                  </IconButton>
+                </Tooltip>
+                <pre {...props}>{children}</pre>
+              </Box>
+            )
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </Box>
+  )
 }
 
 function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, compact = false }: AiChatProps) {
@@ -389,15 +451,8 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             }}
           >
             {msg.role === 'assistant' ? (
-              <Box
-                sx={{
-                  '& p': { my: 0.25 },
-                  '& pre': { bgcolor: 'action.selected', p: 0.5, borderRadius: 1, overflow: 'auto', fontSize: '0.8rem' },
-                  '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
-                  fontSize: compact ? '0.8rem' : '0.875rem',
-                }}
-              >
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <Box>
+                <MarkdownWithCopyCode content={msg.content} compact={compact} />
                 {/* Source attribution */}
                 {msg.sources && msg.sources.length > 0 ? (
                   <Box sx={{ mt: 0.5 }}>
@@ -538,15 +593,8 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
               opacity: 0.85,
             }}
           >
-            <Box
-              sx={{
-                '& p': { my: 0.25 },
-                '& pre': { bgcolor: 'action.selected', p: 0.5, borderRadius: 1, overflow: 'auto', fontSize: '0.8rem' },
-                '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
-                fontSize: compact ? '0.8rem' : '0.875rem',
-              }}
-            >
-              <ReactMarkdown>{partialContent}</ReactMarkdown>
+            <Box>
+              <MarkdownWithCopyCode content={partialContent} compact={compact} />
             </Box>
           </Box>
         )}
