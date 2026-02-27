@@ -27,6 +27,7 @@ import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import type { Note } from '../../store/useStore'
+import { useTileFlowStore } from '../../store/useTileFlowStore'
 
 // ─── Note editor modal ────────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
   const addNote = useStore((s) => s.addNote)
   const updateNote = useStore((s) => s.updateNote)
   const removeNote = useStore((s) => s.removeNote)
+  const publishOutput = useTileFlowStore((s) => s.publishOutput)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -147,6 +149,10 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
   const [searchQuery, setSearchQuery] = useState('')
 
   const handleNoteClick = (note: Note) => {
+    const outputContent = note.content.trim() || note.title.trim()
+    if (outputContent) {
+      publishOutput(tile.id, { content: outputContent, dataType: 'text' })
+    }
     setSelectedNote(note)
     setEditorOpen(true)
   }
@@ -154,6 +160,10 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
   const handleSaveExisting = (title: string, content: string) => {
     if (selectedNote) {
       updateNote(selectedNote.id, { title, content })
+    }
+    const outputContent = content.trim() || title.trim()
+    if (outputContent) {
+      publishOutput(tile.id, { content: outputContent, dataType: 'text' })
     }
     setEditorOpen(false)
     setSelectedNote(null)
@@ -169,6 +179,10 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
 
   const handleSaveNew = (title: string, content: string) => {
     addNote(title, content)
+    const outputContent = content.trim() || title.trim()
+    if (outputContent) {
+      publishOutput(tile.id, { content: outputContent, dataType: 'text' })
+    }
     setNewNoteOpen(false)
   }
 
@@ -176,6 +190,7 @@ export default function NotesTile({ tile }: { tile: TileInstance }) {
     const trimmed = quickTitle.trim()
     if (!trimmed) return
     addNote(trimmed, '')
+    publishOutput(tile.id, { content: trimmed, dataType: 'text' })
     setQuickTitle('')
   }
 
