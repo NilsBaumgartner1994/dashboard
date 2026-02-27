@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, Button, List, ListItem, ListItemText, Stack, TextField, Typography } from '@mui/material'
+import { Box, Button, FormControlLabel, List, ListItem, ListItemText, Stack, Switch, TextField, Typography } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord'
 import StopIcon from '@mui/icons-material/Stop'
@@ -17,6 +17,9 @@ interface SavedSpeech {
 export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
   const publishOutput = useTileFlowStore((s) => s.publishOutput)
   const [speechName, setSpeechName] = useState('Neue Aufnahme')
+  const [autoOutputInput, setAutoOutputInput] = useState(
+    tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : true,
+  )
   const [recording, setRecording] = useState(false)
   const [saved, setSaved] = useState<SavedSpeech[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -74,17 +77,34 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
     setRecording(false)
   }
 
+  const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : true
+
   const playAndSend = (entry: SavedSpeech) => {
     if (!audioRef.current) {
       audioRef.current = new Audio()
     }
     audioRef.current.src = entry.audioDataUrl
     void audioRef.current.play()
-    publishOutput(tile.id, { content: entry.audioDataUrl, dataType: 'audio' })
+    if (autoOutputEnabled) {
+      publishOutput(tile.id, { content: entry.audioDataUrl, dataType: 'audio' })
+    }
   }
 
   return (
-    <BaseTile tile={tile}>
+    <BaseTile
+      tile={tile}
+      onSettingsOpen={() => {
+        setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : true)
+      }}
+      settingsChildren={(
+        <FormControlLabel
+          sx={{ mt: 1 }}
+          control={<Switch checked={autoOutputInput} onChange={(e) => setAutoOutputInput(e.target.checked)} />}
+          label="Auto-Output beim Abspielen senden"
+        />
+      )}
+      getExtraConfig={() => ({ autoOutputEnabled: autoOutputInput })}
+    >
       <Stack spacing={1}>
         <Typography variant="subtitle2" fontWeight={700}>Speech Aufnahme & Library</Typography>
         <TextField
