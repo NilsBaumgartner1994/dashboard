@@ -105,6 +105,7 @@ function makeSrcDoc(code: string): string {
         }
 
         const transformed = Babel.transform(normalized, {
+          filename: 'rendered-component.tsx',
           presets: ['react', 'typescript'],
           plugins: ['transform-modules-commonjs'],
           sourceType: 'module',
