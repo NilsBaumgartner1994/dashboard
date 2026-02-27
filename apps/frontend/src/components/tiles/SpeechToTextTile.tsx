@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
@@ -11,7 +11,7 @@ import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { pipeline } from '@xenova/transformers'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
-import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
+import { getLatestConnectedPayload, getOutputTargets } from '../../store/tileFlowHelpers'
 
 interface SpeechToTextTileProps {
   tile: TileInstance
@@ -97,6 +97,10 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     () => getLatestConnectedPayload(tiles, outputs, tile.id),
     [tiles, outputs, tile.id],
   )
+  const outputTargets = useMemo(() => getOutputTargets(tile), [tile])
+  const hasConnectedTargets = outputTargets.length > 0
+  const autoForwardOutput = tile.config?.autoForwardOutput !== false
+
   const wrappedTranscript = useMemo(() => {
     if (!transcript.trim()) return ''
     const template = ((tile.config?.outputPromptWrap as string) || outputPromptWrapInput || '{content}').trim()
@@ -256,9 +260,14 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   }
 
   const handlePushOutput = () => {
-    if (!wrappedTranscript) return
+    if (!wrappedTranscript || !hasConnectedTargets) return
     publishOutput(tile.id, { content: wrappedTranscript, dataType: 'text' })
   }
+
+  useEffect(() => {
+    if (!autoForwardOutput || !hasConnectedTargets || !wrappedTranscript) return
+    publishOutput(tile.id, { content: wrappedTranscript, dataType: 'text' })
+  }, [autoForwardOutput, hasConnectedTargets, wrappedTranscript, publishOutput, tile.id])
 
   return (
     <BaseTile
@@ -333,14 +342,16 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           >
             Input übernehmen
           </Button>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handlePushOutput}
-            disabled={!wrappedTranscript}
-          >
-            Output senden
-          </Button>
+          {!autoForwardOutput && hasConnectedTargets && (
+            <Button
+              variant="contained"
+              size="small"
+              onClick={handlePushOutput}
+              disabled={!wrappedTranscript}
+            >
+              Output senden
+            </Button>
+          )}
           <Button
             variant="text"
             size="small"

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, isValidElement } from 'react'
+import { useState, useRef, useEffect, useCallback, isValidElement, useMemo } from 'react'
 import {
   Box,
   Typography,
@@ -39,7 +39,7 @@ import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
-import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
+import { getLatestConnectedPayload, getOutputTargets } from '../../store/tileFlowHelpers'
 import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
@@ -198,6 +198,12 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
       </ReactMarkdown>
     </Box>
   )
+}
+
+function toCodeOnlyOutput(content: string): string {
+  const matches = [...content.matchAll(/```(?:[a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g)]
+  if (matches.length === 0) return content.trim()
+  return matches.map((m) => (m[1] ?? '').trim()).filter(Boolean).join('\n\n')
 }
 
 function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, compact = false }: AiChatProps) {
@@ -928,6 +934,8 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false,
   )
   const [checkIntervalInput, setCheckIntervalInput] = useState(String(backendCheckIntervalS))
+  const [codeOnlyOutputInput, setCodeOnlyOutputInput] = useState(tile.config?.codeOnlyOutput === true)
+  const [inputWrapperTemplateInput, setInputWrapperTemplateInput] = useState((tile.config?.inputWrapperTemplate as string) || '')
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
@@ -935,20 +943,37 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
   const latestConnectedPayload = getLatestConnectedPayload(tiles, outputs, tile.id)
+  const inputWrapperTemplate = (tile.config?.inputWrapperTemplate as string) || ''
+  const outputTargets = useMemo(() => getOutputTargets(tile), [tile])
+  const hasConnectedTargets = outputTargets.length > 0
+  const autoForwardOutput = tile.config?.autoForwardOutput !== false
+  const codeOnlyOutput = tile.config?.codeOnlyOutput === true
 
   const handleUseConnectedInput = () => {
     const content = latestConnectedPayload?.content?.trim()
     if (!content) return
-    const newMessages: Message[] = [...messages, { role: 'user', content }]
+    const template = inputWrapperTemplate.trim()
+    const wrappedContent = template
+      ? (template.includes('${Input}') ? template.split('${Input}').join(content) : `${template} ${content}`)
+      : content
+    const newMessages: Message[] = [...messages, { role: 'user', content: wrappedContent }]
     handleSetMessages(newMessages)
   }
 
-  const handlePublishAssistantOutput = () => {
+  const handlePublishAssistantOutput = useCallback(() => {
+    if (!hasConnectedTargets) return
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-    const content = lastAssistant?.content?.trim()
+    const rawContent = lastAssistant?.content?.trim()
+    if (!rawContent) return
+    const content = codeOnlyOutput ? toCodeOnlyOutput(rawContent) : rawContent
     if (!content) return
     publishOutput(tile.id, { content, dataType: 'text' })
-  }
+  }, [codeOnlyOutput, hasConnectedTargets, messages, publishOutput, tile.id])
+
+  useEffect(() => {
+    if (!autoForwardOutput) return
+    handlePublishAssistantOutput()
+  }, [autoForwardOutput, handlePublishAssistantOutput])
 
   return (
     <>
@@ -965,6 +990,8 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               ? tile.config.backendCheckInterval
               : DEFAULT_BACKEND_CHECK_INTERVAL_S
           ))
+          setCodeOnlyOutputInput(tile.config?.codeOnlyOutput === true)
+          setInputWrapperTemplateInput((tile.config?.inputWrapperTemplate as string) || '')
         }}
         settingsChildren={
           <Box>
@@ -977,6 +1004,16 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               onChange={(e) => setModelInput(e.target.value)}
               sx={{ mb: 2 }}
               helperText="Muss auf dem Ollama-Server verfügbar sein"
+            />
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              label="Optionaler Input-Wrapper"
+              helperText="Optional. Verwende ${Input} als Platzhalter für den verbundenen Input."
+              value={inputWrapperTemplateInput}
+              onChange={(e) => setInputWrapperTemplateInput(e.target.value)}
+              sx={{ mb: 2 }}
             />
             <FormControlLabel
               control={
@@ -1017,6 +1054,17 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 <Typography variant="body2">Debug-Modus (zeige Ollama-Anfrage)</Typography>
               }
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={codeOnlyOutputInput}
+                  onChange={(e) => setCodeOnlyOutputInput(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2">Nur Code als Output senden</Typography>
+              }
+            />
             <Divider sx={{ my: 2 }}>Server-Statusprüfung</Divider>
             <TextField
               fullWidth
@@ -1029,7 +1077,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, codeOnlyOutput: codeOnlyOutputInput, inputWrapperTemplate: inputWrapperTemplateInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -1074,7 +1122,9 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           <Box sx={{ flex: 1, overflow: 'hidden', cursor: 'pointer' }} onClick={() => setModalOpen(true)}>
             <Box sx={{ display: 'flex', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
               <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); handleUseConnectedInput() }} disabled={!latestConnectedPayload?.content}>Input übernehmen</Button>
-              <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); handlePublishAssistantOutput() }} disabled={!messages.some((m) => m.role === 'assistant')}>Output senden</Button>
+              {!autoForwardOutput && hasConnectedTargets && (
+                <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); handlePublishAssistantOutput() }} disabled={!messages.some((m) => m.role === 'assistant')}>Output senden</Button>
+              )}
             </Box>
             {messages.length === 0 ? (
               <Typography variant="body2" color="text.secondary">

@@ -1,7 +1,7 @@
 import type { TileInstance } from './useStore'
 import type { TileFlowPayload } from './useTileFlowStore'
 
-function getOutputTargets(tile: TileInstance): string[] {
+export function getOutputTargets(tile: TileInstance): string[] {
   const raw = tile.config?.outputTargets
   if (!Array.isArray(raw)) return []
   return raw.filter((v): v is string => typeof v === 'string' && v.length > 0)
