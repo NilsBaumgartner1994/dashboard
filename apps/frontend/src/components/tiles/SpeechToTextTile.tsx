@@ -103,7 +103,9 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const wrappedTranscript = useMemo(() => {
     if (!transcript.trim()) return ''
     const template = ((tile.config?.outputPromptWrap as string) || outputPromptWrapInput || '{content}').trim()
-    return template.includes('{content}') ? template.replace('{content}', transcript) : `${template} ${transcript}`
+    if (template.includes('${content}')) return template.replace('${content}', transcript)
+    if (template.includes('{content}')) return template.replace('{content}', transcript)
+    return template
   }, [transcript, tile.config?.outputPromptWrap, outputPromptWrapInput])
   const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined
     ? (tile.config.autoOutputEnabled as boolean)
@@ -297,7 +299,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
             multiline
             minRows={3}
             label="Output Wrapper"
-            helperText="Nutze {content} als Platzhalter für den transkribierten Text."
+            helperText="Nutze ${content} (oder {content}) als Platzhalter für den transkribierten Text. Ohne Platzhalter bleibt der Wrapper unverändert."
             value={outputPromptWrapInput}
             onChange={(e) => setOutputPromptWrapInput(e.target.value)}
           />
