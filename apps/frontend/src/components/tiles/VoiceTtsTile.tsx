@@ -48,6 +48,7 @@ import RecordingAudioIndicator from './RecordingAudioIndicator'
 import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { useTileFlowStore } from '../../store/useTileFlowStore'
 import { pipeline } from '@xenova/transformers'
 
 const DEFAULT_CHECK_INTERVAL_S = 60
@@ -340,6 +341,7 @@ function formatDate(date: Date): string {
 
 export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const backendUrl = useStore((s) => s.backendUrl)
+  const publishOutput = useTileFlowStore((s) => s.publishOutput)
   const defaultTtsUrl = `${backendUrl}/tts`
   const ttsUrl: string = (tile.config?.ttsUrl as string) || defaultTtsUrl
   const checkIntervalS: number =
@@ -976,7 +978,12 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
     const audio = new Audio(audioUrl)
     audioRef.current = audio
     audio.onended = () => setPlaying(false)
-    audio.play().then(() => setPlaying(true)).catch((err) => setError(String(err)))
+    audio.play()
+      .then(() => {
+        setPlaying(true)
+        publishOutput(tile.id, { content: audioUrl, dataType: 'audio' })
+      })
+      .catch((err) => setError(String(err)))
   }
 
   const handleStop = () => {
