@@ -3,6 +3,7 @@ import { Alert, Box, Button, FormControlLabel, List, ListItem, ListItemButton, L
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord'
 import StopIcon from '@mui/icons-material/Stop'
+import DeleteIcon from '@mui/icons-material/Delete'
 import BaseTile from './BaseTile'
 import RecordingAudioIndicator from './RecordingAudioIndicator'
 import type { TileInstance } from '../../store/useStore'
@@ -175,6 +176,14 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
     setRenameValue('')
   }
 
+  const deleteEntry = (entryId: string) => {
+    persist(saved.filter((entry) => entry.id !== entryId))
+    if (renameId === entryId) {
+      setRenameId(null)
+      setRenameValue('')
+    }
+  }
+
   return (
     <BaseTile
       tile={tile}
@@ -209,10 +218,19 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
             <ListItem
               key={entry.id}
               disablePadding
-              secondaryAction={<Button size="small" startIcon={<PlayArrowIcon />} onClick={() => playAndSend(entry)}>Abspielen</Button>}
+              secondaryAction={(
+                <Stack direction="row" spacing={0.5}>
+                  <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} onClick={() => playAndSend(entry)}>
+                    Start
+                  </Button>
+                  <Button size="small" variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => deleteEntry(entry.id)}>
+                    Löschen
+                  </Button>
+                </Stack>
+              )}
             >
               {renameId === entry.id ? (
-                <Box sx={{ width: '100%', py: 0.5, pr: 8 }}>
+                <Box sx={{ width: '100%', py: 0.5, pr: 24 }}>
                   <TextField
                     size="small"
                     fullWidth
@@ -230,7 +248,7 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
                   />
                 </Box>
               ) : (
-                <ListItemButton onClick={() => startRename(entry)} sx={{ pr: 8 }}>
+                <ListItemButton onClick={() => startRename(entry)} sx={{ pr: 24 }}>
                   <ListItemText primary={entry.name} secondary="Zum Umbenennen antippen" />
                 </ListItemButton>
               )}
