@@ -171,6 +171,7 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
     const content = latestConnectedPayload?.content?.trim()
     if (!content) return
     setCodeInput(content)
+    setRenderedCode(content)
   }, [autoInputApplyEnabled, latestConnectedPayload?.content])
 
   useEffect(() => {
