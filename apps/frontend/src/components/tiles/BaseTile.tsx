@@ -27,6 +27,7 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import type { ReactNode } from 'react'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { getOutputTargets } from '../../store/tileFlowHelpers'
 
 interface BaseTileProps {
   tile: TileInstance
@@ -67,22 +68,14 @@ export default function BaseTile({
   const [maxWidthInput, setMaxWidthInput] = useState(
     tile.config?.maxWidth != null ? String(tile.config.maxWidth) : ''
   )
-  const [outputTargetsInput, setOutputTargetsInput] = useState<string[]>(
-    Array.isArray(tile.config?.outputTargets)
-      ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
-      : [],
-  )
+  const [outputTargetsInput, setOutputTargetsInput] = useState<string[]>(getOutputTargets(tile))
   const connectableTiles = useStore((s) => s.tiles.filter((t) => t.id !== tile.id))
 
   const handleOpenSettings = () => {
     setNameInput((tile.config?.name as string) ?? '')
     setBgInput((tile.config?.backgroundImage as string) ?? '')
     setMaxWidthInput(tile.config?.maxWidth != null ? String(tile.config.maxWidth) : '')
-    setOutputTargetsInput(
-      Array.isArray(tile.config?.outputTargets)
-        ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
-        : [],
-    )
+    setOutputTargetsInput(getOutputTargets(tile))
     onSettingsOpen?.()
     setSettingsOpen(true)
   }
