@@ -322,8 +322,8 @@ export default function DashboardScreen() {
               style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 20 }}
             >
               <defs>
-                <marker id="tile-flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                  <path d="M0,0 L8,4 L0,8 z" fill={theme.palette.primary.main} />
+                <marker id="tile-flow-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 z" fill={theme.palette.primary.main} />
                 </marker>
               </defs>
               {tileConnections.map((connection) => {
@@ -334,38 +334,18 @@ export default function DashboardScreen() {
                 const fromY = (connection.from.y + connection.from.h / 2) * rowHeight
                 const toX = (toLayout.x / currentColumns) * 100
                 const toY = (connection.to.y + connection.to.h / 2) * rowHeight
-                const c1x = Math.min(98, fromX + 6)
-                const c2x = Math.max(2, toX - 6)
-                const pathD = `M ${fromX} ${fromY} C ${c1x} ${fromY}, ${c2x} ${toY}, ${toX} ${toY}`
+                const pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
-                  <g key={key}>
-                    <path
-                      d={pathD}
-                      stroke={theme.palette.background.paper}
-                      strokeWidth="5"
-                      fill="none"
-                      opacity="0.95"
-                    />
-                    <path
-                      d={pathD}
-                      stroke={theme.palette.primary.main}
-                      strokeWidth="2.5"
-                      fill="none"
-                      markerEnd="url(#tile-flow-arrow)"
-                      opacity="0.98"
-                    />
-                    <path
-                      d={pathD}
-                      stroke={theme.palette.primary.light}
-                      strokeWidth="2.5"
-                      fill="none"
-                      strokeDasharray="8 8"
-                      opacity="0.9"
-                    >
-                      <animate attributeName="stroke-dashoffset" from="16" to="0" dur="1.1s" repeatCount="indefinite" />
-                    </path>
-                  </g>
+                  <path
+                    key={key}
+                    d={pathD}
+                    stroke={theme.palette.primary.main}
+                    strokeWidth="2"
+                    fill="none"
+                    markerEnd="url(#tile-flow-arrow)"
+                    opacity="0.95"
+                  />
                 )
               })}
             </svg>
