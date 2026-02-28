@@ -86,6 +86,8 @@ interface ServerTileProps {
   statusAtBottom?: boolean
   /** Optional element rendered after the main tile content (e.g. a ReloadIntervalBar) */
   afterContent?: React.ReactNode
+  /** Optional custom content rendered above the status chip. */
+  contentChildren?: React.ReactNode
 }
 
 export default function ServerTile({
@@ -97,6 +99,7 @@ export default function ServerTile({
   onExtraSettingsOpen,
   statusAtBottom,
   afterContent,
+  contentChildren,
 }: ServerTileProps) {
   const config = (tile.config ?? {}) as ServerConfig
 
@@ -319,6 +322,8 @@ export default function ServerTile({
               Kein Server konfiguriert. ⚙ drücken.
             </Typography>
           )}
+
+          {contentChildren}
 
           {/* Status chip – bottom or inline */}
           <Box sx={statusAtBottom ? { mt: 'auto', pb: 0.5 } : { mt: 0.5 }}>
