@@ -105,7 +105,13 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
   const startRecording = async () => {
     try {
       setError(null)
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      })
       recordingStreamRef.current = stream
 
       const recorder = new MediaRecorder(stream)
