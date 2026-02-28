@@ -44,6 +44,7 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import DeleteIcon from '@mui/icons-material/Delete'
 import HideImageIcon from '@mui/icons-material/HideImage'
 import BaseTile from './BaseTile'
+import RecordingAudioIndicator from './RecordingAudioIndicator'
 import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
@@ -117,38 +118,6 @@ const getTranscriber = async (): Promise<AsrTranscriber> => {
   }
 
   return transcriberPromise
-}
-
-interface AudioLevelVisualizerProps {
-  level: number
-}
-
-function AudioLevelVisualizer({ level }: AudioLevelVisualizerProps) {
-  const barCount = 18
-
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: 30, mt: 0.5 }}>
-      {Array.from({ length: barCount }).map((_, index) => {
-        const wave = Math.abs(Math.sin((index / barCount) * Math.PI * 2))
-        const normalized = Math.min(1, level * (0.65 + wave * 0.7))
-        const height = 4 + normalized * 24
-
-        return (
-          <Box
-            key={index}
-            sx={{
-              width: 4,
-              height,
-              borderRadius: 999,
-              transition: 'height 120ms ease-out, opacity 120ms ease-out',
-              bgcolor: 'error.main',
-              opacity: 0.25 + normalized * 0.75,
-            }}
-          />
-        )
-      })}
-    </Box>
-  )
 }
 
 function VoiceCardModal({ open, onClose, title, items, selected, onSelect, ttsUrl, manageImages, onImagesChanged }: VoiceCardModalProps) {
@@ -1243,7 +1212,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                         <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           ● Aufnahme läuft…
                         </Typography>
-                        <AudioLevelVisualizer level={audioLevel} />
+                        <RecordingAudioIndicator level={audioLevel} />
                       </Box>
                     )}
                     {recordedAudioUrl && !isRecording && (
