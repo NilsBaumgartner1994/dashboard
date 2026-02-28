@@ -153,7 +153,7 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
   const [codeInput, setCodeInput] = useState((tile.config?.code as string) || DEFAULT_CODE)
   const [renderedCode, setRenderedCode] = useState((tile.config?.code as string) || DEFAULT_CODE)
   const [autoInputApplyInput, setAutoInputApplyInput] = useState(
-    tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : false,
+    tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : true,
   )
   const [autoOutputInput, setAutoOutputInput] = useState(
     tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false,
@@ -161,7 +161,7 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
   const srcDoc = useMemo(() => makeSrcDoc(renderedCode), [renderedCode])
   const autoInputApplyEnabled = tile.config?.autoInputApplyEnabled !== undefined
     ? (tile.config.autoInputApplyEnabled as boolean)
-    : false
+    : true
   const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined
     ? (tile.config.autoOutputEnabled as boolean)
     : false
@@ -189,7 +189,7 @@ export default function ReactCodeRenderTile({ tile }: { tile: TileInstance }) {
       tile={tile}
       onSettingsOpen={() => {
         setCodeInput((tile.config?.code as string) || DEFAULT_CODE)
-        setAutoInputApplyInput(tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : false)
+        setAutoInputApplyInput(tile.config?.autoInputApplyEnabled !== undefined ? (tile.config.autoInputApplyEnabled as boolean) : true)
         setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
       }}
       settingsChildren={

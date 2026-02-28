@@ -248,6 +248,8 @@ export default function DashboardScreen() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const tileConnections = getTileConnections(tiles)
+  const rowHeight = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
+  const overlayHeight = Math.max(1, ...tiles.map((tile) => tile.y + tile.h)) * rowHeight
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event
@@ -311,11 +313,13 @@ export default function DashboardScreen() {
               ))}
             </Box>
           </DndContext>
-          {!isMobile && tileConnections.length > 0 && (
+          {tileConnections.length > 0 && (
             <svg
               width="100%"
-              height="100%"
-              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2 }}
+              height={overlayHeight}
+              viewBox={`0 0 100 ${overlayHeight}`}
+              preserveAspectRatio="none"
+              style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 20 }}
             >
               <defs>
                 <marker id="tile-flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
@@ -323,23 +327,35 @@ export default function DashboardScreen() {
                 </marker>
               </defs>
               {tileConnections.map((connection) => {
-                const fromX = ((connection.from.x + connection.from.w) / gridColumns) * 100
-                const fromY = (connection.from.y + connection.from.h / 2) * DESKTOP_ROW_HEIGHT
-                const toX = (connection.to.x / gridColumns) * 100
-                const toY = (connection.to.y + connection.to.h / 2) * DESKTOP_ROW_HEIGHT
+                const currentColumns = isMobile ? MOBILE_COLS : gridColumns
+                const fromLayout = isMobile ? getMobileTilePos(connection.from, gridColumns) : { x: connection.from.x, w: connection.from.w }
+                const toLayout = isMobile ? getMobileTilePos(connection.to, gridColumns) : { x: connection.to.x, w: connection.to.w }
+                const fromX = ((fromLayout.x + fromLayout.w) / currentColumns) * 100
+                const fromY = (connection.from.y + connection.from.h / 2) * rowHeight
+                const toX = (toLayout.x / currentColumns) * 100
+                const toY = (connection.to.y + connection.to.h / 2) * rowHeight
                 const c1x = Math.min(98, fromX + 6)
                 const c2x = Math.max(2, toX - 6)
+                const pathD = `M ${fromX * 10} ${fromY} C ${c1x * 10} ${fromY}, ${c2x * 10} ${toY}, ${toX * 10} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
-                  <path
-                    key={key}
-                    d={`M ${fromX}% ${fromY} C ${c1x}% ${fromY}, ${c2x}% ${toY}, ${toX}% ${toY}`}
-                    stroke={theme.palette.primary.main}
-                    strokeWidth="2"
-                    fill="none"
-                    markerEnd="url(#tile-flow-arrow)"
-                    opacity="0.8"
-                  />
+                  <g key={key}>
+                    <path
+                      d={pathD}
+                      stroke={theme.palette.background.paper}
+                      strokeWidth="5"
+                      fill="none"
+                      opacity="0.95"
+                    />
+                    <path
+                      d={pathD}
+                      stroke={theme.palette.primary.main}
+                      strokeWidth="2.5"
+                      fill="none"
+                      markerEnd="url(#tile-flow-arrow)"
+                      opacity="0.98"
+                    />
+                  </g>
                 )
               })}
             </svg>
