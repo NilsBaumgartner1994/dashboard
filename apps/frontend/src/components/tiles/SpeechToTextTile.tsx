@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, Chip, FormControlLabel, Stack, Switch, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, FormControlLabel, MenuItem, Stack, Switch, TextField, Typography } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -55,16 +55,45 @@ type WindowWithSpeechRecognition = Window & {
 type AsrResult = { text?: string }
 type AsrTranscriber = (audio: string, options?: { chunk_length_s?: number; stride_length_s?: number }) => Promise<AsrResult>
 
-let transcriberPromise: Promise<AsrTranscriber> | null = null
+type AsrLibraryId = 'browser' | 'whisperTiny' | 'whisperBase'
 
-const getTranscriber = async (): Promise<AsrTranscriber> => {
-  if (!transcriberPromise) {
-    transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-      quantized: true,
-    }) as Promise<AsrTranscriber>
+const ASR_LIBRARY_OPTIONS: { id: AsrLibraryId; label: string; model?: string; description: string }[] = [
+  {
+    id: 'browser',
+    label: 'Browser SpeechRecognition (Web Speech API)',
+    description: 'Sehr schnell für Live-Mikrofon, Qualität hängt stark vom Browser ab.',
+  },
+  {
+    id: 'whisperTiny',
+    label: 'Transformers.js – Whisper Tiny',
+    model: 'Xenova/whisper-tiny',
+    description: 'Lokales Modell, schnell, meist besser für Upload-Audio als Browser-STT.',
+  },
+  {
+    id: 'whisperBase',
+    label: 'Transformers.js – Whisper Base',
+    model: 'Xenova/whisper-base',
+    description: 'Genauer als Tiny, braucht aber mehr Zeit und Speicher.',
+  },
+]
+
+const transcriberPromises = new Map<AsrLibraryId, Promise<AsrTranscriber>>()
+
+const getTranscriber = async (library: AsrLibraryId): Promise<AsrTranscriber> => {
+  if (library === 'browser') {
+    throw new Error('Die Browser-STT-Bibliothek unterstützt nur Live-Mikrofon, kein Datei-Transkript.')
   }
 
-  return transcriberPromise
+  if (!transcriberPromises.has(library)) {
+    const model = ASR_LIBRARY_OPTIONS.find((option) => option.id === library)?.model
+    if (!model) throw new Error('Unbekannte STT-Bibliothek ausgewählt.')
+
+    transcriberPromises.set(library, pipeline('automatic-speech-recognition', model, {
+      quantized: true,
+    }) as Promise<AsrTranscriber>)
+  }
+
+  return transcriberPromises.get(library) as Promise<AsrTranscriber>
 }
 
 function getSpeechRecognitionCtor() {
@@ -80,6 +109,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadProcessing, setUploadProcessing] = useState(false)
   const [languageInput, setLanguageInput] = useState((tile.config?.language as string) || 'de-DE')
+  const [asrLibraryInput, setAsrLibraryInput] = useState((tile.config?.asrLibrary as AsrLibraryId) || 'browser')
   const [outputPromptWrapInput, setOutputPromptWrapInput] = useState(
     (tile.config?.outputPromptWrap as string)
       || 'Erstelle mir eine react Code und gebe diesen direkt aus ohne Erklärungen sondern direkt den Code, fange mit <View> an. Hier die Anforderung {content}',
@@ -95,6 +125,8 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const lastAppliedConnectedTimestampRef = useRef<number | null>(null)
 
   const language = (tile.config?.language as string) || 'de-DE'
+  const asrLibrary = (tile.config?.asrLibrary as AsrLibraryId) || 'browser'
+  const asrLibraryLabel = ASR_LIBRARY_OPTIONS.find((option) => option.id === asrLibrary)?.label || asrLibrary
   const outputTargetIds = getOutputTargets(tile)
 
   const transcript = useMemo(() => finalTexts.join('\n'), [finalTexts])
@@ -233,7 +265,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
 
     try {
       const objectUrl = URL.createObjectURL(uploadFile)
-      const transcriber = await getTranscriber()
+      const transcriber = await getTranscriber(asrLibrary)
       const result = await transcriber(objectUrl, { chunk_length_s: 20, stride_length_s: 4 })
       URL.revokeObjectURL(objectUrl)
 
@@ -262,7 +294,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     if (payload?.dataType === 'audio') {
       setUploadProcessing(true)
       try {
-        const transcriber = await getTranscriber()
+        const transcriber = await getTranscriber(asrLibrary)
         const result = await transcriber(content, { chunk_length_s: 20, stride_length_s: 4 })
         const text = result.text?.trim()
         if (!text) {
@@ -301,6 +333,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       tile={tile}
       onSettingsOpen={() => {
         setLanguageInput(language)
+        setAsrLibraryInput(asrLibrary)
         setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
       }}
       settingsChildren={
@@ -313,6 +346,24 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
             onChange={(e) => setLanguageInput(e.target.value)}
             sx={{ mt: 1, mb: 2 }}
           />
+          <TextField
+            fullWidth
+            select
+            label="STT Bibliothek"
+            helperText="Wähle aus, welche Bibliothek/Modell für Uploads und Audio-Inputs genutzt werden soll."
+            value={asrLibraryInput}
+            onChange={(e) => setAsrLibraryInput(e.target.value as AsrLibraryId)}
+            sx={{ mb: 2 }}
+          >
+            {ASR_LIBRARY_OPTIONS.map((option) => (
+              <MenuItem key={option.id} value={option.id}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+            {ASR_LIBRARY_OPTIONS.find((option) => option.id === asrLibraryInput)?.description}
+          </Typography>
           <TextField
             fullWidth
             multiline
@@ -331,6 +382,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       }
       getExtraConfig={() => ({
         language: languageInput || 'de-DE',
+        asrLibrary: asrLibraryInput,
         outputPromptWrap: outputPromptWrapInput,
         autoOutputEnabled: autoOutputInput,
       })}
@@ -338,7 +390,10 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       <Stack spacing={1.2}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="subtitle1" fontWeight={700}>Speech to Text</Typography>
-          <Chip color={listening ? 'success' : 'default'} size="small" label={listening ? 'Hört zu' : 'Gestoppt'} />
+          <Stack direction="row" spacing={0.5}>
+            <Chip color={listening ? 'success' : 'default'} size="small" label={listening ? 'Hört zu' : 'Gestoppt'} />
+            <Chip size="small" variant="outlined" label={asrLibraryLabel} />
+          </Stack>
         </Box>
 
         {error && <Alert severity="warning">{error}</Alert>}
@@ -411,15 +466,22 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
             variant="contained"
             size="small"
             startIcon={<GraphicEqIcon />}
-            disabled={!uploadFile || uploadProcessing}
+            disabled={!uploadFile || uploadProcessing || asrLibrary === 'browser'}
             onClick={handleUploadedAudioTranscription}
           >
-            {uploadProcessing ? 'Wandle um…' : 'MP3 umwandeln'}
+            {uploadProcessing ? 'Wandle um…' : 'Audio transkribieren'}
           </Button>
           <Typography variant="caption" color="text.secondary">
             {uploadFile ? uploadFile.name : 'Keine Datei ausgewählt'}
           </Typography>
         </Stack>
+
+        {asrLibrary === 'browser' && (
+          <Alert severity="info">
+            Browser-STT ist nur für Live-Mikrofon aktiv. Für Uploads/Audio-Inputs bitte in den Tile-Einstellungen
+            auf Whisper Tiny oder Whisper Base umstellen.
+          </Alert>
+        )}
 
         <TextField
           label="Zwischenergebnis"
