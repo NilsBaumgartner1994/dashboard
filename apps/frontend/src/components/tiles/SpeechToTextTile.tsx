@@ -133,6 +133,9 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       return
     }
 
+    setFinalTexts([])
+    setInterimText('')
+
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition()
       recognition.continuous = true
@@ -230,7 +233,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
         return
       }
 
-      setFinalTexts((prev) => [text, ...prev])
+      setFinalTexts([text])
       setInterimText('')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Transkription fehlgeschlagen.'
@@ -254,7 +257,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           setError('Audio-Input konnte nicht transkribiert werden.')
           return
         }
-        setFinalTexts((prev) => [text, ...prev])
+        setFinalTexts([text])
         setInterimText('')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Audio-Transkription fehlgeschlagen.')
@@ -263,7 +266,8 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       }
       return
     }
-    setFinalTexts((prev) => [content, ...prev])
+    setFinalTexts([content])
+    setInterimText('')
   }
 
   const handlePushOutput = () => {

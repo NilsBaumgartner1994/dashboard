@@ -336,7 +336,7 @@ export default function DashboardScreen() {
                 const toY = (connection.to.y + connection.to.h / 2) * rowHeight
                 const c1x = Math.min(98, fromX + 6)
                 const c2x = Math.max(2, toX - 6)
-                const pathD = `M ${fromX * 10} ${fromY} C ${c1x * 10} ${fromY}, ${c2x * 10} ${toY}, ${toX * 10} ${toY}`
+                const pathD = `M ${fromX} ${fromY} C ${c1x} ${fromY}, ${c2x} ${toY}, ${toX} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
                   <g key={key}>
@@ -355,6 +355,16 @@ export default function DashboardScreen() {
                       markerEnd="url(#tile-flow-arrow)"
                       opacity="0.98"
                     />
+                    <path
+                      d={pathD}
+                      stroke={theme.palette.primary.light}
+                      strokeWidth="2.5"
+                      fill="none"
+                      strokeDasharray="8 8"
+                      opacity="0.9"
+                    >
+                      <animate attributeName="stroke-dashoffset" from="16" to="0" dur="1.1s" repeatCount="indefinite" />
+                    </path>
                   </g>
                 )
               })}

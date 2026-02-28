@@ -4,6 +4,7 @@ import StickyNote2Icon from '@mui/icons-material/StickyNote2'
 import BaseTile from './BaseTile'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
+import { getOutputTargets } from '../../store/tileFlowHelpers'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
 
 export default function PostItTile({ tile }: { tile: TileInstance }) {
@@ -13,6 +14,7 @@ export default function PostItTile({ tile }: { tile: TileInstance }) {
   const theme = useTheme()
 
   const savedContent = (tile.config?.postItContent as string) ?? ''
+  const outputTargetIds = getOutputTargets(tile)
   const [content, setContent] = useState(savedContent)
   const [autoOutputInput, setAutoOutputInput] = useState(
     tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : true,
@@ -59,6 +61,7 @@ export default function PostItTile({ tile }: { tile: TileInstance }) {
 
   const bgColor = theme.palette.mode === 'dark' ? '#4a4000' : '#fff9c4'
   const textColor = theme.palette.mode === 'dark' ? '#ffe57f' : '#424242'
+  const showManualOutputButton = !editMode && !autoOutputInput && outputTargetIds.length > 0
 
   return (
     <BaseTile
@@ -110,7 +113,7 @@ export default function PostItTile({ tile }: { tile: TileInstance }) {
           readOnly={editMode}
         />
 
-        {!editMode && (
+        {showManualOutputButton && (
           <Button size="small" variant="outlined" onClick={handleSendOutput} disabled={!content.trim()}>
             Output senden
           </Button>
