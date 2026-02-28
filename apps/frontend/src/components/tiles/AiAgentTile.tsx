@@ -39,7 +39,7 @@ import LargeModal from './LargeModal'
 import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
-import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
+import { getLatestConnectedPayload, getOutputTargets } from '../../store/tileFlowHelpers'
 import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
@@ -135,7 +135,13 @@ interface AiChatProps {
   onJobStarted?: (jobId: string) => void
   /** Called when the current job finishes (success or error), so the caller can clear the persisted job ID. */
   onJobDone?: () => void
+  externalInputTrigger?: { id: number; content: string } | null
   compact?: boolean
+}
+
+function extractCodeBlocks(content: string): string {
+  const matches = [...content.matchAll(/```(?:[\w+-]+)?\n([\s\S]*?)```/g)]
+  return matches.map((match) => match[1]?.trim() ?? '').filter(Boolean).join('\n\n')
 }
 
 function MarkdownWithCopyCode({ content, compact = false }: { content: string; compact?: boolean }) {
@@ -200,7 +206,7 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
   )
 }
 
-function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, externalInputTrigger = null, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -421,6 +427,16 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     })
     e.target.value = ''
   }
+
+  useEffect(() => {
+    if (!externalInputTrigger?.content || loading) return
+    setError(null)
+    setPartialContent('')
+    setCurrentActivity('')
+    setPlannedSteps([])
+    setDebugPayload(null)
+    submitMessages([{ role: 'user', content: externalInputTrigger.content.trim() }])
+  }, [externalInputTrigger, loading, submitMessages])
 
   const removePendingImage = (idx: number) => {
     setPendingImages((prev) => prev.filter((_, i) => i !== idx))
@@ -931,6 +947,12 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false,
   )
   const [checkIntervalInput, setCheckIntervalInput] = useState(String(backendCheckIntervalS))
+  const [codeBlocksOnlyOutputInput, setCodeBlocksOnlyOutputInput] = useState(
+    tile.config?.codeBlocksOnlyOutput !== undefined ? (tile.config.codeBlocksOnlyOutput as boolean) : false,
+  )
+  const [showLatestChatInTileInput, setShowLatestChatInTileInput] = useState(
+    tile.config?.showLatestChatInTile !== undefined ? (tile.config.showLatestChatInTile as boolean) : false,
+  )
 
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
@@ -938,26 +960,75 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
   const tileTitle = (tile.config?.name as string) || 'KI-Agent'
   const autoOutputEnabled = tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false
+  const codeBlocksOnlyOutput = tile.config?.codeBlocksOnlyOutput !== undefined ? (tile.config.codeBlocksOnlyOutput as boolean) : false
+  const showLatestChatInTile = tile.config?.showLatestChatInTile !== undefined ? (tile.config.showLatestChatInTile as boolean) : false
   const latestConnectedPayload = getLatestConnectedPayload(tiles, outputs, tile.id)
+  const hasOutputTargets = getOutputTargets(tile).length > 0
+  const shouldShowManualOutputButton = hasOutputTargets && !autoOutputEnabled
+  const [externalInputTrigger, setExternalInputTrigger] = useState<{ id: number; content: string } | null>(null)
+  const [nextExternalInputId, setNextExternalInputId] = useState(1)
+  const latestConnectedTimestampRef = useRef<number>(latestConnectedPayload?.timestamp ?? 0)
+  const waitingForConnectedOutputRef = useRef(false)
+  const tileChatBottomRef = useRef<HTMLDivElement>(null)
+
+  const getForwardedAssistantContent = useCallback((rawContent: string): string => {
+    if (!codeBlocksOnlyOutput) return rawContent.trim()
+    return extractCodeBlocks(rawContent)
+  }, [codeBlocksOnlyOutput])
 
   useEffect(() => {
     if (!autoOutputEnabled) return
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-    const content = lastAssistant?.content?.trim()
+    const content = lastAssistant ? getForwardedAssistantContent(lastAssistant.content) : ''
     if (!content) return
     publishOutput(tile.id, { content, dataType: 'text' })
-  }, [autoOutputEnabled, messages, publishOutput, tile.id])
+  }, [autoOutputEnabled, getForwardedAssistantContent, messages, publishOutput, tile.id])
 
-  const handleUseConnectedInput = () => {
-    const content = latestConnectedPayload?.content?.trim()
+  useEffect(() => {
+    if (!latestConnectedPayload?.content?.trim()) return
+    if (latestConnectedPayload.timestamp <= latestConnectedTimestampRef.current) return
+
+    latestConnectedTimestampRef.current = latestConnectedPayload.timestamp
+    if (activeJobId) {
+      abortAgentJob(backendUrl, activeJobId).finally(() => {
+        handleJobDone()
+      })
+    }
+
+    waitingForConnectedOutputRef.current = true
+    const newId = `chat-${crypto.randomUUID()}`
+    setChatId(newId)
+    setMessages([])
+    setActiveJobId(undefined)
+
+    try {
+      localStorage.setItem(`ai-chat-id-${tile.id}`, newId)
+      localStorage.removeItem(`ai-chat-job-${chatId}`)
+      localStorage.removeItem(`ai-chat-messages-${newId}`)
+    } catch { /* ignore */ }
+
+    setExternalInputTrigger({ id: nextExternalInputId, content: latestConnectedPayload.content })
+    setNextExternalInputId((prev) => prev + 1)
+  }, [activeJobId, backendUrl, chatId, handleJobDone, latestConnectedPayload, nextExternalInputId, tile.id])
+
+  useEffect(() => {
+    if (!waitingForConnectedOutputRef.current) return
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    if (!lastAssistant) return
+    const content = getForwardedAssistantContent(lastAssistant.content)
     if (!content) return
-    const newMessages: Message[] = [...messages, { role: 'user', content }]
-    handleSetMessages(newMessages)
-  }
+    publishOutput(tile.id, { content, dataType: 'text' })
+    waitingForConnectedOutputRef.current = false
+  }, [getForwardedAssistantContent, messages, publishOutput, tile.id])
+
+  useEffect(() => {
+    if (!showLatestChatInTile) return
+    tileChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, showLatestChatInTile])
 
   const handlePublishAssistantOutput = () => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-    const content = lastAssistant?.content?.trim()
+    const content = lastAssistant ? getForwardedAssistantContent(lastAssistant.content) : ''
     if (!content) return
     publishOutput(tile.id, { content, dataType: 'text' })
   }
@@ -973,6 +1044,8 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
           setAutoOutputInput(tile.config?.autoOutputEnabled !== undefined ? (tile.config.autoOutputEnabled as boolean) : false)
+          setCodeBlocksOnlyOutputInput(tile.config?.codeBlocksOnlyOutput !== undefined ? (tile.config.codeBlocksOnlyOutput as boolean) : false)
+          setShowLatestChatInTileInput(tile.config?.showLatestChatInTile !== undefined ? (tile.config.showLatestChatInTile as boolean) : false)
           setCheckIntervalInput(String(
             typeof tile.config?.backendCheckInterval === 'number' && tile.config.backendCheckInterval >= 10
               ? tile.config.backendCheckInterval
@@ -1039,6 +1112,24 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               }
               label={<Typography variant="body2">Auto-Output (letzte KI-Antwort) weiterleiten</Typography>}
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={codeBlocksOnlyOutputInput}
+                  onChange={(e) => setCodeBlocksOnlyOutputInput(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Beim Weiterleiten nur Codeblöcke senden</Typography>}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showLatestChatInTileInput}
+                  onChange={(e) => setShowLatestChatInTileInput(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Letzten Chat in der Kachel anzeigen (auto-scroll)</Typography>}
+            />
             <Divider sx={{ my: 2 }}>Server-Statusprüfung</Divider>
             <TextField
               fullWidth
@@ -1051,7 +1142,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -1094,18 +1185,33 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             )}
           </Box>
           <Box sx={{ flex: 1, overflow: 'hidden', cursor: 'pointer' }} onClick={() => setModalOpen(true)}>
-            <Box sx={{ display: 'flex', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
-              <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); handleUseConnectedInput() }} disabled={!latestConnectedPayload?.content}>Input übernehmen</Button>
-              <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); handlePublishAssistantOutput() }} disabled={!messages.some((m) => m.role === 'assistant')}>Output senden</Button>
-            </Box>
+            {shouldShowManualOutputButton && (
+              <Box sx={{ display: 'flex', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
+                <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); handlePublishAssistantOutput() }} disabled={!messages.some((m) => m.role === 'assistant')}>Output senden</Button>
+              </Box>
+            )}
             {messages.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 Tippe hier, um mit dem KI-Agenten zu chatten…
               </Typography>
             ) : (
-              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                {messages.length} Nachricht{messages.length !== 1 ? 'en' : ''} – Tippe zum Öffnen
-              </Typography>
+              <>
+                <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block', mb: showLatestChatInTile ? 0.5 : 0 }}>
+                  {messages.length} Nachricht{messages.length !== 1 ? 'en' : ''} – Tippe zum Öffnen
+                </Typography>
+                {showLatestChatInTile && (
+                  <Box sx={{ maxHeight: 170, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 0.5, pr: 0.5 }}>
+                    {messages.map((msg, index) => (
+                      <Box key={`${msg.role}-${index}`} sx={{ alignSelf: msg.role === 'assistant' ? 'flex-start' : 'flex-end', bgcolor: msg.role === 'assistant' ? 'action.hover' : 'primary.main', color: msg.role === 'assistant' ? 'text.primary' : 'primary.contrastText', px: 0.75, py: 0.5, borderRadius: 1.5, maxWidth: '90%' }}>
+                        <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {msg.content}
+                        </Typography>
+                      </Box>
+                    ))}
+                    <Box ref={tileChatBottomRef} />
+                  </Box>
+                )}
+              </>
             )}
           </Box>
         </Box>
@@ -1165,6 +1271,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               initialJobId={activeJobId}
               onJobStarted={handleJobStarted}
               onJobDone={handleJobDone}
+              externalInputTrigger={externalInputTrigger}
             />
           </Box>
         </Box>
