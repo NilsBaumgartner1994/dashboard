@@ -107,7 +107,6 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
       setError(null)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recordingStreamRef.current = stream
-      startAudioLevelMonitor(stream)
 
       const recorder = new MediaRecorder(stream)
       chunksRef.current = []
@@ -134,6 +133,7 @@ export default function SpeechLibraryTile({ tile }: { tile: TileInstance }) {
       mediaRecorderRef.current = recorder
       recorder.start()
       setRecording(true)
+      startAudioLevelMonitor(stream)
     } catch (err) {
       setError(`Mikrofon-Zugriff fehlgeschlagen: ${String(err)}`)
       setRecording(false)
