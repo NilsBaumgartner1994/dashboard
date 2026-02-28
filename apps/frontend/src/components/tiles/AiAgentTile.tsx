@@ -135,6 +135,7 @@ interface AiChatProps {
   onJobStarted?: (jobId: string) => void
   /** Called when the current job finishes (success or error), so the caller can clear the persisted job ID. */
   onJobDone?: () => void
+  onLiveStatusChange?: (status: { loading: boolean; partialContent: string; currentActivity: string }) => void
   externalInputTrigger?: { id: number; content: string } | null
   compact?: boolean
 }
@@ -206,7 +207,7 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
   )
 }
 
-function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, externalInputTrigger = null, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -225,6 +226,10 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, partialContent])
+
+  useEffect(() => {
+    onLiveStatusChange?.({ loading, partialContent, currentActivity })
+  }, [currentActivity, loading, onLiveStatusChange, partialContent])
 
   // Clean up polling timer on unmount
   useEffect(() => {
@@ -970,6 +975,11 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const latestConnectedTimestampRef = useRef<number>(latestConnectedPayload?.timestamp ?? 0)
   const waitingForConnectedOutputRef = useRef(false)
   const tileChatBottomRef = useRef<HTMLDivElement>(null)
+  const [tileLiveStatus, setTileLiveStatus] = useState<{ loading: boolean; partialContent: string; currentActivity: string }>({
+    loading: false,
+    partialContent: '',
+    currentActivity: '',
+  })
 
   const getForwardedAssistantContent = useCallback((rawContent: string): string => {
     if (!codeBlocksOnlyOutput) return rawContent.trim()
@@ -1024,7 +1034,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   useEffect(() => {
     if (!showLatestChatInTile) return
     tileChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, showLatestChatInTile])
+  }, [messages, showLatestChatInTile, tileLiveStatus])
 
   const handlePublishAssistantOutput = () => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
@@ -1208,6 +1218,13 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                         </Typography>
                       </Box>
                     ))}
+                    {tileLiveStatus.loading && (
+                      <Box sx={{ alignSelf: 'flex-start', bgcolor: 'action.hover', color: 'text.primary', px: 0.75, py: 0.5, borderRadius: 1.5, maxWidth: '90%', opacity: 0.85 }}>
+                        <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {tileLiveStatus.partialContent || tileLiveStatus.currentActivity || 'KI denkt nach…'}
+                        </Typography>
+                      </Box>
+                    )}
                     <Box ref={tileChatBottomRef} />
                   </Box>
                 )}
@@ -1271,6 +1288,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               initialJobId={activeJobId}
               onJobStarted={handleJobStarted}
               onJobDone={handleJobDone}
+              onLiveStatusChange={setTileLiveStatus}
               externalInputTrigger={externalInputTrigger}
             />
           </Box>
