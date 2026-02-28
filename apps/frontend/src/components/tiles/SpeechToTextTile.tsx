@@ -11,7 +11,7 @@ import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import { pipeline } from '@xenova/transformers'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
-import { getLatestConnectedPayload } from '../../store/tileFlowHelpers'
+import { getLatestConnectedPayload, getOutputTargets } from '../../store/tileFlowHelpers'
 
 interface SpeechToTextTileProps {
   tile: TileInstance
@@ -92,8 +92,10 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
   const publishOutput = useTileFlowStore((s) => s.publishOutput)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const shouldKeepListeningRef = useRef(false)
+  const lastAppliedConnectedTimestampRef = useRef<number | null>(null)
 
   const language = (tile.config?.language as string) || 'de-DE'
+  const outputTargetIds = getOutputTargets(tile)
 
   const transcript = useMemo(() => finalTexts.join('\n'), [finalTexts])
   const latestConnectedPayload = useMemo(
@@ -122,6 +124,13 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     setListening(false)
   }
 
+  const resetTranscriptionState = () => {
+    stopListeningInternal()
+    setFinalTexts([])
+    setInterimText('')
+    setError(null)
+  }
+
   const handleStart = async () => {
     const SpeechRecognition = getSpeechRecognitionCtor()
 
@@ -135,8 +144,7 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       return
     }
 
-    setFinalTexts([])
-    setInterimText('')
+    resetTranscriptionState()
 
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition()
@@ -245,12 +253,14 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
     }
   }
 
-  const applyConnectedInput = async () => {
-    const content = latestConnectedPayload?.content?.trim()
+  const applyConnectedInput = async (payload = latestConnectedPayload) => {
+    const content = payload?.content?.trim()
     if (!content) return
-    if (latestConnectedPayload?.dataType === 'audio') {
+
+    resetTranscriptionState()
+
+    if (payload?.dataType === 'audio') {
       setUploadProcessing(true)
-      setError(null)
       try {
         const transcriber = await getTranscriber()
         const result = await transcriber(content, { chunk_length_s: 20, stride_length_s: 4 })
@@ -260,7 +270,6 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           return
         }
         setFinalTexts([text])
-        setInterimText('')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Audio-Transkription fehlgeschlagen.')
       } finally {
@@ -268,9 +277,19 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
       }
       return
     }
+
     setFinalTexts([content])
-    setInterimText('')
   }
+
+
+  useEffect(() => {
+    const payload = latestConnectedPayload
+    if (!payload?.content?.trim()) return
+    if (payload.timestamp === lastAppliedConnectedTimestampRef.current) return
+
+    lastAppliedConnectedTimestampRef.current = payload.timestamp
+    void applyConnectedInput(payload)
+  }, [latestConnectedPayload])
 
   const handlePushOutput = () => {
     if (!wrappedTranscript) return
@@ -354,22 +373,16 @@ export default function SpeechToTextTile({ tile }: SpeechToTextTileProps) {
           >
             Kopieren
           </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={applyConnectedInput}
-            disabled={!latestConnectedPayload?.content}
-          >
-            Input übernehmen
-          </Button>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handlePushOutput}
-            disabled={!wrappedTranscript}
-          >
-            Output senden
-          </Button>
+          {!autoOutputEnabled && outputTargetIds.length > 0 && (
+            <Button
+              variant="contained"
+              size="small"
+              onClick={handlePushOutput}
+              disabled={!wrappedTranscript}
+            >
+              Output senden
+            </Button>
+          )}
           <Button
             variant="text"
             size="small"
