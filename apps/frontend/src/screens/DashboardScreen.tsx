@@ -47,6 +47,7 @@ import DockerLogsTile from '../components/tiles/DockerLogsTile'
 import SpeechToTextTile from '../components/tiles/SpeechToTextTile'
 import ReactCodeRenderTile from '../components/tiles/ReactCodeRenderTile'
 import SpeechLibraryTile from '../components/tiles/SpeechLibraryTile'
+import { getOutputTargets } from '../store/tileFlowHelpers'
 
 const MOBILE_COLS = 12
 const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
@@ -92,9 +93,7 @@ function getTileConnections(tiles: TileInstance[]): TileConnection[] {
   const connections: TileConnection[] = []
 
   tiles.forEach((tile) => {
-    const targets = Array.isArray(tile.config?.outputTargets)
-      ? (tile.config.outputTargets as string[]).filter((v): v is string => typeof v === 'string')
-      : []
+    const targets = getOutputTargets(tile)
     targets.forEach((targetId) => {
       const target = byId.get(targetId)
       if (!target) return

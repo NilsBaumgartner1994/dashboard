@@ -1,10 +1,28 @@
 import type { TileInstance } from './useStore'
 import type { TileFlowPayload } from './useTileFlowStore'
 
-function getOutputTargets(tile: TileInstance): string[] {
-  const raw = tile.config?.outputTargets
-  if (!Array.isArray(raw)) return []
-  return raw.filter((v): v is string => typeof v === 'string' && v.length > 0)
+function normalizeOutputTargets(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    return trimmed
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0)
+  }
+
+  return []
+}
+
+export function getOutputTargets(tile: TileInstance): string[] {
+  const outputTargets = normalizeOutputTargets(tile.config?.outputTargets)
+  if (outputTargets.length > 0) return outputTargets
+  // Backward compatibility for older tile configs.
+  return normalizeOutputTargets(tile.config?.outputTarget)
 }
 
 export function getConnectedSourceIds(tiles: TileInstance[], targetTileId: string): string[] {
