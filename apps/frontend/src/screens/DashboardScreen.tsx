@@ -306,6 +306,8 @@ export default function DashboardScreen() {
                 gridAutoRows: `${isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT}px`,
                 width: '100%',
                 gap: 0.5,
+                position: 'relative',
+                zIndex: 1,
               }}
             >
               {tiles.map((tile) => (
@@ -319,20 +321,15 @@ export default function DashboardScreen() {
               height={overlayHeight}
               viewBox={`0 0 100 ${overlayHeight}`}
               preserveAspectRatio="none"
-              style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 20 }}
+              style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 0 }}
             >
-              <defs>
-                <marker id="tile-flow-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L6,3 L0,6 z" fill={theme.palette.primary.main} />
-                </marker>
-              </defs>
               {tileConnections.map((connection) => {
                 const currentColumns = isMobile ? MOBILE_COLS : gridColumns
                 const fromLayout = isMobile ? getMobileTilePos(connection.from, gridColumns) : { x: connection.from.x, w: connection.from.w }
                 const toLayout = isMobile ? getMobileTilePos(connection.to, gridColumns) : { x: connection.to.x, w: connection.to.w }
-                const fromX = ((fromLayout.x + fromLayout.w) / currentColumns) * 100
+                const fromX = ((fromLayout.x + fromLayout.w / 2) / currentColumns) * 100
                 const fromY = (connection.from.y + connection.from.h / 2) * rowHeight
-                const toX = (toLayout.x / currentColumns) * 100
+                const toX = ((toLayout.x + toLayout.w / 2) / currentColumns) * 100
                 const toY = (connection.to.y + connection.to.h / 2) * rowHeight
                 const pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
@@ -343,7 +340,6 @@ export default function DashboardScreen() {
                     stroke={theme.palette.primary.main}
                     strokeWidth="2"
                     fill="none"
-                    markerEnd="url(#tile-flow-arrow)"
                     opacity="0.95"
                   />
                 )
