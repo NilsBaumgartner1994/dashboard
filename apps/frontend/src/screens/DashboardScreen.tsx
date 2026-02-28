@@ -47,6 +47,7 @@ import DockerLogsTile from '../components/tiles/DockerLogsTile'
 import SpeechToTextTile from '../components/tiles/SpeechToTextTile'
 import ReactCodeRenderTile from '../components/tiles/ReactCodeRenderTile'
 import SpeechLibraryTile from '../components/tiles/SpeechLibraryTile'
+import ApiSwitchTile from '../components/tiles/ApiSwitchTile'
 import { getOutputTargets } from '../store/tileFlowHelpers'
 
 const MOBILE_COLS = 12
@@ -81,6 +82,7 @@ const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: 
   speechtotext: { label: 'Speech to Text', component: SpeechToTextTile },
   reactcoderender: { label: 'React Code Renderer', component: ReactCodeRenderTile },
   speechlibrary: { label: 'Speech Aufnahme/Player', component: SpeechLibraryTile },
+  apiswitch: { label: 'API Switch (Schwellwert)', component: ApiSwitchTile },
 }
 
 interface TileConnection {
