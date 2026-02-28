@@ -44,7 +44,6 @@ import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
 const POLL_INTERVAL_MS = 2000
-const TILE_CHAT_SYNC_POLL_INTERVAL_MS = 1500
 const DEFAULT_BACKEND_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
 
@@ -1036,34 +1035,6 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     if (!showLatestChatInTile) return
     tileChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, showLatestChatInTile, tileLiveStatus])
-
-  // Keep tile preview synced with the latest active chat, even if another flow updates
-  // localStorage (e.g. automated input that starts a new chat while tile modal is closed).
-  useEffect(() => {
-    if (!showLatestChatInTile) return
-
-    const syncLatestChatFromStorage = () => {
-      try {
-        const storedChatId = localStorage.getItem(`ai-chat-id-${tile.id}`) ?? ''
-        if (!storedChatId || storedChatId === chatId) return
-
-        const storedMessagesRaw = localStorage.getItem(`ai-chat-messages-${storedChatId}`)
-        const storedJobId = localStorage.getItem(`ai-chat-job-${storedChatId}`) ?? undefined
-        const parsedMessages = storedMessagesRaw ? (JSON.parse(storedMessagesRaw) as Message[]) : []
-
-        setChatId(storedChatId)
-        setMessages(parsedMessages)
-        setActiveJobId(storedJobId)
-      } catch {
-        // ignore malformed or unavailable localStorage
-      }
-    }
-
-    syncLatestChatFromStorage()
-    const intervalId = setInterval(syncLatestChatFromStorage, TILE_CHAT_SYNC_POLL_INTERVAL_MS)
-
-    return () => clearInterval(intervalId)
-  }, [chatId, showLatestChatInTile, tile.id])
 
   const handlePublishAssistantOutput = () => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
