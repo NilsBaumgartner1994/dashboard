@@ -58,6 +58,12 @@ const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
   'chatgpt-unofficial-proxy': ['gpt-4', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'],
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'],
 }
+const CHATGPT_UNOFFICIAL_PROXY_OPTIONS = [
+  { value: '', label: 'Auto (Fallback-Reihenfolge)' },
+  { value: 'https://ai.fakeopen.com/api/conversation', label: 'Community: ai.fakeopen.com' },
+  { value: 'https://api.pawan.krd/backend-api/conversation', label: 'Community: api.pawan.krd' },
+  { value: 'backend-default', label: 'Backend-Proxy aus Umgebungsvariable' },
+] as const
 const POLL_INTERVAL_MS = 2000
 const DEFAULT_BACKEND_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
@@ -143,6 +149,7 @@ interface AiChatProps {
   provider: string
   model: string
   chatGptUnofficialAccessToken?: string
+  chatGptUnofficialProxyUrl?: string
   allowInternet: boolean
   thinking: boolean
   debugMode: boolean
@@ -226,7 +233,7 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
   )
 }
 
-function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -363,7 +370,7 @@ function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, all
   /** Submit a pre-built messages array to the backend and start polling. */
   const submitMessages = useCallback(
     async (newMessages: Message[]) => {
-      const requestSignature = JSON.stringify({ provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, messages: newMessages })
+      const requestSignature = JSON.stringify({ provider, model, chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl, allowInternet, thinking, messages: newMessages })
       if (loading && activeRequestSignatureRef.current === requestSignature) return
 
       if (pollTimerRef.current !== null) {
@@ -379,7 +386,7 @@ function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, all
         const res = await fetch(`${backendUrl}/ai-agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider, model, messages: newMessages, allowInternet, thinking, chatGptUnofficialAccessToken }),
+          body: JSON.stringify({ provider, model, messages: newMessages, allowInternet, thinking, chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl }),
         })
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string }
@@ -398,7 +405,7 @@ function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, all
         onJobDone?.()
       }
     },
-    [backendUrl, provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
+    [backendUrl, provider, model, chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
   )
 
   const send = async () => {
@@ -982,6 +989,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const [providerInput, setProviderInput] = useState((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
   const [modelInput, setModelInput] = useState((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
   const [chatGptUnofficialAccessTokenInput, setChatGptUnofficialAccessTokenInput] = useState((tile.config?.chatGptUnofficialAccessToken as string) || '')
+  const [chatGptUnofficialProxyUrlInput, setChatGptUnofficialProxyUrlInput] = useState((tile.config?.chatGptUnofficialProxyUrl as string) || '')
   const [allowInternetInput, setAllowInternetInput] = useState(
     tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
   )
@@ -1005,6 +1013,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const provider = (tile.config?.aiProvider as string) || DEFAULT_PROVIDER
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const chatGptUnofficialAccessToken = (tile.config?.chatGptUnofficialAccessToken as string) || ''
+  const chatGptUnofficialProxyUrl = (tile.config?.chatGptUnofficialProxyUrl as string) || ''
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
   const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
@@ -1097,6 +1106,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           setProviderInput((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
           setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
           setChatGptUnofficialAccessTokenInput((tile.config?.chatGptUnofficialAccessToken as string) || '')
+          setChatGptUnofficialProxyUrlInput((tile.config?.chatGptUnofficialProxyUrl as string) || '')
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
@@ -1131,20 +1141,35 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               </Select>
             </FormControl>
             {providerInput === 'chatgpt-unofficial-proxy' && (
-              <TextField
-                fullWidth
-                label="Access Token"
-                value={chatGptUnofficialAccessTokenInput}
-                onChange={(e) => setChatGptUnofficialAccessTokenInput(e.target.value)}
-                sx={{ mb: 2 }}
-                placeholder="eyJ..."
-                helperText={(
-                  <>
-                    Für den Unofficial Proxy Access Token: 
-                    <a href="https://chat.openai.com/api/auth/session" target="_blank" rel="noreferrer">https://chat.openai.com/api/auth/session</a>
-                  </>
-                )}
-              />
+              <>
+                <TextField
+                  fullWidth
+                  label="Access Token"
+                  value={chatGptUnofficialAccessTokenInput}
+                  onChange={(e) => setChatGptUnofficialAccessTokenInput(e.target.value)}
+                  sx={{ mb: 2 }}
+                  placeholder="eyJ..."
+                  helperText={(
+                    <>
+                      Für den Unofficial Proxy Access Token: 
+                      <a href="https://chat.openai.com/api/auth/session" target="_blank" rel="noreferrer">https://chat.openai.com/api/auth/session</a>
+                    </>
+                  )}
+                />
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel id="ai-unofficial-proxy-url-label">Proxy URL</InputLabel>
+                  <Select
+                    labelId="ai-unofficial-proxy-url-label"
+                    value={chatGptUnofficialProxyUrlInput}
+                    label="Proxy URL"
+                    onChange={(e) => setChatGptUnofficialProxyUrlInput(e.target.value)}
+                  >
+                    {CHATGPT_UNOFFICIAL_PROXY_OPTIONS.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </>
             )}
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel id="ai-model-label">Modell</InputLabel>
@@ -1237,7 +1262,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiProvider: providerInput || DEFAULT_PROVIDER, aiModel: modelInput || DEFAULT_AI_MODEL, chatGptUnofficialAccessToken: chatGptUnofficialAccessTokenInput.trim(), allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiProvider: providerInput || DEFAULT_PROVIDER, aiModel: modelInput || DEFAULT_AI_MODEL, chatGptUnofficialAccessToken: chatGptUnofficialAccessTokenInput.trim(), chatGptUnofficialProxyUrl: chatGptUnofficialProxyUrlInput === 'backend-default' ? '' : chatGptUnofficialProxyUrlInput, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -1368,6 +1393,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               provider={provider}
               model={model}
               chatGptUnofficialAccessToken={chatGptUnofficialAccessToken}
+              chatGptUnofficialProxyUrl={chatGptUnofficialProxyUrl}
               allowInternet={allowInternet}
               thinking={thinkingMode}
               debugMode={debugMode}
