@@ -336,9 +336,18 @@ async function streamOllamaCall(
   return { content, toolCalls };
 }
 
-async function callChatGptUnofficialProxy(messages: OllamaMessage[], model: string, job: Job): Promise<ChatCallResult> {
-  if (!CHATGPT_UNOFFICIAL_PROXY_API_URL || !CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN) {
-    throw new Error('CHATGPT_UNOFFICIAL_PROXY_API_URL and CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN are required');
+async function callChatGptUnofficialProxy(
+  messages: OllamaMessage[],
+  model: string,
+  job: Job,
+  accessTokenOverride?: string,
+): Promise<ChatCallResult> {
+  if (!CHATGPT_UNOFFICIAL_PROXY_API_URL) {
+    throw new Error('CHATGPT_UNOFFICIAL_PROXY_API_URL is required');
+  }
+  const accessToken = accessTokenOverride || CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error('CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN is required (env or request override)');
   }
 
   const chatMessages = messages
@@ -356,7 +365,7 @@ async function callChatGptUnofficialProxy(messages: OllamaMessage[], model: stri
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
       action: 'next',
@@ -422,9 +431,10 @@ async function streamProviderCall(
   model: string,
   job: Job,
   tools: unknown[] = [],
+  chatGptUnofficialAccessToken?: string,
 ): Promise<ChatCallResult> {
   if (provider === 'openai') return callOpenAi(messages, model, job);
-  if (provider === 'chatgpt-unofficial-proxy') return callChatGptUnofficialProxy(messages, model, job);
+  if (provider === 'chatgpt-unofficial-proxy') return callChatGptUnofficialProxy(messages, model, job, chatGptUnofficialAccessToken);
   return streamOllamaCall(messages, model, job, tools);
 }
 
@@ -435,6 +445,7 @@ async function runAgentLoop(
   tools: unknown[],
   job: Job,
   thinking = false,
+  chatGptUnofficialAccessToken?: string,
 ): Promise<void> {
   const currentMessages = [...messages];
 
@@ -528,6 +539,8 @@ async function runAgentLoop(
       [analysisSystemMsg, ...messages],
       model,
       job,
+      [],
+      chatGptUnofficialAccessToken,
     );
 
     // Extract step-by-step plan from the analysis so the frontend can show checkboxes.
@@ -578,6 +591,7 @@ async function runAgentLoop(
       model,
       job,
       tools,
+      chatGptUnofficialAccessToken,
     );
 
     // If the model requested tool calls, execute them and continue the loop
@@ -689,7 +703,7 @@ async function runAgentLoop(
         'Stelle sicher, dass alle relevanten Details enthalten sind und die Antwort vollständig ist.',
     });
 
-    const { content: synthesisContent } = await streamProviderCall(provider, currentMessages, model, job);
+    const { content: synthesisContent } = await streamProviderCall(provider, currentMessages, model, job, [], chatGptUnofficialAccessToken);
 
     job.message = { role: 'assistant', content: synthesisContent };
     job.status = 'done';
@@ -766,13 +780,14 @@ export default defineEndpoint({
 
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
-      const { messages, model, tools, allowInternet = true, thinking = false, provider = 'ollama' } = req.body as {
+      const { messages, model, tools, allowInternet = true, thinking = false, provider = 'ollama', chatGptUnofficialAccessToken } = req.body as {
         messages?: Array<{ role: string; content: string; images?: string[] }>;
         model?: string;
         tools?: unknown[];
         allowInternet?: boolean;
         thinking?: boolean;
         provider?: AiProvider;
+        chatGptUnofficialAccessToken?: string;
       };
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -833,7 +848,7 @@ export default defineEndpoint({
       // Start inference in the background – do NOT await
       // The status is set to 'aborted' before abort() is called in the DELETE handler,
       // so by the time this .catch() callback runs (next event-loop tick), the check is reliable.
-      runAgentLoop(provider, ollamaMessages, selectedModel, effectiveTools, job, thinking).catch((err) => {
+      runAgentLoop(provider, ollamaMessages, selectedModel, effectiveTools, job, thinking, chatGptUnofficialAccessToken).catch((err) => {
         if (job.status === 'aborted') return;
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);

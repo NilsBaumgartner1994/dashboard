@@ -142,6 +142,7 @@ interface AiChatProps {
   backendUrl: string
   provider: string
   model: string
+  chatGptUnofficialAccessToken?: string
   allowInternet: boolean
   thinking: boolean
   debugMode: boolean
@@ -225,7 +226,7 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
   )
 }
 
-function AiChat({ backendUrl, provider, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -362,7 +363,7 @@ function AiChat({ backendUrl, provider, model, allowInternet, thinking, debugMod
   /** Submit a pre-built messages array to the backend and start polling. */
   const submitMessages = useCallback(
     async (newMessages: Message[]) => {
-      const requestSignature = JSON.stringify({ provider, model, allowInternet, thinking, messages: newMessages })
+      const requestSignature = JSON.stringify({ provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, messages: newMessages })
       if (loading && activeRequestSignatureRef.current === requestSignature) return
 
       if (pollTimerRef.current !== null) {
@@ -378,7 +379,7 @@ function AiChat({ backendUrl, provider, model, allowInternet, thinking, debugMod
         const res = await fetch(`${backendUrl}/ai-agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider, model, messages: newMessages, allowInternet, thinking }),
+          body: JSON.stringify({ provider, model, messages: newMessages, allowInternet, thinking, chatGptUnofficialAccessToken }),
         })
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string }
@@ -397,7 +398,7 @@ function AiChat({ backendUrl, provider, model, allowInternet, thinking, debugMod
         onJobDone?.()
       }
     },
-    [backendUrl, provider, model, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
+    [backendUrl, provider, model, chatGptUnofficialAccessToken, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
   )
 
   const send = async () => {
@@ -980,6 +981,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
 
   const [providerInput, setProviderInput] = useState((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
   const [modelInput, setModelInput] = useState((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
+  const [chatGptUnofficialAccessTokenInput, setChatGptUnofficialAccessTokenInput] = useState((tile.config?.chatGptUnofficialAccessToken as string) || '')
   const [allowInternetInput, setAllowInternetInput] = useState(
     tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
   )
@@ -1002,6 +1004,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
 
   const provider = (tile.config?.aiProvider as string) || DEFAULT_PROVIDER
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
+  const chatGptUnofficialAccessToken = (tile.config?.chatGptUnofficialAccessToken as string) || ''
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
   const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
   const debugMode = tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false
@@ -1093,6 +1096,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
         onSettingsOpen={() => {
           setProviderInput((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
           setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
+          setChatGptUnofficialAccessTokenInput((tile.config?.chatGptUnofficialAccessToken as string) || '')
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
           setDebugModeInput(tile.config?.debugMode !== undefined ? (tile.config.debugMode as boolean) : false)
@@ -1126,6 +1130,22 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
                 ))}
               </Select>
             </FormControl>
+            {providerInput === 'chatgpt-unofficial-proxy' && (
+              <TextField
+                fullWidth
+                label="Access Token"
+                value={chatGptUnofficialAccessTokenInput}
+                onChange={(e) => setChatGptUnofficialAccessTokenInput(e.target.value)}
+                sx={{ mb: 2 }}
+                placeholder="eyJ..."
+                helperText={(
+                  <>
+                    Für den Unofficial Proxy Access Token: 
+                    <a href="https://chat.openai.com/api/auth/session" target="_blank" rel="noreferrer">https://chat.openai.com/api/auth/session</a>
+                  </>
+                )}
+              />
+            )}
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel id="ai-model-label">Modell</InputLabel>
               <Select
@@ -1217,7 +1237,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiProvider: providerInput || DEFAULT_PROVIDER, aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiProvider: providerInput || DEFAULT_PROVIDER, aiModel: modelInput || DEFAULT_AI_MODEL, chatGptUnofficialAccessToken: chatGptUnofficialAccessTokenInput.trim(), allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -1347,6 +1367,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               backendUrl={backendUrl}
               provider={provider}
               model={model}
+              chatGptUnofficialAccessToken={chatGptUnofficialAccessToken}
               allowInternet={allowInternet}
               thinking={thinkingMode}
               debugMode={debugMode}
