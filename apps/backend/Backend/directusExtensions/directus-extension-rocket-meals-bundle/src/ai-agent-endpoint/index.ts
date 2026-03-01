@@ -630,8 +630,12 @@ export default defineEndpoint({
       if (!job) {
         return res.status(404).json({ error: 'Job not found' });
       }
+      const currentAnswer = job.partialContent;
+      const finalAnswer = job.status === 'done' ? (job.message?.content ?? '') : '';
       return res.json({
         status: job.status,
+        currentAnswer,
+        finalAnswer,
         partialContent: job.partialContent,
         currentActivity: job.currentActivity,
         visitedUrls: job.visitedUrls,

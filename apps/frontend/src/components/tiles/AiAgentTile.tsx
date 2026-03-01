@@ -113,6 +113,8 @@ interface Message {
 interface JobStatusResponse {
   status: 'pending' | 'running' | 'done' | 'error' | 'aborted'
   partialContent: string
+  currentAnswer?: string
+  finalAnswer?: string
   currentActivity?: string
   visitedUrls?: string[]
   plannedSteps?: Array<{ text: string; done: boolean }>
@@ -222,6 +224,8 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
+  const activeRequestSignatureRef = useRef<string | null>(null)
+  const lastExternalTriggerIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -261,9 +265,10 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           }
           const data = (await res.json()) as JobStatusResponse
 
-          // Update partial content so the user sees the AI "thinking"
-          if (data.partialContent !== undefined) {
-            setPartialContent(data.partialContent)
+          // Update partial content so the user sees the AI progress while generating.
+          const liveCurrentAnswer = data.currentAnswer ?? data.partialContent
+          if (liveCurrentAnswer !== undefined) {
+            setPartialContent(liveCurrentAnswer)
           }
 
           // Update current activity status message
@@ -277,7 +282,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           }
 
           if (data.status === 'done') {
-            const reply = data.message?.content ?? ''
+            const reply = data.finalAnswer ?? data.message?.content ?? ''
             const responseTimeMs = Date.now() - startTime
             const sources = data.visitedUrls ?? []
 
@@ -298,6 +303,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             if (data.debugPayload) setDebugPayload(data.debugPayload)
             setLoading(false)
             currentJobIdRef.current = null
+            activeRequestSignatureRef.current = null
             onJobDone?.()
           } else if (data.status === 'error') {
             setError(data.error ?? 'Unbekannter Fehler')
@@ -306,6 +312,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setPlannedSteps([])
             setLoading(false)
             currentJobIdRef.current = null
+            activeRequestSignatureRef.current = null
             onJobDone?.()
           } else if (data.status === 'aborted') {
             setPartialContent('')
@@ -313,6 +320,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
             setPlannedSteps([])
             setLoading(false)
             currentJobIdRef.current = null
+            activeRequestSignatureRef.current = null
             onJobDone?.()
           } else {
             // Still running – poll again after interval
@@ -326,6 +334,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
           setPlannedSteps([])
           setLoading(false)
           currentJobIdRef.current = null
+          activeRequestSignatureRef.current = null
           onJobDone?.()
         }
       }
@@ -337,6 +346,15 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   /** Submit a pre-built messages array to the backend and start polling. */
   const submitMessages = useCallback(
     async (newMessages: Message[]) => {
+      const requestSignature = JSON.stringify({ model, allowInternet, thinking, messages: newMessages })
+      if (loading && activeRequestSignatureRef.current === requestSignature) return
+
+      if (pollTimerRef.current !== null) {
+        clearTimeout(pollTimerRef.current)
+        pollTimerRef.current = null
+      }
+
+      activeRequestSignatureRef.current = requestSignature
       onMessages(newMessages)
       setLoading(true)
       const startTime = Date.now()
@@ -359,10 +377,11 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
         const msg = err instanceof Error ? err.message : String(err)
         setError(msg)
         setLoading(false)
+        activeRequestSignatureRef.current = null
         onJobDone?.()
       }
     },
-    [backendUrl, model, allowInternet, thinking, onMessages, onJobStarted, onJobDone, pollJob],
+    [backendUrl, model, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
   )
 
   const send = async () => {
@@ -415,6 +434,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
     currentJobIdRef.current = null
     await abortAgentJob(backendUrl, jobId)
     setLoading(false)
+    activeRequestSignatureRef.current = null
     setPartialContent('')
     setCurrentActivity('')
     setPlannedSteps([])
@@ -434,7 +454,11 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   }
 
   useEffect(() => {
-    if (!externalInputTrigger?.content || loading) return
+    if (!externalInputTrigger?.content?.trim()) return
+    if (loading) return
+    if (lastExternalTriggerIdRef.current === externalInputTrigger.id) return
+
+    lastExternalTriggerIdRef.current = externalInputTrigger.id
     setError(null)
     setPartialContent('')
     setCurrentActivity('')
