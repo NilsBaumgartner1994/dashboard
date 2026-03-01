@@ -10,6 +10,10 @@ import {
   Divider,
   Switch,
   FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
   Button,
   Checkbox,
   Dialog,
@@ -43,6 +47,17 @@ import { getLatestConnectedPayload, getOutputTargets } from '../../store/tileFlo
 import ReactMarkdown from 'react-markdown'
 
 const DEFAULT_AI_MODEL = 'llama3.1:8b'
+const DEFAULT_PROVIDER = 'ollama'
+const PROVIDER_OPTIONS = [
+  { value: 'ollama', label: 'Ollama (Custom Backend)' },
+  { value: 'chatgpt-unofficial-proxy', label: 'ChatGPT Unofficial Proxy API' },
+  { value: 'openai', label: 'OpenAI (Official)' },
+] as const
+const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
+  ollama: [DEFAULT_AI_MODEL, 'qwen3:8b', 'mistral:7b'],
+  'chatgpt-unofficial-proxy': ['gpt-4', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'],
+  openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'],
+}
 const POLL_INTERVAL_MS = 2000
 const DEFAULT_BACKEND_CHECK_INTERVAL_S = 60
 const MAX_STATUS_LOG_ENTRIES = 50
@@ -125,6 +140,7 @@ interface JobStatusResponse {
 
 interface AiChatProps {
   backendUrl: string
+  provider: string
   model: string
   allowInternet: boolean
   thinking: boolean
@@ -209,7 +225,7 @@ function MarkdownWithCopyCode({ content, compact = false }: { content: string; c
   )
 }
 
-function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
+function AiChat({ backendUrl, provider, model, allowInternet, thinking, debugMode, messages, onMessages, initialJobId, onJobStarted, onJobDone, onLiveStatusChange, externalInputTrigger = null, compact = false }: AiChatProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [partialContent, setPartialContent] = useState<string>('')
@@ -346,7 +362,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
   /** Submit a pre-built messages array to the backend and start polling. */
   const submitMessages = useCallback(
     async (newMessages: Message[]) => {
-      const requestSignature = JSON.stringify({ model, allowInternet, thinking, messages: newMessages })
+      const requestSignature = JSON.stringify({ provider, model, allowInternet, thinking, messages: newMessages })
       if (loading && activeRequestSignatureRef.current === requestSignature) return
 
       if (pollTimerRef.current !== null) {
@@ -362,7 +378,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
         const res = await fetch(`${backendUrl}/ai-agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: newMessages, allowInternet, thinking }),
+          body: JSON.stringify({ provider, model, messages: newMessages, allowInternet, thinking }),
         })
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string }
@@ -381,7 +397,7 @@ function AiChat({ backendUrl, model, allowInternet, thinking, debugMode, message
         onJobDone?.()
       }
     },
-    [backendUrl, model, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
+    [backendUrl, provider, model, allowInternet, thinking, loading, onMessages, onJobStarted, onJobDone, pollJob],
   )
 
   const send = async () => {
@@ -962,6 +978,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     }).catch((err) => { console.error('Clipboard write failed:', err) })
   }
 
+  const [providerInput, setProviderInput] = useState((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
   const [modelInput, setModelInput] = useState((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
   const [allowInternetInput, setAllowInternetInput] = useState(
     tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true,
@@ -983,6 +1000,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
     tile.config?.showLatestChatInTile !== undefined ? (tile.config.showLatestChatInTile as boolean) : false,
   )
 
+  const provider = (tile.config?.aiProvider as string) || DEFAULT_PROVIDER
   const model = (tile.config?.aiModel as string) || DEFAULT_AI_MODEL
   const allowInternet = tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true
   const thinkingMode = tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false
@@ -1073,6 +1091,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
         tile={tile}
         onTileClick={() => setModalOpen(true)}
         onSettingsOpen={() => {
+          setProviderInput((tile.config?.aiProvider as string) || DEFAULT_PROVIDER)
           setModelInput((tile.config?.aiModel as string) || DEFAULT_AI_MODEL)
           setAllowInternetInput(tile.config?.allowInternet !== undefined ? (tile.config.allowInternet as boolean) : true)
           setThinkingModeInput(tile.config?.thinkingMode !== undefined ? (tile.config.thinkingMode as boolean) : false)
@@ -1089,15 +1108,37 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
         settingsChildren={
           <Box>
             <Divider sx={{ mb: 2 }}>KI-Modell</Divider>
-            <TextField
-              fullWidth
-              label="Ollama Modell"
-              placeholder={DEFAULT_AI_MODEL}
-              value={modelInput}
-              onChange={(e) => setModelInput(e.target.value)}
-              sx={{ mb: 2 }}
-              helperText="Muss auf dem Ollama-Server verfügbar sein"
-            />
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="ai-provider-label">Provider</InputLabel>
+              <Select
+                labelId="ai-provider-label"
+                value={providerInput}
+                label="Provider"
+                onChange={(e) => {
+                  const nextProvider = e.target.value
+                  setProviderInput(nextProvider)
+                  const providerModels = PROVIDER_MODEL_OPTIONS[nextProvider] ?? []
+                  if (providerModels.length > 0) setModelInput(providerModels[0])
+                }}
+              >
+                {PROVIDER_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="ai-model-label">Modell</InputLabel>
+              <Select
+                labelId="ai-model-label"
+                value={modelInput}
+                label="Modell"
+                onChange={(e) => setModelInput(e.target.value)}
+              >
+                {(PROVIDER_MODEL_OPTIONS[providerInput] ?? []).map((modelOption) => (
+                  <MenuItem key={modelOption} value={modelOption}>{modelOption}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControlLabel
               control={
                 <Switch
@@ -1176,7 +1217,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
             />
           </Box>
         }
-        getExtraConfig={() => ({ aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
+        getExtraConfig={() => ({ aiProvider: providerInput || DEFAULT_PROVIDER, aiModel: modelInput || DEFAULT_AI_MODEL, allowInternet: allowInternetInput, thinkingMode: thinkingModeInput, debugMode: debugModeInput, autoOutputEnabled: autoOutputInput, codeBlocksOnlyOutput: codeBlocksOnlyOutputInput, showLatestChatInTile: showLatestChatInTileInput, backendCheckInterval: Math.max(10, Number(checkIntervalInput) || DEFAULT_BACKEND_CHECK_INTERVAL_S) })}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -1192,6 +1233,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
               sx={{ fontSize: '0.65rem', cursor: 'pointer' }}
               onClick={(e) => { e.stopPropagation(); setStatusLogOpen(true) }}
             />
+            <Chip label={provider} size="small" variant="outlined" sx={{ fontSize: '0.65rem' }} />
             <Chip label={model} size="small" variant="outlined" sx={{ fontSize: '0.65rem' }} />
             {allowInternet && (
               <Tooltip title="Internet-Zugriff aktiv">
@@ -1303,6 +1345,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
           <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <AiChat
               backendUrl={backendUrl}
+              provider={provider}
               model={model}
               allowInternet={allowInternet}
               thinking={thinkingMode}

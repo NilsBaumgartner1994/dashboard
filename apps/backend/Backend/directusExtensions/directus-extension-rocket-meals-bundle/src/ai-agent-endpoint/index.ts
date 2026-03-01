@@ -1,4 +1,5 @@
 import { defineEndpoint } from '@directus/extensions-sdk';
+import OpenAI from 'openai';
 
 // AI Agent endpoint – runs chat requests as background jobs with polling support.
 //
@@ -17,6 +18,12 @@ import { defineEndpoint } from '@directus/extensions-sdk';
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
+const CHATGPT_UNOFFICIAL_PROXY_API_URL = process.env.CHATGPT_UNOFFICIAL_PROXY_API_URL;
+const CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN = process.env.CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN;
+const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
+const DEFAULT_CHATGPT_UNOFFICIAL_MODEL = process.env.CHATGPT_UNOFFICIAL_MODEL ?? 'gpt-4';
 // Context window size sent to Ollama on every request.
 // llama3.1 defaults to 131 072 tokens which is extremely slow on CPU.
 // 4096 is sufficient for conversational use and gives a ~10–20× speed-up.
@@ -260,6 +267,13 @@ interface OllamaChatChunk {
   done?: boolean;
 }
 
+type AiProvider = 'ollama' | 'chatgpt-unofficial-proxy' | 'openai';
+
+interface ChatCallResult {
+  content: string;
+  toolCalls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
+}
+
 /**
  * Sends a single chat request to Ollama with streaming and accumulates the response.
  * Updates job.partialContent in real-time so pollers see live output.
@@ -269,7 +283,7 @@ async function streamOllamaCall(
   model: string,
   job: Job,
   tools: unknown[] = [],
-): Promise<{ content: string; toolCalls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }> }> {
+): Promise<ChatCallResult> {
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -322,7 +336,100 @@ async function streamOllamaCall(
   return { content, toolCalls };
 }
 
+async function callChatGptUnofficialProxy(messages: OllamaMessage[], model: string, job: Job): Promise<ChatCallResult> {
+  if (!CHATGPT_UNOFFICIAL_PROXY_API_URL || !CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN) {
+    throw new Error('CHATGPT_UNOFFICIAL_PROXY_API_URL and CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN are required');
+  }
+
+  const chatMessages = messages
+    .filter((message) => message.role === 'system' || message.role === 'user' || message.role === 'assistant')
+    .map((message) => ({
+      id: crypto.randomUUID(),
+      role: message.role,
+      content: {
+        content_type: 'text',
+        parts: [String(message.content ?? '')],
+      },
+    }));
+
+  const response = await fetch(CHATGPT_UNOFFICIAL_PROXY_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
+      action: 'next',
+      model,
+      messages: chatMessages,
+      parent_message_id: crypto.randomUUID(),
+    }),
+    signal: AbortSignal.any([AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS), job.abortController.signal]),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`ChatGPT unofficial proxy returned ${response.status}: ${text}`);
+  }
+
+  const responseText = await response.text();
+  const jsonPayload = responseText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => line.replace(/^data:\s*/, ''))
+    .filter((line) => line && line !== '[DONE]')
+    .pop();
+
+  if (!jsonPayload) {
+    throw new Error('ChatGPT unofficial proxy did not return a valid message');
+  }
+
+  const parsed = JSON.parse(jsonPayload) as { message?: { content?: { parts?: string[] } } };
+  const content = parsed.message?.content?.parts?.[0] ?? '';
+  job.partialContent = content;
+  return { content };
+}
+
+async function callOpenAi(messages: OllamaMessage[], model: string, job: Job): Promise<ChatCallResult> {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required');
+  }
+  const client = new OpenAI({
+    apiKey: OPENAI_API_KEY,
+    ...(OPENAI_BASE_URL ? { baseURL: OPENAI_BASE_URL } : {}),
+  });
+
+  const response = await client.chat.completions.create({
+    model,
+    messages: messages
+      .filter((message): message is OllamaMessage & { role: 'system' | 'user' | 'assistant' } =>
+        message.role === 'system' || message.role === 'user' || message.role === 'assistant',
+      )
+      .map((message) => ({ role: message.role, content: String(message.content ?? '') })),
+  }, {
+    signal: AbortSignal.any([AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS), job.abortController.signal]),
+  });
+
+  const content = response.choices[0]?.message?.content ?? '';
+  job.partialContent = content;
+  return { content };
+}
+
+async function streamProviderCall(
+  provider: AiProvider,
+  messages: OllamaMessage[],
+  model: string,
+  job: Job,
+  tools: unknown[] = [],
+): Promise<ChatCallResult> {
+  if (provider === 'openai') return callOpenAi(messages, model, job);
+  if (provider === 'chatgpt-unofficial-proxy') return callChatGptUnofficialProxy(messages, model, job);
+  return streamOllamaCall(messages, model, job, tools);
+}
+
 async function runAgentLoop(
+  provider: AiProvider,
   messages: OllamaMessage[],
   model: string,
   tools: unknown[],
@@ -417,7 +524,7 @@ async function runAgentLoop(
         'Gib NUR die Analyse und den Plan aus, noch KEINE endgültige Antwort.',
     };
 
-    const { content: analysisContent } = await streamOllamaCall(
+    const { content: analysisContent } = await streamProviderCall(provider,
       [analysisSystemMsg, ...messages],
       model,
       job,
@@ -466,7 +573,7 @@ async function runAgentLoop(
     if (job.status === 'aborted') return;
     job.status = 'running';
 
-    const { content: accumulatedContent, toolCalls } = await streamOllamaCall(
+    const { content: accumulatedContent, toolCalls } = await streamProviderCall(provider,
       currentMessages,
       model,
       job,
@@ -582,7 +689,7 @@ async function runAgentLoop(
         'Stelle sicher, dass alle relevanten Details enthalten sind und die Antwort vollständig ist.',
     });
 
-    const { content: synthesisContent } = await streamOllamaCall(currentMessages, model, job);
+    const { content: synthesisContent } = await streamProviderCall(provider, currentMessages, model, job);
 
     job.message = { role: 'assistant', content: synthesisContent };
     job.status = 'done';
@@ -659,24 +766,37 @@ export default defineEndpoint({
 
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
-      const { messages, model, tools, allowInternet = true, thinking = false } = req.body as {
+      const { messages, model, tools, allowInternet = true, thinking = false, provider = 'ollama' } = req.body as {
         messages?: Array<{ role: string; content: string; images?: string[] }>;
         model?: string;
         tools?: unknown[];
         allowInternet?: boolean;
         thinking?: boolean;
+        provider?: AiProvider;
       };
 
       if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages array is required and must not be empty' });
       }
 
+
+      if (provider !== 'ollama' && provider !== 'chatgpt-unofficial-proxy' && provider !== 'openai') {
+        return res.status(400).json({ error: 'Unsupported provider' });
+      }
+
+      const selectedModel = model
+        ?? (provider === 'openai'
+          ? DEFAULT_OPENAI_MODEL
+          : provider === 'chatgpt-unofficial-proxy'
+            ? DEFAULT_CHATGPT_UNOFFICIAL_MODEL
+            : DEFAULT_MODEL);
+
       // Build effective tools list: caller-provided tools + internet tools when allowed
       const effectiveTools: unknown[] = [];
-      if (Array.isArray(tools) && tools.length > 0) {
+      if (provider === 'ollama' && Array.isArray(tools) && tools.length > 0) {
         effectiveTools.push(...tools);
       }
-      if (allowInternet) {
+      if (provider === 'ollama' && allowInternet) {
         effectiveTools.push(...INTERNET_TOOLS);
       }
 
@@ -700,7 +820,8 @@ export default defineEndpoint({
         createdAt: Date.now(),
         abortController,
         debugPayload: {
-          model: model ?? DEFAULT_MODEL,
+          provider,
+          model: selectedModel,
           messages,
           allowInternet,
           thinking,
@@ -712,7 +833,7 @@ export default defineEndpoint({
       // Start inference in the background – do NOT await
       // The status is set to 'aborted' before abort() is called in the DELETE handler,
       // so by the time this .catch() callback runs (next event-loop tick), the check is reliable.
-      runAgentLoop(ollamaMessages, model ?? DEFAULT_MODEL, effectiveTools, job, thinking).catch((err) => {
+      runAgentLoop(provider, ollamaMessages, selectedModel, effectiveTools, job, thinking).catch((err) => {
         if (job.status === 'aborted') return;
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);
