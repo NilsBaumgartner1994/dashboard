@@ -22,6 +22,10 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
 const CHATGPT_UNOFFICIAL_PROXY_API_URL = process.env.CHATGPT_UNOFFICIAL_PROXY_API_URL;
 const CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN = process.env.CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN;
+const CHATGPT_UNOFFICIAL_COMMUNITY_PROXY_URLS = [
+  'https://ai.fakeopen.com/api/conversation',
+  'https://api.pawan.krd/backend-api/conversation',
+] as const;
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
 const DEFAULT_CHATGPT_UNOFFICIAL_MODEL = process.env.CHATGPT_UNOFFICIAL_MODEL ?? 'gpt-4';
 // Context window size sent to Ollama on every request.
@@ -341,13 +345,22 @@ async function callChatGptUnofficialProxy(
   model: string,
   job: Job,
   accessTokenOverride?: string,
+  proxyUrlOverride?: string,
 ): Promise<ChatCallResult> {
-  if (!CHATGPT_UNOFFICIAL_PROXY_API_URL) {
-    throw new Error('CHATGPT_UNOFFICIAL_PROXY_API_URL is required');
-  }
   const accessToken = accessTokenOverride || CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN;
   if (!accessToken) {
     throw new Error('CHATGPT_UNOFFICIAL_PROXY_ACCESS_TOKEN is required (env or request override)');
+  }
+
+  const proxyCandidates = [
+    proxyUrlOverride,
+    ...CHATGPT_UNOFFICIAL_COMMUNITY_PROXY_URLS,
+    CHATGPT_UNOFFICIAL_PROXY_API_URL,
+  ].filter((url): url is string => typeof url === 'string' && url.trim().length > 0);
+
+  const uniqueProxyCandidates = [...new Set(proxyCandidates)];
+  if (uniqueProxyCandidates.length === 0) {
+    throw new Error('No ChatGPT unofficial reverse proxy URL available');
   }
 
   const chatMessages = messages
@@ -361,43 +374,53 @@ async function callChatGptUnofficialProxy(
       },
     }));
 
-  const response = await fetch(CHATGPT_UNOFFICIAL_PROXY_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      action: 'next',
-      model,
-      messages: chatMessages,
-      parent_message_id: crypto.randomUUID(),
-    }),
-    signal: AbortSignal.any([AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS), job.abortController.signal]),
-  });
+  const proxyErrors: string[] = [];
+  for (const proxyUrl of uniqueProxyCandidates) {
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          action: 'next',
+          model,
+          messages: chatMessages,
+          parent_message_id: crypto.randomUUID(),
+        }),
+        signal: AbortSignal.any([AbortSignal.timeout(OLLAMA_INFERENCE_TIMEOUT_MS), job.abortController.signal]),
+      });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`ChatGPT unofficial proxy returned ${response.status}: ${text}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`HTTP ${response.status}: ${text}`);
+      }
+
+      const responseText = await response.text();
+      const jsonPayload = responseText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.replace(/^data:\s*/, ''))
+        .filter((line) => line && line !== '[DONE]')
+        .pop();
+
+      if (!jsonPayload) {
+        throw new Error('did not return a valid message');
+      }
+
+      const parsed = JSON.parse(jsonPayload) as { message?: { content?: { parts?: string[] } } };
+      const content = parsed.message?.content?.parts?.[0] ?? '';
+      job.partialContent = content;
+      return { content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      proxyErrors.push(`${proxyUrl}: ${message}`);
+    }
   }
 
-  const responseText = await response.text();
-  const jsonPayload = responseText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('data: '))
-    .map((line) => line.replace(/^data:\s*/, ''))
-    .filter((line) => line && line !== '[DONE]')
-    .pop();
-
-  if (!jsonPayload) {
-    throw new Error('ChatGPT unofficial proxy did not return a valid message');
-  }
-
-  const parsed = JSON.parse(jsonPayload) as { message?: { content?: { parts?: string[] } } };
-  const content = parsed.message?.content?.parts?.[0] ?? '';
-  job.partialContent = content;
-  return { content };
+  throw new Error(`ChatGPT unofficial proxy failed for all configured URLs: ${proxyErrors.join(' | ')}`);
 }
 
 async function callOpenAi(messages: OllamaMessage[], model: string, job: Job): Promise<ChatCallResult> {
@@ -432,9 +455,12 @@ async function streamProviderCall(
   job: Job,
   tools: unknown[] = [],
   chatGptUnofficialAccessToken?: string,
+  chatGptUnofficialProxyUrl?: string,
 ): Promise<ChatCallResult> {
   if (provider === 'openai') return callOpenAi(messages, model, job);
-  if (provider === 'chatgpt-unofficial-proxy') return callChatGptUnofficialProxy(messages, model, job, chatGptUnofficialAccessToken);
+  if (provider === 'chatgpt-unofficial-proxy') {
+    return callChatGptUnofficialProxy(messages, model, job, chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl);
+  }
   return streamOllamaCall(messages, model, job, tools);
 }
 
@@ -446,6 +472,7 @@ async function runAgentLoop(
   job: Job,
   thinking = false,
   chatGptUnofficialAccessToken?: string,
+  chatGptUnofficialProxyUrl?: string,
 ): Promise<void> {
   const currentMessages = [...messages];
 
@@ -541,6 +568,7 @@ async function runAgentLoop(
       job,
       [],
       chatGptUnofficialAccessToken,
+      chatGptUnofficialProxyUrl,
     );
 
     // Extract step-by-step plan from the analysis so the frontend can show checkboxes.
@@ -592,6 +620,7 @@ async function runAgentLoop(
       job,
       tools,
       chatGptUnofficialAccessToken,
+      chatGptUnofficialProxyUrl,
     );
 
     // If the model requested tool calls, execute them and continue the loop
@@ -703,7 +732,15 @@ async function runAgentLoop(
         'Stelle sicher, dass alle relevanten Details enthalten sind und die Antwort vollständig ist.',
     });
 
-    const { content: synthesisContent } = await streamProviderCall(provider, currentMessages, model, job, [], chatGptUnofficialAccessToken);
+    const { content: synthesisContent } = await streamProviderCall(
+      provider,
+      currentMessages,
+      model,
+      job,
+      [],
+      chatGptUnofficialAccessToken,
+      chatGptUnofficialProxyUrl,
+    );
 
     job.message = { role: 'assistant', content: synthesisContent };
     job.status = 'done';
@@ -780,7 +817,7 @@ export default defineEndpoint({
 
     // Chat endpoint – starts an async job and returns jobId immediately
     router.post('/chat', (req, res) => {
-      const { messages, model, tools, allowInternet = true, thinking = false, provider = 'ollama', chatGptUnofficialAccessToken } = req.body as {
+      const { messages, model, tools, allowInternet = true, thinking = false, provider = 'ollama', chatGptUnofficialAccessToken, chatGptUnofficialProxyUrl } = req.body as {
         messages?: Array<{ role: string; content: string; images?: string[] }>;
         model?: string;
         tools?: unknown[];
@@ -788,6 +825,7 @@ export default defineEndpoint({
         thinking?: boolean;
         provider?: AiProvider;
         chatGptUnofficialAccessToken?: string;
+        chatGptUnofficialProxyUrl?: string;
       };
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -840,6 +878,7 @@ export default defineEndpoint({
           messages,
           allowInternet,
           thinking,
+          chatGptUnofficialProxyUrl,
           effectiveTools,
         },
       };
@@ -848,7 +887,16 @@ export default defineEndpoint({
       // Start inference in the background – do NOT await
       // The status is set to 'aborted' before abort() is called in the DELETE handler,
       // so by the time this .catch() callback runs (next event-loop tick), the check is reliable.
-      runAgentLoop(provider, ollamaMessages, selectedModel, effectiveTools, job, thinking, chatGptUnofficialAccessToken).catch((err) => {
+      runAgentLoop(
+        provider,
+        ollamaMessages,
+        selectedModel,
+        effectiveTools,
+        job,
+        thinking,
+        chatGptUnofficialAccessToken,
+        chatGptUnofficialProxyUrl,
+      ).catch((err) => {
         if (job.status === 'aborted') return;
         job.status = 'error';
         job.error = err instanceof Error ? err.message : String(err);
