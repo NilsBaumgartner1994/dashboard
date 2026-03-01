@@ -75,13 +75,13 @@ describe('AI Agent Endpoint', () => {
 
   describe('GET /ai-agent/job/:id', () => {
     it('should return pending status for a newly created job', () => {
-      const jobResponse = { status: 'pending', partialContent: '', message: undefined, error: undefined };
+      const jobResponse = { status: 'pending', currentAnswer: '', finalAnswer: '', partialContent: '', message: undefined, error: undefined };
       expect(jobResponse.status).toBe('pending');
       expect(jobResponse.partialContent).toBe('');
     });
 
     it('should return partial content while the job is running', () => {
-      const jobResponse = { status: 'running', partialContent: 'Hello, I am thinking…', message: undefined, error: undefined };
+      const jobResponse = { status: 'running', currentAnswer: 'Hello, I am thinking…', finalAnswer: '', partialContent: 'Hello, I am thinking…', message: undefined, error: undefined };
       expect(jobResponse.status).toBe('running');
       expect(jobResponse.partialContent).toBeTruthy();
     });
@@ -89,22 +89,25 @@ describe('AI Agent Endpoint', () => {
     it('should return done status with final message when complete', () => {
       const jobResponse = {
         status: 'done',
+        currentAnswer: 'Hello world',
+        finalAnswer: 'Hello world',
         partialContent: 'Hello world',
         message: { role: 'assistant', content: 'Hello world' },
         error: undefined,
       };
       expect(jobResponse.status).toBe('done');
+      expect(jobResponse.finalAnswer).toBe('Hello world');
       expect(jobResponse.message?.content).toBe('Hello world');
     });
 
     it('should return error status when inference fails', () => {
-      const jobResponse = { status: 'error', partialContent: '', message: undefined, error: 'Ollama returned 503' };
+      const jobResponse = { status: 'error', currentAnswer: '', finalAnswer: '', partialContent: '', message: undefined, error: 'Ollama returned 503' };
       expect(jobResponse.status).toBe('error');
       expect(jobResponse.error).toBeTruthy();
     });
 
     it('should return aborted status after the job has been cancelled', () => {
-      const jobResponse = { status: 'aborted', partialContent: '', message: undefined, error: undefined };
+      const jobResponse = { status: 'aborted', currentAnswer: '', finalAnswer: '', partialContent: '', message: undefined, error: undefined };
       expect(jobResponse.status).toBe('aborted');
     });
 
