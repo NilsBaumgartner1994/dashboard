@@ -323,6 +323,15 @@ const SPEAKERS = [
   'Vivian',
 ]
 
+const REFERENCE_TEXT_PRESETS: Record<10 | 30 | 60 | 120, string> = {
+  10: 'Hallo, mein Name ist Anna. Das ist ein kurzer Test für den Stimmenklon.',
+  30: 'Hallo, mein Name ist Anna. Ich spreche jetzt einen kurzen Beispieltext für das Voice Cloning. Bitte achte auf eine klare Aussprache, natürliche Pausen und eine gleichmäßige Lautstärke. So kann das Modell meine Stimme sauber erfassen.',
+  60: 'Hallo, mein Name ist Anna. Ich spreche jetzt einen längeren Beispieltext für das Voice Cloning. Dabei nutze ich unterschiedliche Satzlängen, damit Intonation und Sprachrhythmus besser erkannt werden. Heute ist ein schöner Tag und ich freue mich darauf, neue Ideen auszuprobieren. Wenn wir deutlich sprechen und störende Hintergrundgeräusche vermeiden, wird die Referenzqualität deutlich besser. Vielen Dank fürs Zuhören.',
+  120: 'Hallo, mein Name ist Anna. Dieser Text ist für eine längere Voice-Clone-Referenz gedacht. Ich spreche in ruhigem Tempo, mit klarer Artikulation und natürlicher Betonung. So kann das Modell nicht nur die Stimme, sondern auch die feinen Nuancen in Aussprache und Rhythmus erfassen. Morgens trinke ich gerne einen Kaffee und plane meinen Tag. Danach arbeite ich konzentriert an Aufgaben, telefoniere mit Kolleginnen und Kollegen und notiere wichtige Punkte. Am Nachmittag mache ich eine kurze Pause, gehe an die frische Luft und sammle neue Energie. Später lese ich ein paar Seiten in einem Buch oder höre einen Podcast. Dabei versuche ich, meine Stimme konstant zu halten und trotzdem lebendig zu sprechen. Für eine gute Aufnahme sind ein ruhiger Raum, ein gleichbleibender Abstand zum Mikrofon und eine moderate Lautstärke besonders wichtig. Wenn diese Bedingungen stimmen, lassen sich hochwertige Sprachproben erzeugen, die beim Klonen der Stimme bessere Ergebnisse liefern. Zum Abschluss bedanke ich mich für deine Zeit und wünsche dir viel Erfolg beim Erstellen deines eigenen Voice-Profils.',
+}
+
+const REFERENCE_TEXT_PRESET_DURATIONS: Array<10 | 30 | 60 | 120> = [10, 30, 60, 120]
+
 function StatusIcon({ status }: { status: ServerStatus }) {
   if (status === 'online') return <CheckCircleIcon />
   if (status === 'offline') return <ErrorIcon />
@@ -407,6 +416,7 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
   const [refAudioFile, setRefAudioFile] = useState<File | null>(null)
   const [refAudioPreviewUrl, setRefAudioPreviewUrl] = useState<string | null>(null)
   const [refText, setRefText] = useState('')
+  const [selectedReferenceTextDuration, setSelectedReferenceTextDuration] = useState<10 | 30 | 60 | 120>(30)
   const [useXVectorOnly, setUseXVectorOnly] = useState(false)
   const [newVoiceName, setNewVoiceName] = useState('')
   const [voiceCloneDescription, setVoiceCloneDescription] = useState('')
@@ -1273,6 +1283,32 @@ export default function VoiceTtsTile({ tile }: { tile: TileInstance }) {
                     </Button>
                   </Box>
                   <TextField fullWidth size="small" label="Reference Text" placeholder="Text the audio is speaking (optional)" value={refText} onChange={(e) => setRefText(e.target.value)} disabled={loading || transcribing} sx={{ mb: 1 }} />
+                  <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                      <InputLabel>Vorlage</InputLabel>
+                      <Select
+                        value={selectedReferenceTextDuration}
+                        label="Vorlage"
+                        onChange={(e) => setSelectedReferenceTextDuration(Number(e.target.value) as 10 | 30 | 60 | 120)}
+                        disabled={loading || transcribing}
+                      >
+                        {REFERENCE_TEXT_PRESET_DURATIONS.map((duration) => (
+                          <MenuItem key={duration} value={duration}>{duration} Sekunden</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={loading || transcribing}
+                      onClick={() => setRefText(REFERENCE_TEXT_PRESETS[selectedReferenceTextDuration])}
+                    >
+                      Vorlage übernehmen
+                    </Button>
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Vorschautext: {REFERENCE_TEXT_PRESETS[selectedReferenceTextDuration]}
+                  </Typography>
                   <FormControlLabel
                     control={<Checkbox checked={useXVectorOnly} onChange={(e) => setUseXVectorOnly(e.target.checked)} disabled={loading || transcribing || !!refText} />}
                     label="Use x-vector only (no reference text needed, lower quality)"
