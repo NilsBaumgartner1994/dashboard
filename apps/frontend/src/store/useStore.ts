@@ -58,7 +58,15 @@ export const useStore = create<AppState>()(
       ],
       notes: [],
       editMode: false,
-      gridColumns: 20,
+      gridColumns: (() => {
+        if (typeof window === 'undefined') return 20
+        const w = window.innerWidth
+        if (w < 600) return 4
+        if (w < 900) return 8
+        if (w < 1200) return 12
+        if (w < 1536) return 16
+        return 20
+      })(),
       defaultLat: undefined,
       defaultLon: undefined,
       defaultLocationName: undefined,
