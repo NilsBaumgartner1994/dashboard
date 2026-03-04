@@ -90,7 +90,15 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
     try {
       const res = await fetch(targetUrl, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) {
-        setFetchError(`HTTP ${res.status}`)
+        const responseBody = await res.text().catch(() => '')
+        const detailedHttpError = `HTTP ${res.status}${responseBody ? ` - ${responseBody}` : ''}`
+        setFetchError(detailedHttpError)
+        console.error('[ApiSwitchTile] Fehler beim Abruf der API:', {
+          requestUrl,
+          targetUrl,
+          status: res.status,
+          body: responseBody,
+        })
         return
       }
       const json = (await res.json()) as unknown
@@ -98,6 +106,7 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
       setFetchError(null)
     } catch (err) {
       setFetchError(String(err))
+      console.error('[ApiSwitchTile] Fehler beim Abruf der API:', err)
     }
   }, [backendUrl, requestUrl, useBackendProxy, valuePath])
 

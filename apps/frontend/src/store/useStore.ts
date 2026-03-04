@@ -105,7 +105,7 @@ export const useStore = create<AppState>()(
                 type,
                 x: 0,
                 y: bottomY,
-                w: 4,
+                w: 16,
                 h: newH,
                 hidden: false,
               },
