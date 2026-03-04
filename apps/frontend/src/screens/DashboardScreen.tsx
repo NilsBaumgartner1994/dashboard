@@ -75,38 +75,36 @@ function useResponsiveColumns(maxColumns: number): number {
 }
 
 /**
- * Scales a tile's column position/width from the stored grid (maxCols) to the
- * currently visible grid (effectiveCols). When effectiveCols < maxCols the tile
- * is proportionally shrunk so it still occupies the same *fraction* of the screen,
- * and its width is capped so it never overflows the available columns.
- */
-function getScaledTilePos(tile: TileInstance, effectiveCols: number, maxCols: number): { x: number; w: number } {
-  if (effectiveCols >= maxCols) {
-    const x = Math.min(tile.x, effectiveCols - 1)
-    const w = Math.min(tile.w, effectiveCols - x)
-    return { x, w }
-  }
-  const scale = effectiveCols / maxCols
-  const rawX = Math.round(tile.x * scale)
-  const rawW = Math.max(1, Math.round(tile.w * scale))
-  const x = Math.min(rawX, effectiveCols - 1)
-  const w = Math.min(rawW, effectiveCols - x)
-  return { x, w }
-}
-
-/**
- * Computes responsive display positions for all tiles without modifying stored data.
+ * Computes display positions for all tiles without modifying stored data.
  *
- * Tiles are sorted by their stored (y, x) coordinates then placed into a virtual
- * grid of `effectiveCols` columns. Each tile is first tried at its scaled desired
- * position; if that spot is occupied or overflows the grid the tile is placed at
- * the next available row – the stored (x, y, w, h) values are never changed.
+ * In **edit mode** tiles are rendered at their stored (x, y) coordinates so the
+ * user sees exactly where each tile lives in the grid and can drag freely.
+ * Overlaps are allowed while editing.
+ *
+ * In **normal mode** tiles are sorted by (y, x) and placed with a greedy
+ * algorithm.  A tile whose stored x + w exceeds `effectiveCols` is wrapped:
+ * its display width is capped to `effectiveCols` and it is placed at the first
+ * available row starting from its desired y.  This mirrors the problem's
+ * example layout where Calendar (10,4,8,8) on a 4-column device shifts to (0,8,4,8)
+ * when the weather tile also wants (0,8,4,8) and slides down to (0,16,4,8).
  */
 function computeDisplayLayout(
   tiles: TileInstance[],
   effectiveCols: number,
-  gridColumns: number,
+  editMode: boolean,
 ): Map<string, { x: number; y: number; w: number; h: number }> {
+  // In edit mode: show tiles at stored positions, clamped to the visible grid
+  if (editMode) {
+    const layout = new Map<string, { x: number; y: number; w: number; h: number }>()
+    for (const tile of tiles) {
+      const x = Math.max(0, Math.min(tile.x, effectiveCols - 1))
+      const w = Math.max(1, Math.min(tile.w, effectiveCols - x))
+      layout.set(tile.id, { x, y: tile.y, w, h: tile.h })
+    }
+    return layout
+  }
+
+  // Normal mode: greedy placement with wrap-on-overflow
   const sorted = [...tiles].sort((a, b) => (a.y - b.y) || (a.x - b.x))
 
   const occupied = new Set<string>()
@@ -131,26 +129,29 @@ function computeDisplayLayout(
   }
 
   for (const tile of sorted) {
-    const { x: scaledX, w: scaledWRaw } = getScaledTilePos(tile, effectiveCols, gridColumns)
     // Cap display width so a single tile never exceeds the available columns
-    const scaledW = Math.min(scaledWRaw, effectiveCols)
+    const displayW = Math.min(tile.w, effectiveCols)
+    // A tile whose desired position (x + w) overflows the visible area wraps to
+    // the next available row starting from x = 0.
+    const overflowsWidth = tile.x + tile.w > effectiveCols
 
-    if (canPlace(scaledX, tile.y, scaledW, tile.h)) {
-      layout.set(tile.id, { x: scaledX, y: tile.y, w: scaledW, h: tile.h })
-      markOccupied(scaledX, tile.y, scaledW, tile.h)
+    // Try desired position first (only when tile fits horizontally)
+    if (!overflowsWidth && canPlace(tile.x, tile.y, displayW, tile.h)) {
+      layout.set(tile.id, { x: tile.x, y: tile.y, w: displayW, h: tile.h })
+      markOccupied(tile.x, tile.y, displayW, tile.h)
       continue
     }
 
-    // Find the next available position, starting from the tile's stored row.
-    // Upper bound prevents an infinite loop in degenerate cases (e.g. extremely
-    // tall tiles) – in practice the bound is never reached.
+    // Greedy fallback: find first available slot from the tile's desired row
+    // Upper bound = sum of all tile heights (worst case: every tile stacked)
+    // plus one extra effectiveCols guard to handle degenerate zero-height tiles.
     const maxY = tile.y + tiles.reduce((sum, t) => sum + t.h, 0) + effectiveCols
     let found = false
     for (let y = tile.y; !found && y <= maxY; y++) {
-      for (let x = 0; x + scaledW <= effectiveCols; x++) {
-        if (canPlace(x, y, scaledW, tile.h)) {
-          layout.set(tile.id, { x, y, w: scaledW, h: tile.h })
-          markOccupied(x, y, scaledW, tile.h)
+      for (let x = 0; x + displayW <= effectiveCols; x++) {
+        if (canPlace(x, y, displayW, tile.h)) {
+          layout.set(tile.id, { x, y, w: displayW, h: tile.h })
+          markOccupied(x, y, displayW, tile.h)
           found = true
           break
         }
@@ -254,9 +255,7 @@ function DraggableTile({
     const cellH = ROW_HEIGHT_REM * remPx
     const dx = Math.round((e.clientX - resizeStartRef.current.x) / cellW)
     const dy = Math.round((e.clientY - resizeStartRef.current.y) / cellH)
-    // Convert dx from effectiveCols-space back to gridColumns-space
-    const dxStored = effectiveCols < gridColumns ? Math.round(dx * gridColumns / effectiveCols) : dx
-    const newW = Math.max(1, Math.min(gridColumns - tile.x, resizeStartRef.current.w + dxStored))
+    const newW = Math.max(1, Math.min(gridColumns - tile.x, resizeStartRef.current.w + dx))
     const newH = Math.max(1, resizeStartRef.current.h + dy)
     if (newW !== tile.w || newH !== tile.h) {
       updateTile(tile.id, { w: newW, h: newH })
@@ -352,7 +351,7 @@ export default function DashboardScreen() {
   const remPx = typeof window !== 'undefined' ? parseFloat(getComputedStyle(document.documentElement).fontSize) : DEFAULT_REM_PX
   const rowHeightPx = ROW_HEIGHT_REM * remPx
 
-  const displayLayout = computeDisplayLayout(tiles, effectiveCols, gridColumns)
+  const displayLayout = computeDisplayLayout(tiles, effectiveCols, editMode)
   const overlayHeight = Math.max(1, ...[...displayLayout.values()].map((p) => p.y + p.h)) * rowHeightPx
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -367,9 +366,7 @@ export default function DashboardScreen() {
     const dx = Math.round(delta.x / cellW)
     const dy = Math.round(delta.y / cellH)
     if (dx === 0 && dy === 0) return
-    // Convert horizontal delta from effectiveCols-space back to stored gridColumns-space
-    const dxStored = effectiveCols < gridColumns ? Math.round(dx * gridColumns / effectiveCols) : dx
-    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dxStored))
+    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dx))
     const ny = Math.max(0, tile.y + dy)
     updateTile(tile.id, { x: nx, y: ny })
   }
