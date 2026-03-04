@@ -281,11 +281,13 @@ export default function SettingsScreen() {
 
       <Paper sx={{ p: 3, maxWidth: 400, mt: 3 }}>
         <Typography variant="subtitle1" gutterBottom>
-          Dashboard Breiten-Begrenzung (Spalten)
+          Dashboard Spaltenanzahl (max.)
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Legt die maximale Anzahl an Rasterspalten fest (z. B. 32 = volle Breite). Kacheln können
-          nicht breiter als dieser Wert sein.
+          Maximale Anzahl an Rasterspalten auf großen Bildschirmen (z.&nbsp;B. 20 für Full-HD).
+          Auf kleineren Bildschirmen wird die Spaltenanzahl automatisch reduziert
+          (Smartphone&nbsp;≈&nbsp;4, Tablet&nbsp;≈&nbsp;8, kleiner Desktop&nbsp;≈&nbsp;12). Kacheln, die breiter
+          als der sichtbare Bereich wären, werden automatisch auf die verfügbare Breite begrenzt.
         </Typography>
         <TextField
           fullWidth
