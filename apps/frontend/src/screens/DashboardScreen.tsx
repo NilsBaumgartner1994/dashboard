@@ -50,18 +50,43 @@ import SpeechLibraryTile from '../components/tiles/SpeechLibraryTile'
 import ApiSwitchTile from '../components/tiles/ApiSwitchTile'
 import { getOutputTargets } from '../store/tileFlowHelpers'
 
-const MOBILE_COLS = 12
-const MOBILE_ROW_HEIGHT = 60 // px per grid row unit on mobile
-const DESKTOP_ROW_HEIGHT = 60 // px per grid row unit on desktop
+/** Height of one grid row unit in rem. Using rem ensures tiles scale with the user's font-size. */
+const ROW_HEIGHT_REM = 4
+/** Fallback px value for 1 rem when `getComputedStyle` is unavailable (e.g., SSR/tests). */
+const DEFAULT_REM_PX = 16
 
+/**
+ * Returns the effective number of grid columns for the current viewport width.
+ * Columns scale up from 4 (xs/phone) to `maxColumns` (xl/large desktop), so tiles
+ * automatically fill the available screen space and never overflow their row.
+ */
+function useResponsiveColumns(maxColumns: number): number {
+  const theme = useTheme()
+  const isXs = useMediaQuery(theme.breakpoints.only('xs'))  // < 600 px
+  const isSm = useMediaQuery(theme.breakpoints.only('sm'))  // 600–900 px
+  const isMd = useMediaQuery(theme.breakpoints.only('md'))  // 900–1200 px
+  const isLg = useMediaQuery(theme.breakpoints.only('lg'))  // 1200–1536 px
+  // xl: ≥ 1536 px → full maxColumns
+  if (isXs) return Math.min(4, maxColumns)
+  if (isSm) return Math.min(8, maxColumns)
+  if (isMd) return Math.min(12, maxColumns)
+  if (isLg) return Math.min(16, maxColumns)
+  return maxColumns
+}
 
-/** Scales a tile's x/w from the desktop grid to the mobile grid. */
-function getMobileTilePos(tile: TileInstance, desktopCols: number): { x: number; w: number } {
-  const scale = MOBILE_COLS / desktopCols
+/**
+ * Scales a tile's column position/width from the stored grid (maxCols) to the
+ * currently visible grid (effectiveCols). When effectiveCols < maxCols the tile
+ * is proportionally shrunk so it still occupies the same *fraction* of the screen,
+ * and its width is capped so it never overflows the available columns.
+ */
+function getScaledTilePos(tile: TileInstance, effectiveCols: number, maxCols: number): { x: number; w: number } {
+  if (effectiveCols >= maxCols) return { x: tile.x, w: tile.w }
+  const scale = effectiveCols / maxCols
   const rawX = Math.round(tile.x * scale)
   const rawW = Math.max(1, Math.round(tile.w * scale))
-  const x = Math.min(rawX, MOBILE_COLS - 1)
-  const w = Math.min(rawW, MOBILE_COLS - x)
+  const x = Math.min(rawX, effectiveCols - 1)
+  const w = Math.min(rawW, effectiveCols - x)
   return { x, w }
 }
 
@@ -110,12 +135,14 @@ function DraggableTile({
   tile,
   editMode,
   isMobile,
+  effectiveCols,
   gridColumns,
   anyModalOpen,
 }: {
   tile: TileInstance
   editMode: boolean
   isMobile: boolean
+  effectiveCols: number
   gridColumns: number
   anyModalOpen: boolean
 }) {
@@ -127,9 +154,7 @@ function DraggableTile({
     disabled: !editMode || isMobile || anyModalOpen,
   })
 
-  const { x: mobileX, w: mobileW } = getMobileTilePos(tile, gridColumns)
-  const effectiveX = isMobile ? mobileX : tile.x
-  const effectiveW = isMobile ? mobileW : tile.w
+  const { x: effectiveX, w: effectiveW } = getScaledTilePos(tile, effectiveCols, gridColumns)
 
   const style: React.CSSProperties = {
     gridColumn: `${effectiveX + 1} / span ${effectiveW}`,
@@ -153,12 +178,14 @@ function DraggableTile({
     if (!resizeStartRef.current) return
     const gridEl = document.getElementById('dashboard-grid')
     if (!gridEl) return
-    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
-    const cellW = gridEl.clientWidth / gridColCount
-    const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
+    const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize)
+    const cellW = gridEl.clientWidth / effectiveCols
+    const cellH = ROW_HEIGHT_REM * remPx
     const dx = Math.round((e.clientX - resizeStartRef.current.x) / cellW)
     const dy = Math.round((e.clientY - resizeStartRef.current.y) / cellH)
-    const newW = Math.max(1, Math.min(gridColCount - tile.x, resizeStartRef.current.w + dx))
+    // Convert dx from effectiveCols-space back to gridColumns-space
+    const dxStored = effectiveCols < gridColumns ? Math.round(dx * gridColumns / effectiveCols) : dx
+    const newW = Math.max(1, Math.min(gridColumns - tile.x, resizeStartRef.current.w + dxStored))
     const newH = Math.max(1, resizeStartRef.current.h + dy)
     if (newW !== tile.w || newH !== tile.h) {
       updateTile(tile.id, { w: newW, h: newH })
@@ -247,11 +274,13 @@ export default function DashboardScreen() {
   const [addOpen, setAddOpen] = useState(false)
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const effectiveCols = useResponsiveColumns(gridColumns)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const tileConnections = getTileConnections(tiles)
-  const rowHeight = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
-  const overlayHeight = Math.max(1, ...tiles.map((tile) => tile.y + tile.h)) * rowHeight
+  const remPx = typeof window !== 'undefined' ? parseFloat(getComputedStyle(document.documentElement).fontSize) : DEFAULT_REM_PX
+  const rowHeightPx = ROW_HEIGHT_REM * remPx
+  const overlayHeight = Math.max(1, ...tiles.map((tile) => tile.y + tile.h)) * rowHeightPx
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event
@@ -259,14 +288,15 @@ export default function DashboardScreen() {
     if (!tile) return
     const gridEl = document.getElementById('dashboard-grid')
     if (!gridEl) return
-    const gridColCount = isMobile ? MOBILE_COLS : gridColumns
-    const cellW = gridEl.clientWidth / gridColCount
-    const cellH = isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT
+    const cellW = gridEl.clientWidth / effectiveCols
+    const remPxNow = parseFloat(getComputedStyle(document.documentElement).fontSize)
+    const cellH = ROW_HEIGHT_REM * remPxNow
     const dx = Math.round(delta.x / cellW)
     const dy = Math.round(delta.y / cellH)
     if (dx === 0 && dy === 0) return
-    const dxDesktop = isMobile ? dx * Math.round(gridColumns / MOBILE_COLS) : dx
-    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dxDesktop))
+    // Convert horizontal delta from effectiveCols-space back to stored gridColumns-space
+    const dxStored = effectiveCols < gridColumns ? Math.round(dx * gridColumns / effectiveCols) : dx
+    const nx = Math.max(0, Math.min(gridColumns - tile.w, tile.x + dxStored))
     const ny = Math.max(0, tile.y + dy)
     updateTile(tile.id, { x: nx, y: ny })
   }
@@ -304,8 +334,8 @@ export default function DashboardScreen() {
               id="dashboard-grid"
               sx={{
                 display: 'grid',
-                gridTemplateColumns: `repeat(${isMobile ? MOBILE_COLS : gridColumns}, 1fr)`,
-                gridAutoRows: `${isMobile ? MOBILE_ROW_HEIGHT : DESKTOP_ROW_HEIGHT}px`,
+                gridTemplateColumns: `repeat(${effectiveCols}, 1fr)`,
+                gridAutoRows: `${ROW_HEIGHT_REM}rem`,
                 width: '100%',
                 gap: 0.5,
                 position: 'relative',
@@ -313,7 +343,7 @@ export default function DashboardScreen() {
               }}
             >
               {tiles.map((tile) => (
-                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
+                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} effectiveCols={effectiveCols} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
               ))}
             </Box>
           </DndContext>
@@ -326,13 +356,12 @@ export default function DashboardScreen() {
               style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 0 }}
             >
               {tileConnections.map((connection) => {
-                const currentColumns = isMobile ? MOBILE_COLS : gridColumns
-                const fromLayout = isMobile ? getMobileTilePos(connection.from, gridColumns) : { x: connection.from.x, w: connection.from.w }
-                const toLayout = isMobile ? getMobileTilePos(connection.to, gridColumns) : { x: connection.to.x, w: connection.to.w }
-                const fromX = ((fromLayout.x + fromLayout.w / 2) / currentColumns) * 100
-                const fromY = (connection.from.y + connection.from.h / 2) * rowHeight
-                const toX = ((toLayout.x + toLayout.w / 2) / currentColumns) * 100
-                const toY = (connection.to.y + connection.to.h / 2) * rowHeight
+                const fromLayout = getScaledTilePos(connection.from, effectiveCols, gridColumns)
+                const toLayout = getScaledTilePos(connection.to, effectiveCols, gridColumns)
+                const fromX = ((fromLayout.x + fromLayout.w / 2) / effectiveCols) * 100
+                const fromY = (connection.from.y + connection.from.h / 2) * rowHeightPx
+                const toX = ((toLayout.x + toLayout.w / 2) / effectiveCols) * 100
+                const toY = (connection.to.y + connection.to.h / 2) * rowHeightPx
                 const pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
