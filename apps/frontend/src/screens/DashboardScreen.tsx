@@ -81,13 +81,84 @@ function useResponsiveColumns(maxColumns: number): number {
  * and its width is capped so it never overflows the available columns.
  */
 function getScaledTilePos(tile: TileInstance, effectiveCols: number, maxCols: number): { x: number; w: number } {
-  if (effectiveCols >= maxCols) return { x: tile.x, w: tile.w }
+  if (effectiveCols >= maxCols) {
+    const x = Math.min(tile.x, effectiveCols - 1)
+    const w = Math.min(tile.w, effectiveCols - x)
+    return { x, w }
+  }
   const scale = effectiveCols / maxCols
   const rawX = Math.round(tile.x * scale)
   const rawW = Math.max(1, Math.round(tile.w * scale))
   const x = Math.min(rawX, effectiveCols - 1)
   const w = Math.min(rawW, effectiveCols - x)
   return { x, w }
+}
+
+/**
+ * Computes responsive display positions for all tiles without modifying stored data.
+ *
+ * Tiles are sorted by their stored (y, x) coordinates then placed into a virtual
+ * grid of `effectiveCols` columns. Each tile is first tried at its scaled desired
+ * position; if that spot is occupied or overflows the grid the tile is placed at
+ * the next available row – the stored (x, y, w, h) values are never changed.
+ */
+function computeDisplayLayout(
+  tiles: TileInstance[],
+  effectiveCols: number,
+  gridColumns: number,
+): Map<string, { x: number; y: number; w: number; h: number }> {
+  const sorted = [...tiles].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+
+  const occupied = new Set<string>()
+  const layout = new Map<string, { x: number; y: number; w: number; h: number }>()
+
+  const canPlace = (x: number, y: number, w: number, h: number): boolean => {
+    if (x < 0 || x + w > effectiveCols) return false
+    for (let row = y; row < y + h; row++) {
+      for (let col = x; col < x + w; col++) {
+        if (occupied.has(`${col},${row}`)) return false
+      }
+    }
+    return true
+  }
+
+  const markOccupied = (x: number, y: number, w: number, h: number) => {
+    for (let row = y; row < y + h; row++) {
+      for (let col = x; col < x + w; col++) {
+        occupied.add(`${col},${row}`)
+      }
+    }
+  }
+
+  for (const tile of sorted) {
+    const { x: scaledX, w: scaledWRaw } = getScaledTilePos(tile, effectiveCols, gridColumns)
+    // Cap display width so a single tile never exceeds the available columns
+    const scaledW = Math.min(scaledWRaw, effectiveCols)
+
+    if (canPlace(scaledX, tile.y, scaledW, tile.h)) {
+      layout.set(tile.id, { x: scaledX, y: tile.y, w: scaledW, h: tile.h })
+      markOccupied(scaledX, tile.y, scaledW, tile.h)
+      continue
+    }
+
+    // Find the next available position, starting from the tile's stored row.
+    // Upper bound prevents an infinite loop in degenerate cases (e.g. extremely
+    // tall tiles) – in practice the bound is never reached.
+    const maxY = tile.y + tiles.reduce((sum, t) => sum + t.h, 0) + effectiveCols
+    let found = false
+    for (let y = tile.y; !found && y <= maxY; y++) {
+      for (let x = 0; x + scaledW <= effectiveCols; x++) {
+        if (canPlace(x, y, scaledW, tile.h)) {
+          layout.set(tile.id, { x, y, w: scaledW, h: tile.h })
+          markOccupied(x, y, scaledW, tile.h)
+          found = true
+          break
+        }
+      }
+    }
+  }
+
+  return layout
 }
 
 const tileRegistry: Record<string, { label: string; component: React.FC<{ tile: TileInstance }> }> = {
@@ -133,6 +204,7 @@ function getTileConnections(tiles: TileInstance[]): TileConnection[] {
 
 function DraggableTile({
   tile,
+  displayPos,
   editMode,
   isMobile,
   effectiveCols,
@@ -140,6 +212,7 @@ function DraggableTile({
   anyModalOpen,
 }: {
   tile: TileInstance
+  displayPos: { x: number; y: number; w: number; h: number }
   editMode: boolean
   isMobile: boolean
   effectiveCols: number
@@ -154,11 +227,9 @@ function DraggableTile({
     disabled: !editMode || isMobile || anyModalOpen,
   })
 
-  const { x: effectiveX, w: effectiveW } = getScaledTilePos(tile, effectiveCols, gridColumns)
-
   const style: React.CSSProperties = {
-    gridColumn: `${effectiveX + 1} / span ${effectiveW}`,
-    gridRow: `${tile.y + 1} / span ${tile.h}`,
+    gridColumn: `${displayPos.x + 1} / span ${displayPos.w}`,
+    gridRow: `${displayPos.y + 1} / span ${displayPos.h}`,
     transform: transform ? CSS.Translate.toString(transform) : undefined,
     position: 'relative',
     display: tile.hidden && !editMode ? 'none' : undefined,
@@ -280,7 +351,9 @@ export default function DashboardScreen() {
   const tileConnections = getTileConnections(tiles)
   const remPx = typeof window !== 'undefined' ? parseFloat(getComputedStyle(document.documentElement).fontSize) : DEFAULT_REM_PX
   const rowHeightPx = ROW_HEIGHT_REM * remPx
-  const overlayHeight = Math.max(1, ...tiles.map((tile) => tile.y + tile.h)) * rowHeightPx
+
+  const displayLayout = computeDisplayLayout(tiles, effectiveCols, gridColumns)
+  const overlayHeight = Math.max(1, ...[...displayLayout.values()].map((p) => p.y + p.h)) * rowHeightPx
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, delta } = event
@@ -342,9 +415,12 @@ export default function DashboardScreen() {
                 zIndex: 1,
               }}
             >
-              {tiles.map((tile) => (
-                <DraggableTile key={tile.id} tile={tile} editMode={editMode} isMobile={isMobile} effectiveCols={effectiveCols} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
-              ))}
+              {tiles.map((tile) => {
+                const displayPos = displayLayout.get(tile.id) ?? { x: 0, y: tile.y, w: tile.w, h: tile.h }
+                return (
+                  <DraggableTile key={tile.id} tile={tile} displayPos={displayPos} editMode={editMode} isMobile={isMobile} effectiveCols={effectiveCols} gridColumns={gridColumns} anyModalOpen={anyModalOpen} />
+                )
+              })}
             </Box>
           </DndContext>
           {tileConnections.length > 0 && (
@@ -356,12 +432,12 @@ export default function DashboardScreen() {
               style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 0 }}
             >
               {tileConnections.map((connection) => {
-                const fromLayout = getScaledTilePos(connection.from, effectiveCols, gridColumns)
-                const toLayout = getScaledTilePos(connection.to, effectiveCols, gridColumns)
+                const fromLayout = displayLayout.get(connection.from.id) ?? { x: 0, y: connection.from.y, w: connection.from.w, h: connection.from.h }
+                const toLayout = displayLayout.get(connection.to.id) ?? { x: 0, y: connection.to.y, w: connection.to.w, h: connection.to.h }
                 const fromX = ((fromLayout.x + fromLayout.w / 2) / effectiveCols) * 100
-                const fromY = (connection.from.y + connection.from.h / 2) * rowHeightPx
+                const fromY = (fromLayout.y + fromLayout.h / 2) * rowHeightPx
                 const toX = ((toLayout.x + toLayout.w / 2) / effectiveCols) * 100
-                const toY = (connection.to.y + connection.to.h / 2) * rowHeightPx
+                const toY = (toLayout.y + toLayout.h / 2) * rowHeightPx
                 const pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`
                 const key = `${connection.from.id}-${connection.to.id}`
                 return (
