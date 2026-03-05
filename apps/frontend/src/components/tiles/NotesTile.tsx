@@ -36,13 +36,13 @@ import type { TileInstance } from '../../store/useStore'
 import { useStore } from '../../store/useStore'
 import type { Note } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
-import { useGoogleAuthStore } from '../../store/useGoogleAuthStore'
-import { useGoogleNotesStore, isNotesTokenValid } from '../../store/useGoogleNotesStore'
+import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
+import { useGoogleNotesStore } from '../../store/useGoogleNotesStore'
 
 // ─── Google Drive helpers ────────────────────────────────────────────────────
 
 const DRIVE_NOTES_FILENAME = 'dashboard-notes.json'
-const DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly'
 
 async function driveFindNotesFile(token: string): Promise<string | null> {
   const url = new URL('https://www.googleapis.com/drive/v3/files')
@@ -264,9 +264,9 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   const tileClientSecret = (tile.config?.clientSecret as string | undefined)?.trim() ?? ''
   const clientSecret = tileClientSecret || globalClientSecret
 
-  const { accessToken, tokenExpiry, refreshToken, setToken, setRefreshToken, clearToken, driveFileId, setDriveFileId } =
-    useGoogleNotesStore()
-  const tokenOk = isNotesTokenValid({ accessToken, tokenExpiry })
+  const { accessToken, tokenExpiry, refreshToken, setToken, setRefreshToken, clearToken } = useGoogleAuthStore()
+  const { driveFileId, setDriveFileId } = useGoogleNotesStore()
+  const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
   // Sync state
   const [syncing, setSyncing] = useState(false)
@@ -328,7 +328,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
 
   const loginImplicit = useGoogleLogin({
     flow: 'implicit',
-    scope: DRIVE_APPDATA_SCOPE,
+    scope: GOOGLE_SCOPES,
     onSuccess: (tokenResponse) => {
       isSilentRefresh.current = false
       setToken(tokenResponse.access_token, tokenResponse.expires_in ?? 3600)
@@ -344,7 +344,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
 
   const loginAuthCode = useGoogleLogin({
     flow: 'auth-code',
-    scope: DRIVE_APPDATA_SCOPE,
+    scope: GOOGLE_SCOPES,
     onSuccess: async (codeResponse) => {
       try {
         const tokens = await exchangeCodeForTokens(codeResponse.code)
@@ -807,14 +807,33 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   )
 }
 
+// ─── Tile shown when no Google Client-ID is configured ────────────────────────
+
+function NotesTileUnconfigured({ tile }: { tile: TileInstance }) {
+  return (
+    <BaseTile tile={tile}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <NoteIcon fontSize="small" color="primary" />
+        <Typography variant="subtitle2" fontWeight="bold">
+          {(tile.config?.name as string) || 'Notizen'}
+        </Typography>
+      </Box>
+      <Typography variant="body2" color="text.secondary">
+        Google Client-ID fehlt. Bitte in den Einstellungen konfigurieren.
+      </Typography>
+    </BaseTile>
+  )
+}
+
 // ─── Wrapper that provides GoogleOAuthProvider ────────────────────────────────
 
 export default function NotesTile({ tile }: { tile: TileInstance }) {
   const clientId = useGoogleAuthStore((s) => s.clientId)
 
+  // When no clientId is configured, show a simplified tile that does not
+  // initialise the OAuth provider (avoids using an invalid client ID).
   if (!clientId) {
-    // No Google Client-ID configured: render the tile without Google integration
-    return <NotesTileInner tile={tile} />
+    return <NotesTileUnconfigured tile={tile} />
   }
 
   return (

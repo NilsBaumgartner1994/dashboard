@@ -344,7 +344,7 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
 
   const loginImplicit = useGoogleLogin({
     flow: 'implicit',
-    scope: 'https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
     onSuccess: (tokenResponse) => {
       isSilentRefresh.current = false
       setToken(tokenResponse.access_token, tokenResponse.expires_in ?? 3600)
@@ -361,7 +361,7 @@ function GoogleTasksTileInner({ tile }: { tile: TileInstance }) {
   // ── Google login – auth-code flow (used when clientSecret is set) ─────────
   const loginAuthCode = useGoogleLogin({
     flow: 'auth-code',
-    scope: 'https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
     onSuccess: async (codeResponse) => {
       try {
         const tokens = await exchangeCodeForTokens(codeResponse.code)
