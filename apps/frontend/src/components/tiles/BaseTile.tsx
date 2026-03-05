@@ -18,6 +18,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
+import OpenWithIcon from '@mui/icons-material/OpenWith'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
@@ -63,6 +64,7 @@ export default function BaseTile({
 }: BaseTileProps) {
   const { updateTile, duplicateTile, removeTile, editMode, gridColumns } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [nameInput, setNameInput] = useState((tile.config?.name as string) ?? '')
   const [bgInput, setBgInput] = useState((tile.config?.backgroundImage as string) ?? '')
   const [maxWidthInput, setMaxWidthInput] = useState(
@@ -162,6 +164,27 @@ export default function BaseTile({
             }}
           >
             <SettingsIcon fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
+      )}
+
+      {/* Move button – only visible in edit mode */}
+      {editMode && (
+        <Tooltip title="Verschieben">
+          <IconButton
+            size="small"
+            onClick={() => setMoveOpen(true)}
+            sx={{
+              position: 'absolute',
+              top: 4,
+              left: 36,
+              zIndex: 10,
+              backgroundColor: 'rgba(0,0,0,0.35)',
+              color: '#fff',
+              '&:hover': { backgroundColor: 'rgba(0,0,0,0.55)' },
+            }}
+          >
+            <OpenWithIcon fontSize="inherit" />
           </IconButton>
         </Tooltip>
       )}
@@ -322,6 +345,72 @@ export default function BaseTile({
             >
               Löschen
             </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+      {/* Move modal – transparent bottom sheet with directional arrows */}
+      <Dialog
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        hideBackdrop
+        disableEnforceFocus
+        disableScrollLock
+        fullWidth
+        maxWidth={false}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') { e.preventDefault(); move(0, -1) }
+          else if (e.key === 'ArrowDown') { e.preventDefault(); move(0, 1) }
+          else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1, 0) }
+          else if (e.key === 'ArrowRight') { e.preventDefault(); move(1, 0) }
+        }}
+        PaperProps={{
+          sx: {
+            position: 'fixed',
+            bottom: 0,
+            m: 0,
+            width: '100%',
+            maxWidth: '100%',
+            borderRadius: '16px 16px 0 0',
+            backgroundColor: 'rgba(30,30,30,0.55)',
+            backdropFilter: 'blur(3px)',
+            color: '#fff',
+            pointerEvents: 'auto',
+          },
+        }}
+        sx={{ '& .MuiDialog-container': { alignItems: 'flex-end', pointerEvents: 'none' } }}
+      >
+        <DialogTitle sx={{ p: 1, display: 'flex', justifyContent: 'flex-end' }}>
+          <Tooltip title="Schließen">
+            <IconButton size="small" sx={{ color: 'rgba(255,255,255,0.7)' }} onClick={() => setMoveOpen(false)}>
+              <CloseIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
+        <DialogContent sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+            <Tooltip title="Hoch">
+              <IconButton sx={{ color: '#fff' }} onClick={() => move(0, -1)}>
+                <ArrowUpwardIcon />
+              </IconButton>
+            </Tooltip>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              <Tooltip title="Links">
+                <IconButton sx={{ color: '#fff' }} onClick={() => move(-1, 0)}>
+                  <ArrowBackIcon />
+                </IconButton>
+              </Tooltip>
+              <Box sx={{ width: 40, height: 40 }} />
+              <Tooltip title="Rechts">
+                <IconButton sx={{ color: '#fff' }} onClick={() => move(1, 0)}>
+                  <ArrowForwardIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+            <Tooltip title="Runter">
+              <IconButton sx={{ color: '#fff' }} onClick={() => move(0, 1)}>
+                <ArrowDownwardIcon />
+              </IconButton>
+            </Tooltip>
           </Box>
         </DialogContent>
       </Dialog>
