@@ -37,20 +37,53 @@ import { useStore } from '../../store/useStore'
 import type { Note } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
-import { useGoogleNotesStore } from '../../store/useGoogleNotesStore'
+import { useGoogleKeepStore } from '../../store/useGoogleKeepStore'
 
-// ─── Google Drive helpers ────────────────────────────────────────────────────
+// ─── Google Keep helpers ─────────────────────────────────────────────────────
 
-const DRIVE_NOTES_FILENAME = 'dashboard-notes.json'
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly'
+const KEEP_BASE = 'https://keep.googleapis.com/v1'
+const KEEP_NOTES_PREFIX = 'notes/'
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/keep https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly'
 
-async function driveFindNotesFile(token: string): Promise<string | null> {
-  const url = new URL('https://www.googleapis.com/drive/v3/files')
-  url.searchParams.set('spaces', 'appDataFolder')
-  url.searchParams.set('q', `name='${DRIVE_NOTES_FILENAME}'`)
-  url.searchParams.set('fields', 'files(id)')
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+interface KeepNote {
+  name: string
+  title: string
+  body?: { text?: { text?: string } }
+  createTime?: string
+  updateTime?: string
+}
+
+async function keepListNotes(token: string): Promise<KeepNote[]> {
+  const allNotes: KeepNote[] = []
+  let pageToken: string | undefined
+  do {
+    const url = new URL(`${KEEP_BASE}/notes`)
+    url.searchParams.set('filter', 'NOT trashed')
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+      let body = ''
+      try { body = await res.text() } catch { /* ignore */ }
+      throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
+    }
+    const data = await res.json() as { notes?: KeepNote[]; nextPageToken?: string }
+    allNotes.push(...(data.notes ?? []))
+    pageToken = data.nextPageToken
+  } while (pageToken)
+  return allNotes
+}
+
+async function keepCreateNote(token: string, title: string, text: string): Promise<KeepNote> {
+  const res = await fetch(`${KEEP_BASE}/notes`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title, body: { text: { text } } }),
   })
   if (!res.ok) {
     if (res.status === 401) throw new Error('TOKEN_EXPIRED')
@@ -58,76 +91,17 @@ async function driveFindNotesFile(token: string): Promise<string | null> {
     try { body = await res.text() } catch { /* ignore */ }
     throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
   }
-  const data = await res.json()
-  const files: { id: string }[] = data.files ?? []
-  return files.length > 0 ? files[0].id : null
+  return (await res.json()) as KeepNote
 }
 
-async function driveReadNotes(token: string, fileId: string): Promise<Note[]> {
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
+async function keepDeleteNote(token: string, keepName: string): Promise<void> {
+  const res = await fetch(`https://keep.googleapis.com/v1/${keepName}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) {
     if (res.status === 401) throw new Error('TOKEN_EXPIRED')
-    let body = ''
-    try { body = await res.text() } catch { /* ignore */ }
-    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
-  }
-  const data = await res.json()
-  return Array.isArray(data) ? data : []
-}
-
-async function driveCreateNotesFile(token: string, notes: Note[]): Promise<string> {
-  const metadata = { name: DRIVE_NOTES_FILENAME, parents: ['appDataFolder'] }
-  const content = JSON.stringify(notes)
-  const boundary = 'notes_boundary_482910'
-  const body = [
-    `--${boundary}`,
-    'Content-Type: application/json; charset=UTF-8',
-    '',
-    JSON.stringify(metadata),
-    `--${boundary}`,
-    'Content-Type: application/json',
-    '',
-    content,
-    `--${boundary}--`,
-  ].join('\r\n')
-  const res = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    },
-  )
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('TOKEN_EXPIRED')
-    let bodyText = ''
-    try { bodyText = await res.text() } catch { /* ignore */ }
-    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${bodyText}`)
-  }
-  const data = await res.json()
-  return data.id as string
-}
-
-async function driveUpdateNotesFile(token: string, fileId: string, notes: Note[]): Promise<void> {
-  const res = await fetch(
-    `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(notes),
-    },
-  )
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+    if (res.status === 404) return // already deleted
     let body = ''
     try { body = await res.text() } catch { /* ignore */ }
     throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
@@ -265,19 +239,18 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   const clientSecret = tileClientSecret || globalClientSecret
 
   const { accessToken, tokenExpiry, refreshToken, setToken, setRefreshToken, clearToken } = useGoogleAuthStore()
-  const { driveFileId, setDriveFileId } = useGoogleNotesStore()
+  const { noteIdToKeepName, setKeepName, removeKeepName, clearAll: clearKeepMapping } = useGoogleKeepStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
-  // Clear driveFileId whenever the auth token is explicitly cleared (accessToken → null).
-  // This ensures the next login re-discovers (or re-creates) the Drive file rather than
-  // trying to use a stale file ID from a previous OAuth session.
+  // Clear Keep name mappings whenever the auth token is explicitly cleared (accessToken → null).
+  // This ensures the next login re-loads notes from Keep rather than using stale mappings.
   const prevAccessTokenRef = useRef<string | null>(accessToken)
   useEffect(() => {
     if (prevAccessTokenRef.current && !accessToken) {
-      setDriveFileId(null)
+      clearKeepMapping()
     }
     prevAccessTokenRef.current = accessToken
-  }, [accessToken, setDriveFileId])
+  }, [accessToken, clearKeepMapping])
 
   // Sync state
   const [syncing, setSyncing] = useState(false)
@@ -405,33 +378,15 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     }
   }, [tokenExpiry, accessToken, refreshToken, clientSecret, refreshAccessToken, setToken, clearToken])
 
-  // ── Google Drive sync helpers ─────────────────────────────────────────────
+  // ── Google Keep sync helpers ──────────────────────────────────────────────
 
-  /**
-   * Ensures we have a Drive file ID: searches for the file, or creates it.
-   * Returns the file ID or throws.
-   */
-  const ensureDriveFile = useCallback(async (token: string, currentNotes: Note[]): Promise<string> => {
-    let fid = driveFileId
-    if (!fid) {
-      fid = await driveFindNotesFile(token)
-      if (fid) {
-        setDriveFileId(fid)
-      } else {
-        fid = await driveCreateNotesFile(token, currentNotes)
-        setDriveFileId(fid)
-      }
-    }
-    return fid
-  }, [driveFileId, setDriveFileId])
-
-  /** Saves the given notes array to Google Drive. */
-  const saveToDrive = useCallback(async (updatedNotes: Note[]) => {
+  /** Creates a new Keep note and stores the local→Keep name mapping. */
+  const createKeepNote = useCallback(async (note: Note) => {
     if (!tokenOk || !accessToken) return
     setSyncing(true)
     try {
-      const fid = await ensureDriveFile(accessToken, updatedNotes)
-      await driveUpdateNotesFile(accessToken, fid, updatedNotes)
+      const keepNote = await keepCreateNote(accessToken, note.title, note.content)
+      setKeepName(note.id, keepNote.name)
       setSyncError(null)
     } catch (err: unknown) {
       const msg = (err as Error).message
@@ -444,9 +399,65 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     } finally {
       setSyncing(false)
     }
-  }, [tokenOk, accessToken, ensureDriveFile, clearToken])
+  }, [tokenOk, accessToken, setKeepName, clearToken])
 
-  // ── Load notes from Drive on connect ─────────────────────────────────────
+  /**
+   * Updates an existing Keep note.
+   * Because Keep note bodies are immutable, this creates a replacement note
+   * first, then deletes the old one only after the new one is successfully
+   * created – preventing data loss on transient failures.
+   */
+  const updateKeepNote = useCallback(async (note: Note) => {
+    if (!tokenOk || !accessToken) return
+    setSyncing(true)
+    try {
+      const existingKeepName = noteIdToKeepName[note.id]
+      // Create the new note first to avoid data loss if the create request fails
+      const keepNote = await keepCreateNote(accessToken, note.title, note.content)
+      setKeepName(note.id, keepNote.name)
+      // Only delete the old note after the new one is safely created
+      if (existingKeepName) {
+        await keepDeleteNote(accessToken, existingKeepName)
+      }
+      setSyncError(null)
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') {
+        clearToken()
+        setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+      } else {
+        setSyncError(msg)
+      }
+    } finally {
+      setSyncing(false)
+    }
+  }, [tokenOk, accessToken, noteIdToKeepName, setKeepName, clearToken])
+
+  /** Deletes a Keep note and removes the local→Keep name mapping. */
+  const deleteKeepNote = useCallback(async (noteId: string) => {
+    if (!tokenOk || !accessToken) return
+    setSyncing(true)
+    try {
+      const existingKeepName = noteIdToKeepName[noteId]
+      if (existingKeepName) {
+        await keepDeleteNote(accessToken, existingKeepName)
+        removeKeepName(noteId)
+      }
+      setSyncError(null)
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') {
+        clearToken()
+        setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
+      } else {
+        setSyncError(msg)
+      }
+    } finally {
+      setSyncing(false)
+    }
+  }, [tokenOk, accessToken, noteIdToKeepName, removeKeepName, clearToken])
+
+  // ── Load notes from Keep on connect ──────────────────────────────────────
 
   useEffect(() => {
     if (!tokenOk || !accessToken) return
@@ -454,18 +465,30 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     ;(async () => {
       setSyncing(true)
       try {
-        let fid = driveFileId
-        if (!fid) {
-          fid = await driveFindNotesFile(accessToken)
-          if (fid) setDriveFileId(fid)
-        }
-        if (fid && !cancelled) {
-          const driveNotes = await driveReadNotes(accessToken, fid)
-          if (!cancelled) {
-            setNotes(mergeNotes(notes, driveNotes))
+        const keepNotes = await keepListNotes(accessToken)
+        if (!cancelled) {
+          const remoteNotes: Note[] = []
+          for (const kn of keepNotes) {
+            // Derive a stable local ID from the Keep name so re-loads are idempotent
+            const noteId = kn.name.startsWith(KEEP_NOTES_PREFIX)
+              ? kn.name.slice(KEEP_NOTES_PREFIX.length)
+              : kn.name
+            const localId = `keep-${noteId}`
+            remoteNotes.push({
+              id: localId,
+              title: kn.title ?? '',
+              content: kn.body?.text?.text ?? '',
+              createdAt: kn.createTime ? new Date(kn.createTime).getTime() : Date.now(),
+              updatedAt: kn.updateTime ? new Date(kn.updateTime).getTime() : Date.now(),
+            })
+            // Store the Keep name mapping for later update/delete operations
+            setKeepName(localId, kn.name)
           }
+          // Merge remote notes with local notes using getState() to avoid stale closure
+          // (last-write-wins by updatedAt – see mergeNotes above)
+          setNotes(mergeNotes(useStore.getState().notes, remoteNotes))
+          setSyncError(null)
         }
-        if (!cancelled) setSyncError(null)
       } catch (err: unknown) {
         const msg = (err as Error).message
         if (!cancelled) {
@@ -485,7 +508,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenOk, accessToken])
 
-  // ── Note CRUD with Drive sync ─────────────────────────────────────────────
+  // ── Note CRUD with Keep sync ──────────────────────────────────────────────
 
   const handleNoteClick = (note: Note) => {
     const outputContent = note.content.trim() || note.title.trim()
@@ -497,24 +520,26 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   const handleSaveExisting = (title: string, content: string) => {
     if (!selectedNote) return
     const updatedAt = Date.now()
+    const updatedNote = { ...selectedNote, title, content, updatedAt }
     const updated = notes.map((n) =>
-      n.id === selectedNote.id ? { ...n, title, content, updatedAt } : n,
+      n.id === selectedNote.id ? updatedNote : n,
     )
     setNotes(updated)
     const outputContent = content.trim() || title.trim()
     if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
     setEditorOpen(false)
     setSelectedNote(null)
-    void saveToDrive(updated)
+    void updateKeepNote(updatedNote)
   }
 
   const handleDeleteNote = () => {
     if (!selectedNote) return
     const updated = notes.filter((n) => n.id !== selectedNote.id)
     setNotes(updated)
+    const noteIdToDelete = selectedNote.id
     setEditorOpen(false)
     setSelectedNote(null)
-    void saveToDrive(updated)
+    void deleteKeepNote(noteIdToDelete)
   }
 
   const handleSaveNew = (title: string, content: string) => {
@@ -531,7 +556,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     const outputContent = content.trim() || title.trim()
     if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
     setNewNoteOpen(false)
-    void saveToDrive(updated)
+    void createKeepNote(newNote)
   }
 
   const handleQuickAdd = () => {
@@ -549,7 +574,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     setNotes(updated)
     publishOutput(tile.id, { content: trimmed, dataType: 'text' })
     setQuickTitle('')
-    void saveToDrive(updated)
+    void createKeepNote(newNote)
   }
 
   const handleQuickAddKeyDown = (e: { key: string; stopPropagation: () => void }) => {
@@ -571,17 +596,17 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
 
   const settingsContent = (
     <>
-      <Divider sx={{ mb: 2 }}>Google Drive Sync</Divider>
+      <Divider sx={{ mb: 2 }}>Google Keep Sync</Divider>
       {tokenOk ? (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <CloudIcon fontSize="small" color="success" />
           <Typography variant="body2" color="success.main" sx={{ flex: 1 }}>
-            Mit Google Drive verbunden
+            Mit Google Keep verbunden
           </Typography>
           <Button
             variant="text"
             size="small"
-            onClick={() => { clearToken(); setDriveFileId(null); setSyncError(null) }}
+            onClick={() => { clearToken(); clearKeepMapping(); setSyncError(null) }}
           >
             Abmelden
           </Button>
@@ -683,7 +708,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
             {(tile.config?.name as string) || 'Notizen'}
           </Typography>
           {tokenOk && (
-            <Tooltip title={syncing ? 'Synchronisiert…' : 'Mit Google Drive verbunden'}>
+            <Tooltip title={syncing ? 'Synchronisiert…' : 'Mit Google Keep verbunden'}>
               {syncing ? (
                 <CircularProgress size={14} sx={{ mr: 0.5 }} />
               ) : (
