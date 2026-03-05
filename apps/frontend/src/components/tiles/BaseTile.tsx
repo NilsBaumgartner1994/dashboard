@@ -373,6 +373,13 @@ export default function BaseTile({
         }}
         sx={{ '& .MuiDialog-container': { alignItems: 'flex-end', pointerEvents: 'none' } }}
       >
+        <DialogTitle sx={{ p: 1, display: 'flex', justifyContent: 'flex-end' }}>
+          <Tooltip title="Schließen">
+            <IconButton size="small" sx={{ color: 'rgba(255,255,255,0.7)' }} onClick={() => setMoveOpen(false)}>
+              <CloseIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
         <DialogContent sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
             <Tooltip title="Hoch">
@@ -386,11 +393,7 @@ export default function BaseTile({
                   <ArrowBackIcon />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Schließen">
-                <IconButton sx={{ color: 'rgba(255,255,255,0.7)' }} onClick={() => setMoveOpen(false)}>
-                  <CloseIcon />
-                </IconButton>
-              </Tooltip>
+              <Box sx={{ width: 40, height: 40 }} />
               <Tooltip title="Rechts">
                 <IconButton sx={{ color: '#fff' }} onClick={() => move(1, 0)}>
                   <ArrowForwardIcon />
