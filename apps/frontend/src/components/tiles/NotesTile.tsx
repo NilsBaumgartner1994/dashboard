@@ -268,6 +268,17 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   const { driveFileId, setDriveFileId } = useGoogleNotesStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
+  // Clear driveFileId whenever the auth token is explicitly cleared (accessToken → null).
+  // This ensures the next login re-discovers (or re-creates) the Drive file rather than
+  // trying to use a stale file ID from a previous OAuth session.
+  const prevAccessTokenRef = useRef<string | null>(accessToken)
+  useEffect(() => {
+    if (prevAccessTokenRef.current && !accessToken) {
+      setDriveFileId(null)
+    }
+    prevAccessTokenRef.current = accessToken
+  }, [accessToken, setDriveFileId])
+
   // Sync state
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -530,7 +541,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     const newNote: Note = {
       id: `note-${crypto.randomUUID()}`,
       title: trimmed,
-      content: '',
+      content: `# ${trimmed}`,
       createdAt: now,
       updatedAt: now,
     }
@@ -696,6 +707,23 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
             <CloudOffIcon sx={{ fontSize: '0.8rem', mr: 0.3, verticalAlign: 'middle' }} />
             {syncError}
           </Typography>
+        )}
+
+        {/* Connect button – shown when clientId is configured but not yet logged in */}
+        {clientId && !tokenOk && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5, mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Nicht mit Google verbunden.
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<LoginIcon />}
+              onClick={(e) => { e.stopPropagation(); login() }}
+            >
+              Mit Google verbinden
+            </Button>
+          </Box>
         )}
 
         {/* Inline quick-add */}
