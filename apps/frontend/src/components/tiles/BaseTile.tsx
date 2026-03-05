@@ -357,6 +357,12 @@ export default function BaseTile({
         disableScrollLock
         fullWidth
         maxWidth={false}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') { e.preventDefault(); move(0, -1) }
+          else if (e.key === 'ArrowDown') { e.preventDefault(); move(0, 1) }
+          else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1, 0) }
+          else if (e.key === 'ArrowRight') { e.preventDefault(); move(1, 0) }
+        }}
         PaperProps={{
           sx: {
             position: 'fixed',
