@@ -33,75 +33,128 @@ import BaseTile from './BaseTile'
 import LargeModal from './LargeModal'
 import MyModal from './MyModal'
 import type { TileInstance } from '../../store/useStore'
-import { useStore } from '../../store/useStore'
-import type { Note } from '../../store/useStore'
 import { useTileFlowStore } from '../../store/useTileFlowStore'
 import { useGoogleAuthStore, isTokenValid } from '../../store/useGoogleAuthStore'
-import { useGoogleKeepStore } from '../../store/useGoogleKeepStore'
 
-// ─── Google Keep helpers ─────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const KEEP_BASE = 'https://keep.googleapis.com/v1'
-const KEEP_NOTES_PREFIX = 'notes/'
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/keep https://www.googleapis.com/auth/keep.readonly'
+const MY_NOTES_LIST_TITLE = 'My_Notes'
+const TASKS_BASE = 'https://tasks.googleapis.com/tasks/v1'
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/tasks'
+/** Maximum number of notes loaded per sync. Google Tasks API page limit is 100. */
+const MAX_NOTES = 100
 
-interface KeepNote {
-  name: string
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Note {
+  id: string
   title: string
-  body?: { text?: { text?: string } }
-  createTime?: string
-  updateTime?: string
+  content: string
+  updatedAt: number
 }
 
-async function keepListNotes(token: string): Promise<KeepNote[]> {
-  const allNotes: KeepNote[] = []
-  let pageToken: string | undefined
-  do {
-    const url = new URL(`${KEEP_BASE}/notes`)
-    url.searchParams.set('filter', 'NOT trashed')
-    if (pageToken) url.searchParams.set('pageToken', pageToken)
-    const res = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) {
-      if (res.status === 401) throw new Error('TOKEN_EXPIRED')
-      let body = ''
-      try { body = await res.text() } catch { /* ignore */ }
-      throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
-    }
-    const data = await res.json() as { notes?: KeepNote[]; nextPageToken?: string }
-    allNotes.push(...(data.notes ?? []))
-    pageToken = data.nextPageToken
-  } while (pageToken)
-  return allNotes
+interface TaskList {
+  id: string
+  title: string
 }
 
-async function keepCreateNote(token: string, title: string, text: string): Promise<KeepNote> {
-  const res = await fetch(`${KEEP_BASE}/notes`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ title, body: { text: { text } } }),
+// ─── Google Tasks helpers ─────────────────────────────────────────────────────
+
+async function tasksListTaskLists(token: string): Promise<TaskList[]> {
+  const res = await fetch(`${TASKS_BASE}/users/@me/lists`, {
+    headers: { Authorization: `Bearer ${token}` },
   })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
   if (!res.ok) {
-    if (res.status === 401) throw new Error('TOKEN_EXPIRED')
     let body = ''
     try { body = await res.text() } catch { /* ignore */ }
     throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
   }
-  return (await res.json()) as KeepNote
+  const data = await res.json() as { items?: TaskList[] }
+  return (data.items ?? []).map((l) => ({ id: l.id, title: l.title }))
 }
 
-async function keepDeleteNote(token: string, keepName: string): Promise<void> {
-  const res = await fetch(`https://keep.googleapis.com/v1/${keepName}`, {
+async function tasksCreateTaskList(token: string, title: string): Promise<TaskList> {
+  const res = await fetch(`${TASKS_BASE}/users/@me/lists`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+  if (!res.ok) {
+    let body = ''
+    try { body = await res.text() } catch { /* ignore */ }
+    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
+  }
+  return (await res.json()) as TaskList
+}
+
+async function tasksFetchNotes(token: string, listId: string): Promise<Note[]> {
+  const url = new URL(`${TASKS_BASE}/lists/${encodeURIComponent(listId)}/tasks`)
+  url.searchParams.set('showCompleted', 'false')
+  url.searchParams.set('showHidden', 'false')
+  url.searchParams.set('maxResults', String(MAX_NOTES))
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+  if (!res.ok) {
+    let body = ''
+    try { body = await res.text() } catch { /* ignore */ }
+    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
+  }
+  const data = await res.json() as { items?: Array<{ id: string; title: string; notes?: string; updated?: string }> }
+  return (data.items ?? []).map((t) => ({
+    id: t.id,
+    title: t.title ?? '',
+    content: t.notes ?? '',
+    updatedAt: t.updated ? new Date(t.updated).getTime() : Date.now(),
+  }))
+}
+
+async function tasksCreateNote(token: string, listId: string, title: string, content: string): Promise<Note> {
+  const body: { title: string; notes?: string } = { title }
+  if (content) body.notes = content
+  const res = await fetch(`${TASKS_BASE}/lists/${encodeURIComponent(listId)}/tasks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+  if (!res.ok) {
+    let resBody = ''
+    try { resBody = await res.text() } catch { /* ignore */ }
+    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${resBody}`)
+  }
+  const t = await res.json() as { id: string; title: string; notes?: string; updated?: string }
+  return { id: t.id, title: t.title ?? '', content: t.notes ?? '', updatedAt: t.updated ? new Date(t.updated).getTime() : Date.now() }
+}
+
+async function tasksUpdateNote(token: string, listId: string, taskId: string, title: string, content: string): Promise<Note> {
+  const body: { title: string; notes: string } = { title, notes: content }
+  const res = await fetch(`${TASKS_BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+  if (!res.ok) {
+    let resBody = ''
+    try { resBody = await res.text() } catch { /* ignore */ }
+    throw new Error(`HTTP ${res.status} – ${res.statusText}\n${resBody}`)
+  }
+  const t = await res.json() as { id: string; title: string; notes?: string; updated?: string }
+  return { id: t.id, title: t.title ?? '', content: t.notes ?? '', updatedAt: t.updated ? new Date(t.updated).getTime() : Date.now() }
+}
+
+async function tasksDeleteNote(token: string, listId: string, taskId: string): Promise<void> {
+  const res = await fetch(`${TASKS_BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   })
+  if (res.status === 401) throw new Error('TOKEN_EXPIRED')
+  if (res.status === 404) return // already deleted
   if (!res.ok) {
-    if (res.status === 401) throw new Error('TOKEN_EXPIRED')
-    if (res.status === 404) return // already deleted
     let body = ''
     try { body = await res.text() } catch { /* ignore */ }
     throw new Error(`HTTP ${res.status} – ${res.statusText}\n${body}`)
@@ -207,30 +260,9 @@ function NoteEditor({ note, open, onClose, onSave, onDelete }: NoteEditorProps) 
   )
 }
 
-// ─── Merge helper ─────────────────────────────────────────────────────────────
-
-/**
- * Merges local and remote note lists.
- * For notes that exist in both, keeps the one with the higher updatedAt (last-write-wins).
- * Notes that only exist in one list are included as-is.
- */
-function mergeNotes(local: Note[], remote: Note[]): Note[] {
-  const map = new Map<string, Note>()
-  for (const note of remote) map.set(note.id, note)
-  for (const note of local) {
-    const existing = map.get(note.id)
-    if (!existing || note.updatedAt > existing.updatedAt) {
-      map.set(note.id, note)
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt)
-}
-
 // ─── Inner tile component (needs GoogleOAuthProvider in tree) ─────────────────
 
 function NotesTileInner({ tile }: { tile: TileInstance }) {
-  const notes = useStore((s) => s.notes)
-  const setNotes = useStore((s) => s.setNotes)
   const publishOutput = useTileFlowStore((s) => s.publishOutput)
 
   const clientId = useGoogleAuthStore((s) => s.clientId)
@@ -239,21 +271,14 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
   const clientSecret = tileClientSecret || globalClientSecret
 
   const { accessToken, tokenExpiry, refreshToken, setToken, setRefreshToken, clearToken } = useGoogleAuthStore()
-  const { noteIdToKeepName, setKeepName, removeKeepName, clearAll: clearKeepMapping } = useGoogleKeepStore()
   const tokenOk = isTokenValid({ accessToken, tokenExpiry })
 
-  // Clear Keep name mappings whenever the auth token is explicitly cleared (accessToken → null).
-  // This ensures the next login re-loads notes from Keep rather than using stale mappings.
-  const prevAccessTokenRef = useRef<string | null>(accessToken)
-  useEffect(() => {
-    if (prevAccessTokenRef.current && !accessToken) {
-      clearKeepMapping()
-    }
-    prevAccessTokenRef.current = accessToken
-  }, [accessToken, clearKeepMapping])
+  // Notes loaded from Google Tasks "My_Notes" list
+  const [notes, setNotes] = useState<Note[]>([])
+  const [myNotesListId, setMyNotesListId] = useState<string | null>(null)
 
   // Sync state
-  const [syncing, setSyncing] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
 
   // Settings panel state
@@ -378,120 +403,29 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     }
   }, [tokenExpiry, accessToken, refreshToken, clientSecret, refreshAccessToken, setToken, clearToken])
 
-  // ── Google Keep sync helpers ──────────────────────────────────────────────
-
-  /** Creates a new Keep note and stores the local→Keep name mapping. */
-  const createKeepNote = useCallback(async (note: Note) => {
-    if (!tokenOk || !accessToken) return
-    setSyncing(true)
-    try {
-      const keepNote = await keepCreateNote(accessToken, note.title, note.content)
-      setKeepName(note.id, keepNote.name)
-      setSyncError(null)
-    } catch (err: unknown) {
-      const msg = (err as Error).message
-      if (msg === 'TOKEN_EXPIRED') {
-        clearToken()
-        setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
-      } else {
-        setSyncError(msg)
-      }
-    } finally {
-      setSyncing(false)
-    }
-  }, [tokenOk, accessToken, setKeepName, clearToken])
-
-  /**
-   * Updates an existing Keep note.
-   * Because Keep note bodies are immutable, this creates a replacement note
-   * first, then deletes the old one only after the new one is successfully
-   * created – preventing data loss on transient failures.
-   */
-  const updateKeepNote = useCallback(async (note: Note) => {
-    if (!tokenOk || !accessToken) return
-    setSyncing(true)
-    try {
-      const existingKeepName = noteIdToKeepName[note.id]
-      // Create the new note first to avoid data loss if the create request fails
-      const keepNote = await keepCreateNote(accessToken, note.title, note.content)
-      setKeepName(note.id, keepNote.name)
-      // Only delete the old note after the new one is safely created
-      if (existingKeepName) {
-        await keepDeleteNote(accessToken, existingKeepName)
-      }
-      setSyncError(null)
-    } catch (err: unknown) {
-      const msg = (err as Error).message
-      if (msg === 'TOKEN_EXPIRED') {
-        clearToken()
-        setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
-      } else {
-        setSyncError(msg)
-      }
-    } finally {
-      setSyncing(false)
-    }
-  }, [tokenOk, accessToken, noteIdToKeepName, setKeepName, clearToken])
-
-  /** Deletes a Keep note and removes the local→Keep name mapping. */
-  const deleteKeepNote = useCallback(async (noteId: string) => {
-    if (!tokenOk || !accessToken) return
-    setSyncing(true)
-    try {
-      const existingKeepName = noteIdToKeepName[noteId]
-      if (existingKeepName) {
-        await keepDeleteNote(accessToken, existingKeepName)
-        removeKeepName(noteId)
-      }
-      setSyncError(null)
-    } catch (err: unknown) {
-      const msg = (err as Error).message
-      if (msg === 'TOKEN_EXPIRED') {
-        clearToken()
-        setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.')
-      } else {
-        setSyncError(msg)
-      }
-    } finally {
-      setSyncing(false)
-    }
-  }, [tokenOk, accessToken, noteIdToKeepName, removeKeepName, clearToken])
-
-  // ── Load notes from Keep on connect ──────────────────────────────────────
+  // ── Find or create "My_Notes" list and load notes ─────────────────────────
 
   useEffect(() => {
     if (!tokenOk || !accessToken) return
     let cancelled = false
     ;(async () => {
-      setSyncing(true)
+      setLoading(true)
+      setSyncError(null)
       try {
-        const keepNotes = await keepListNotes(accessToken)
-        if (!cancelled) {
-          const remoteNotes: Note[] = []
-          for (const kn of keepNotes) {
-            // Derive a stable local ID from the Keep name so re-loads are idempotent
-            const noteId = kn.name.startsWith(KEEP_NOTES_PREFIX)
-              ? kn.name.slice(KEEP_NOTES_PREFIX.length)
-              : kn.name
-            const localId = `keep-${noteId}`
-            remoteNotes.push({
-              id: localId,
-              title: kn.title ?? '',
-              content: kn.body?.text?.text ?? '',
-              createdAt: kn.createTime ? new Date(kn.createTime).getTime() : Date.now(),
-              updatedAt: kn.updateTime ? new Date(kn.updateTime).getTime() : Date.now(),
-            })
-            // Store the Keep name mapping for later update/delete operations
-            setKeepName(localId, kn.name)
-          }
-          // Merge remote notes with local notes using getState() to avoid stale closure
-          // (last-write-wins by updatedAt – see mergeNotes above)
-          setNotes(mergeNotes(useStore.getState().notes, remoteNotes))
-          setSyncError(null)
+        // Find or create the My_Notes task list
+        const lists = await tasksListTaskLists(accessToken)
+        let list = lists.find((l) => l.title === MY_NOTES_LIST_TITLE)
+        if (!list) {
+          list = await tasksCreateTaskList(accessToken, MY_NOTES_LIST_TITLE)
         }
+        if (cancelled) return
+        setMyNotesListId(list.id)
+        const loaded = await tasksFetchNotes(accessToken, list.id)
+        if (!cancelled) setNotes(loaded)
+        setSyncError(null)
       } catch (err: unknown) {
-        const msg = (err as Error).message
         if (!cancelled) {
+          const msg = (err as Error).message
           if (msg === 'TOKEN_EXPIRED') {
             clearToken()
             setSyncError('Sitzung abgelaufen. Bitte erneut anmelden.')
@@ -500,7 +434,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
           }
         }
       } finally {
-        if (!cancelled) setSyncing(false)
+        if (!cancelled) setLoading(false)
       }
     })()
     return () => { cancelled = true }
@@ -508,7 +442,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenOk, accessToken])
 
-  // ── Note CRUD with Keep sync ──────────────────────────────────────────────
+  // ── Note CRUD ─────────────────────────────────────────────────────────────
 
   const handleNoteClick = (note: Note) => {
     const outputContent = note.content.trim() || note.title.trim()
@@ -517,70 +451,71 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
     setEditorOpen(true)
   }
 
-  const handleSaveExisting = (title: string, content: string) => {
-    if (!selectedNote) return
-    const updatedAt = Date.now()
-    const updatedNote = { ...selectedNote, title, content, updatedAt }
-    const updated = notes.map((n) =>
-      n.id === selectedNote.id ? updatedNote : n,
-    )
-    setNotes(updated)
-    const outputContent = content.trim() || title.trim()
-    if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
-    setEditorOpen(false)
-    setSelectedNote(null)
-    void updateKeepNote(updatedNote)
-  }
-
-  const handleDeleteNote = () => {
-    if (!selectedNote) return
-    const updated = notes.filter((n) => n.id !== selectedNote.id)
-    setNotes(updated)
-    const noteIdToDelete = selectedNote.id
-    setEditorOpen(false)
-    setSelectedNote(null)
-    void deleteKeepNote(noteIdToDelete)
-  }
-
-  const handleSaveNew = (title: string, content: string) => {
-    const now = Date.now()
-    const newNote: Note = {
-      id: `note-${crypto.randomUUID()}`,
-      title: title || 'Neue Notiz',
-      content,
-      createdAt: now,
-      updatedAt: now,
+  const handleSaveExisting = async (title: string, content: string) => {
+    if (!selectedNote || !accessToken || !myNotesListId) return
+    try {
+      const updated = await tasksUpdateNote(accessToken, myNotesListId, selectedNote.id, title, content)
+      setNotes((prev) => prev.map((n) => n.id === updated.id ? updated : n))
+      const outputContent = content.trim() || title.trim()
+      if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') { clearToken(); setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.') }
+      else setSyncError(msg)
     }
-    const updated = [newNote, ...notes]
-    setNotes(updated)
-    const outputContent = content.trim() || title.trim()
-    if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
+    setEditorOpen(false)
+    setSelectedNote(null)
+  }
+
+  const handleDeleteNote = async () => {
+    if (!selectedNote || !accessToken || !myNotesListId) return
+    const noteId = selectedNote.id
+    setEditorOpen(false)
+    setSelectedNote(null)
+    try {
+      await tasksDeleteNote(accessToken, myNotesListId, noteId)
+      setNotes((prev) => prev.filter((n) => n.id !== noteId))
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') { clearToken(); setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.') }
+      else setSyncError(msg)
+    }
+  }
+
+  const handleSaveNew = async (title: string, content: string) => {
+    if (!accessToken || !myNotesListId) return
     setNewNoteOpen(false)
-    void createKeepNote(newNote)
+    try {
+      const created = await tasksCreateNote(accessToken, myNotesListId, title || 'Neue Notiz', content)
+      setNotes((prev) => [created, ...prev])
+      const outputContent = content.trim() || title.trim()
+      if (outputContent) publishOutput(tile.id, { content: outputContent, dataType: 'text' })
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') { clearToken(); setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.') }
+      else setSyncError(msg)
+    }
   }
 
-  const handleQuickAdd = () => {
+  const handleQuickAdd = async () => {
     const trimmed = quickTitle.trim()
-    if (!trimmed) return
-    const now = Date.now()
-    const newNote: Note = {
-      id: `note-${crypto.randomUUID()}`,
-      title: trimmed,
-      content: `# ${trimmed}`,
-      createdAt: now,
-      updatedAt: now,
-    }
-    const updated = [newNote, ...notes]
-    setNotes(updated)
-    publishOutput(tile.id, { content: trimmed, dataType: 'text' })
+    if (!trimmed || !accessToken || !myNotesListId) return
     setQuickTitle('')
-    void createKeepNote(newNote)
+    try {
+      const created = await tasksCreateNote(accessToken, myNotesListId, trimmed, `# ${trimmed}`)
+      setNotes((prev) => [created, ...prev])
+      publishOutput(tile.id, { content: trimmed, dataType: 'text' })
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      if (msg === 'TOKEN_EXPIRED') { clearToken(); setSyncError('Sitzung abgelaufen (401). Bitte erneut anmelden.') }
+      else setSyncError(msg)
+    }
   }
 
   const handleQuickAddKeyDown = (e: { key: string; stopPropagation: () => void }) => {
     if (e.key === 'Enter' && quickTitle.trim()) {
       e.stopPropagation()
-      handleQuickAdd()
+      void handleQuickAdd()
     }
   }
 
@@ -596,17 +531,17 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
 
   const settingsContent = (
     <>
-      <Divider sx={{ mb: 2 }}>Google Keep Sync</Divider>
+      <Divider sx={{ mb: 2 }}>Google Aufgaben – Notizen</Divider>
       {tokenOk ? (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <CloudIcon fontSize="small" color="success" />
           <Typography variant="body2" color="success.main" sx={{ flex: 1 }}>
-            Mit Google Keep verbunden
+            Verbunden (Liste: {MY_NOTES_LIST_TITLE})
           </Typography>
           <Button
             variant="text"
             size="small"
-            onClick={() => { clearToken(); clearKeepMapping(); setSyncError(null) }}
+            onClick={() => { clearToken(); setNotes([]); setMyNotesListId(null); setSyncError(null) }}
           >
             Abmelden
           </Button>
@@ -708,22 +643,24 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
             {(tile.config?.name as string) || 'Notizen'}
           </Typography>
           {tokenOk && (
-            <Tooltip title={syncing ? 'Synchronisiert…' : 'Mit Google Keep verbunden'}>
-              {syncing ? (
+            <Tooltip title={loading ? 'Lädt…' : 'Mit Google Aufgaben verbunden'}>
+              {loading ? (
                 <CircularProgress size={14} sx={{ mr: 0.5 }} />
               ) : (
                 <CloudIcon sx={{ fontSize: '0.9rem', color: 'success.main', mr: 0.5 }} />
               )}
             </Tooltip>
           )}
-          <Tooltip title="Neue Notiz (mit Details)">
-            <IconButton
-              size="small"
-              onClick={(e) => { e.stopPropagation(); setNewNoteOpen(true) }}
-            >
-              <AddIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
+          {tokenOk && !loading && myNotesListId && (
+            <Tooltip title="Neue Notiz (mit Details)">
+              <IconButton
+                size="small"
+                onClick={(e) => { e.stopPropagation(); setNewNoteOpen(true) }}
+              >
+                <AddIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
         </Box>
 
         {/* Show sync error inline */}
@@ -751,34 +688,38 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
           </Box>
         )}
 
-        {/* Inline quick-add */}
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="Neue Notiz…"
-          value={quickTitle}
-          onChange={(e) => setQuickTitle(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={handleQuickAddKeyDown}
-          sx={{ mb: 1 }}
-          InputProps={{
-            endAdornment: quickTitle.trim() ? (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleQuickAdd() }}>
-                  <AddIcon fontSize="inherit" />
-                </IconButton>
-              </InputAdornment>
-            ) : undefined,
-          }}
-        />
+        {/* Inline quick-add (only when connected and list is ready) */}
+        {tokenOk && !loading && myNotesListId && (
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Neue Notiz…"
+            value={quickTitle}
+            onChange={(e) => setQuickTitle(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleQuickAddKeyDown}
+            sx={{ mb: 1 }}
+            InputProps={{
+              endAdornment: quickTitle.trim() ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={(e) => { e.stopPropagation(); void handleQuickAdd() }}>
+                    <AddIcon fontSize="inherit" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
+        )}
 
         {/* Compact note list */}
         <Box sx={{ overflow: 'auto', flex: 1 }}>
-          {notes.length === 0 ? (
+          {tokenOk && loading && <CircularProgress size={20} />}
+          {tokenOk && !loading && notes.length === 0 && (
             <Typography variant="body2" color="text.secondary">
               Keine Notizen vorhanden.
             </Typography>
-          ) : (
+          )}
+          {tokenOk && !loading && notes.length > 0 && (
             <List dense disablePadding>
               {notes.slice(0, 5).map((note) => (
                 <ListItemButton
@@ -831,9 +772,11 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
               ) : undefined,
             }}
           />
-          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setNewNoteOpen(true)}>
-            Neue Notiz
-          </Button>
+          {myNotesListId && (
+            <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setNewNoteOpen(true)}>
+              Neue Notiz
+            </Button>
+          )}
         </Box>
         <Box sx={{ flex: 1, overflowY: 'auto', p: 1 }}>
           {noteList}
@@ -845,8 +788,8 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
         note={selectedNote}
         open={editorOpen}
         onClose={() => { setEditorOpen(false); setSelectedNote(null) }}
-        onSave={handleSaveExisting}
-        onDelete={handleDeleteNote}
+        onSave={(title, content) => { void handleSaveExisting(title, content) }}
+        onDelete={() => { void handleDeleteNote() }}
       />
 
       {/* Editor for new note */}
@@ -854,7 +797,7 @@ function NotesTileInner({ tile }: { tile: TileInstance }) {
         note={null}
         open={newNoteOpen}
         onClose={() => setNewNoteOpen(false)}
-        onSave={handleSaveNew}
+        onSave={(title, content) => { void handleSaveNew(title, content) }}
       />
     </>
   )
