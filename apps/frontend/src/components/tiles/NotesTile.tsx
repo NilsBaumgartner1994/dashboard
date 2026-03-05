@@ -43,7 +43,7 @@ import { useGoogleKeepStore } from '../../store/useGoogleKeepStore'
 
 const KEEP_BASE = 'https://keep.googleapis.com/v1'
 const KEEP_NOTES_PREFIX = 'notes/'
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/keep https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.readonly'
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/keep https://www.googleapis.com/auth/keep.readonly'
 
 interface KeepNote {
   name: string
