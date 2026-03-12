@@ -13,6 +13,9 @@ interface ApiSwitchConfig extends ServerConfig {
   imageWhenBelow?: string
   textWhenNull?: string
   useBackendProxy?: boolean
+  datePath?: string
+  maxAgeMinutes?: number
+  imageWhenOutdated?: string
 }
 
 function tokenizePath(path: string): string[] {
@@ -50,6 +53,8 @@ function readPathValue(payload: unknown, path: string): unknown {
   return current
 }
 
+const MS_PER_MINUTE = 60000
+
 export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
   const config = (tile.config ?? {}) as ApiSwitchConfig
   const backendUrl = useStore((s) => s.backendUrl)
@@ -61,8 +66,12 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
   const [imageWhenBelowInput, setImageWhenBelowInput] = useState(config.imageWhenBelow ?? '')
   const [textWhenNullInput, setTextWhenNullInput] = useState(config.textWhenNull ?? 'Kein Messwert verfügbar')
   const [useBackendProxyInput, setUseBackendProxyInput] = useState(config.useBackendProxy ?? true)
+  const [datePathInput, setDatePathInput] = useState(config.datePath ?? '')
+  const [maxAgeMinutesInput, setMaxAgeMinutesInput] = useState(config.maxAgeMinutes?.toString() ?? '')
+  const [imageWhenOutdatedInput, setImageWhenOutdatedInput] = useState(config.imageWhenOutdated ?? '')
 
   const [resolvedValue, setResolvedValue] = useState<unknown>(null)
+  const [resolvedDate, setResolvedDate] = useState<unknown>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -75,10 +84,14 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
   const textWhenNull = config.textWhenNull?.trim() || 'Kein Messwert verfügbar'
   const useBackendProxy = config.useBackendProxy ?? true
   const checkInterval = config.checkInterval ?? 60
+  const datePath = config.datePath?.trim() ?? ''
+  const maxAgeMinutes = config.maxAgeMinutes != null ? Number(config.maxAgeMinutes) : null
+  const imageWhenOutdated = config.imageWhenOutdated?.trim() ?? ''
 
   const fetchValue = useCallback(async () => {
     if (!requestUrl) {
       setResolvedValue(null)
+      setResolvedDate(null)
       setFetchError('Keine Request-URL konfiguriert.')
       return
     }
@@ -103,12 +116,13 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
       }
       const json = (await res.json()) as unknown
       setResolvedValue(readPathValue(json, valuePath))
+      setResolvedDate(datePath ? readPathValue(json, datePath) : null)
       setFetchError(null)
     } catch (err) {
       setFetchError(String(err))
       console.error('[ApiSwitchTile] Fehler beim Abruf der API:', err)
     }
-  }, [backendUrl, requestUrl, useBackendProxy, valuePath])
+  }, [backendUrl, requestUrl, useBackendProxy, valuePath, datePath])
 
   useEffect(() => {
     fetchValue()
@@ -127,6 +141,9 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
     setImageWhenBelowInput(config.imageWhenBelow ?? '')
     setTextWhenNullInput(config.textWhenNull ?? 'Kein Messwert verfügbar')
     setUseBackendProxyInput(config.useBackendProxy ?? true)
+    setDatePathInput(config.datePath ?? '')
+    setMaxAgeMinutesInput(config.maxAgeMinutes?.toString() ?? '')
+    setImageWhenOutdatedInput(config.imageWhenOutdated ?? '')
   }
 
   const getExtraConfig = (): Record<string, unknown> => ({
@@ -137,10 +154,31 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
     imageWhenBelow: imageWhenBelowInput,
     textWhenNull: textWhenNullInput,
     useBackendProxy: useBackendProxyInput,
+    datePath: datePathInput,
+    maxAgeMinutes: maxAgeMinutesInput !== '' ? Number(maxAgeMinutesInput) : undefined,
+    imageWhenOutdated: imageWhenOutdatedInput,
   })
 
   const numericValue = typeof resolvedValue === 'number' ? resolvedValue : Number(resolvedValue)
   const hasNumericValue = Number.isFinite(numericValue)
+
+  // Date handling
+  const dateString = resolvedDate != null && resolvedDate !== '' ? String(resolvedDate) : null
+  const parsedDate = dateString ? new Date(dateString) : null
+  const validDate = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate : null
+  const formattedDate = validDate
+    ? validDate.toLocaleString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : null
+  const isOutdated = validDate != null && maxAgeMinutes != null && Number.isFinite(maxAgeMinutes)
+    ? (Date.now() - validDate.getTime()) / MS_PER_MINUTE > maxAgeMinutes
+    : false
 
   let imageToShow = ''
   let textToShow = ''
@@ -161,6 +199,11 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
     }
   } else {
     textToShow = String(resolvedValue)
+  }
+
+  // Outdated image overrides the current image if set and data is outdated
+  if (isOutdated && imageWhenOutdated) {
+    imageToShow = imageWhenOutdated
   }
 
   return (
@@ -216,6 +259,32 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
             onChange={(e) => setTextWhenNullInput(e.target.value)}
             sx={{ mb: 2 }}
           />
+          <Divider sx={{ mb: 2 }}>Datum & Veraltet-Prüfung</Divider>
+          <TextField
+            fullWidth
+            label="Datum-Feld Pfad"
+            helperText="Beispiel: data?.[0]?.date_created"
+            value={datePathInput}
+            onChange={(e) => setDatePathInput(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            type="number"
+            label="Maximales Alter (Minuten)"
+            helperText="Warnung wenn Datum älter als diese Minuten"
+            value={maxAgeMinutesInput}
+            onChange={(e) => setMaxAgeMinutesInput(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label="Bild URL wenn Daten veraltet"
+            helperText="Überschreibt das aktuelle Bild wenn Daten veraltet sind"
+            value={imageWhenOutdatedInput}
+            onChange={(e) => setImageWhenOutdatedInput(e.target.value)}
+            sx={{ mb: 2 }}
+          />
           <FormControlLabel
             control={(
               <Switch
@@ -245,6 +314,16 @@ export default function ApiSwitchTile({ tile }: { tile: TileInstance }) {
           <Typography variant="body2" sx={{ fontWeight: 700 }}>
             {textToShow || '—'}
           </Typography>
+          {formattedDate ? (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {formattedDate}
+            </Typography>
+          ) : null}
+          {isOutdated ? (
+            <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontWeight: 700 }}>
+              ⚠ Daten veraltet
+            </Typography>
+          ) : null}
           {hasNumericValue ? (
             <Typography variant="caption" color="text.secondary">
               Schwellwert: {threshold}
