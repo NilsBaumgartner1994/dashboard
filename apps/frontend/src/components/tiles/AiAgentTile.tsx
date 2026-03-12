@@ -250,18 +250,16 @@ function AiChat({ backendUrl, provider, model, chatGptUnofficialAccessToken, cha
   const [pendingImages, setPendingImages] = useState<string[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollInitialMountRef = useRef(true)
+  const initialMessageCountRef = useRef(messages.length)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
   const activeRequestSignatureRef = useRef<string | null>(null)
   const lastExternalTriggerIdRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (scrollInitialMountRef.current) {
-      scrollInitialMountRef.current = false
-      return
+    if (messages.length > initialMessageCountRef.current || loading || partialContent) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, partialContent])
 
   useEffect(() => {
@@ -1040,7 +1038,7 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
   const latestConnectedTimestampRef = useRef<number>(latestConnectedPayload?.timestamp ?? 0)
   const waitingForConnectedOutputRef = useRef(false)
   const tileChatBottomRef = useRef<HTMLDivElement>(null)
-  const tileChatScrollInitialMountRef = useRef(true)
+  const initialTileMessageCountRef = useRef(messages.length)
   const [tileLiveStatus, setTileLiveStatus] = useState<{ loading: boolean; partialContent: string; currentActivity: string }>({
     loading: false,
     partialContent: '',
@@ -1104,11 +1102,9 @@ export default function AiAgentTile({ tile }: { tile: TileInstance }) {
 
   useEffect(() => {
     if (!showLatestChatInTile) return
-    if (tileChatScrollInitialMountRef.current) {
-      tileChatScrollInitialMountRef.current = false
-      return
+    if (messages.length > initialTileMessageCountRef.current || tileLiveStatus.loading || tileLiveStatus.partialContent) {
+      tileChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-    tileChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, showLatestChatInTile, tileLiveStatus])
 
   const handlePublishAssistantOutput = () => {
